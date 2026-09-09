@@ -1,12 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header } from './components/Header';
 import { ScaleSelector, ScaleMode } from './components/ScaleSelector';
+import { ModelSelector } from './components/ModelSelector';
+import { SpendCascadeComparison } from './components/SpendCascadeComparison';
 import { PerTaskComparison } from './components/PerTaskComparison';
 import { CacheHitRatio } from './components/CacheHitRatio';
 import { CumulativeSavings } from './components/CumulativeSavings';
 import { TurnsDuration } from './components/TurnsDuration';
 import { RawLedgerTable } from './components/RawLedgerTable';
 import { DashboardPayload } from './types';
+import { deriveDataForModel } from './lib/recalculate';
 import { Info, AlertTriangle, ShieldCheck, RefreshCw, Terminal, PlayCircle } from 'lucide-react';
 import { Alert, AlertTitle, AlertDescription } from './components/ui/alert';
 import { Skeleton } from './components/ui/skeleton';
@@ -19,6 +22,11 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [scaleMode, setScaleMode] = useState<ScaleMode>('1x');
+  const [selectedModel, setSelectedModel] = useState<string>('recorded');
+
+  const activeData = useMemo(() => {
+    return deriveDataForModel(data, selectedModel);
+  }, [data, selectedModel]);
 
   const fetchData = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -52,7 +60,7 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background text-gray-100 flex flex-col font-sans">
-      <Header data={data} loading={loading} onRefresh={() => fetchData()} />
+      <Header data={activeData} loading={loading} onRefresh={() => fetchData()} />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 flex flex-col gap-6">
         {/* Banner: Operational Notice */}
@@ -64,7 +72,7 @@ export const App: React.FC = () => {
             </AlertTitle>
             <AlertDescription className="text-gray-300">
               Calibrated across synthetic fixtures and pre-registered <code className="text-primary font-mono font-medium">gemini-3.8-flash</code> benchmark tasks.
-              Toggle the Volume Multiplier below to project measured cache savings across 1M, 10M, or 100M token scale.
+              Select any foundation model rate card below to observe spend cascading, or adjust the volume scale multiplier across 1M, 10M, or 100M tokens.
             </AlertDescription>
           </div>
         </Alert>
@@ -150,33 +158,49 @@ export const App: React.FC = () => {
           </Card>
         )}
 
-        {data && data.has_data && (
+        {data && data.has_data && activeData && (
           <>
-            {/* Volume Scale Multiplier Control */}
-            <ScaleSelector
-              scaleMode={scaleMode}
-              onScaleChange={setScaleMode}
-              totalRuns={data.cumulative.total_runs || 0}
-            />
+            {/* Simulation Controls: Model Rate Card & Volume Scale Multiplier */}
+            <div className="flex flex-col gap-3">
+              <ModelSelector
+                selectedModel={selectedModel}
+                onModelChange={setSelectedModel}
+                pricing={data.pricing || []}
+              />
+              <ScaleSelector
+                scaleMode={scaleMode}
+                onScaleChange={setScaleMode}
+                totalRuns={activeData.cumulative.total_runs || 0}
+              />
+            </div>
+
+            {/* Cross-Model Spend Cascade Visualizer */}
+            {data.cascade && data.cascade.length > 0 && (
+              <SpendCascadeComparison
+                cascade={data.cascade}
+                selectedModel={selectedModel}
+                onSelectModel={setSelectedModel}
+              />
+            )}
 
             {/* View 3: Cumulative Savings Card & Running Line */}
             <CumulativeSavings
-              cumulative={data.cumulative}
-              timeline={data.timeline}
+              cumulative={activeData.cumulative}
+              timeline={activeData.timeline}
               scaleMode={scaleMode}
             />
 
             {/* Grid: View 1 (Per-Task Cost) and View 2 (Cache Hit Ratio) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <PerTaskComparison tasks={data.tasks} scaleMode={scaleMode} />
-              <CacheHitRatio tasks={data.tasks} />
+              <PerTaskComparison tasks={activeData.tasks} scaleMode={scaleMode} />
+              <CacheHitRatio tasks={activeData.tasks} />
             </div>
 
             {/* View 4: Turns & Duration Telemetry */}
-            <TurnsDuration tasks={data.tasks} />
+            <TurnsDuration tasks={activeData.tasks} />
 
             {/* View 5: Raw Ledger Table */}
-            <RawLedgerTable runs={data.runs} />
+            <RawLedgerTable runs={activeData.runs} />
           </>
         )}
       </main>

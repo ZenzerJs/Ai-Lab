@@ -96,6 +96,29 @@ def build_data_payload() -> Dict[str, Any]:
                     })
                     step += 1
 
+        # Calculate multi-model cascade
+        cascade: List[Dict[str, Any]] = []
+        for p in pricing_rows:
+            m = p["model"]
+            m_cum = ledger.cumulative_savings(conn=conn, model_override=m)
+            cascade.append({
+                "model": m,
+                "input_usd_per_mtok": p["input_usd_per_mtok"],
+                "cache_read_usd_per_mtok": p["cache_read_usd_per_mtok"],
+                "output_usd_per_mtok": p["output_usd_per_mtok"],
+                "total_baseline_cost_usd": m_cum["total_baseline_cost_usd"],
+                "total_icm_cost_usd": m_cum["total_icm_cost_usd"],
+                "cumulative_savings_usd": m_cum["cumulative_savings_usd"],
+                "cumulative_savings_percent": m_cum["cumulative_savings_percent"],
+                "cost_per_mtok_baseline": m_cum["cost_per_mtok_baseline"],
+                "cost_per_mtok_icm": m_cum["cost_per_mtok_icm"],
+                "savings_usd_per_mtok": m_cum["savings_usd_per_mtok"],
+                "projected_savings_10m": m_cum["projected_savings_10m"],
+                "projected_savings_100m": m_cum["projected_savings_100m"],
+                "projected_savings_1b": m_cum["savings_usd_per_mtok"] * 1000.0,
+                "source_url": p.get("source_url", ""),
+            })
+
         payload = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "has_data": len(raw_runs) > 0,
@@ -104,6 +127,7 @@ def build_data_payload() -> Dict[str, Any]:
             "runs": raw_runs,
             "timeline": timeline,
             "pricing": pricing_rows,
+            "cascade": cascade,
         }
         return payload
     finally:

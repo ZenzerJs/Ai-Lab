@@ -95,6 +95,24 @@ export interface PricingRecord {
   fetched_at: string;
 }
 
+export interface ModelCascadeItem {
+  model: string;
+  input_usd_per_mtok: number;
+  cache_read_usd_per_mtok: number;
+  output_usd_per_mtok: number;
+  total_baseline_cost_usd: number;
+  total_icm_cost_usd: number;
+  cumulative_savings_usd: number;
+  cumulative_savings_percent: number;
+  cost_per_mtok_baseline: number;
+  cost_per_mtok_icm: number;
+  savings_usd_per_mtok: number;
+  projected_savings_10m: number;
+  projected_savings_100m: number;
+  projected_savings_1b: number;
+  source_url: string;
+}
+
 export interface DashboardPayload {
   generated_at: string;
   has_data: boolean;
@@ -103,4 +121,5 @@ export interface DashboardPayload {
   runs: RunRecord[];
   timeline: TimelinePoint[];
   pricing: PricingRecord[];
+  cascade?: ModelCascadeItem[];
 }

@@ -289,7 +289,12 @@ def record_run(
     return run_id
 
 
-def task_summary(task_id: str, conn: Optional[sqlite3.Connection] = None, db_path: Optional[Path] = None) -> Dict[str, Any]:
+def task_summary(
+    task_id: str,
+    conn: Optional[sqlite3.Connection] = None,
+    db_path: Optional[Path] = None,
+    model_override: Optional[str] = None,
+) -> Dict[str, Any]:
     """Calculate per-arm means, error bands, and savings metrics for a task."""
     should_close = False
     if conn is None:
@@ -310,11 +315,12 @@ def task_summary(task_id: str, conn: Optional[sqlite3.Connection] = None, db_pat
         arm = r["arm"].lower()
         if arm not in arms_data:
             arms_data[arm] = []
+        model_to_use = model_override or r["model"]
         cost = calculate_cost(
             r["input_tokens"],
             r["cache_read_tokens"],
             r["output_tokens"],
-            r["model"],
+            model_to_use,
             conn=conn,
         )
         r["cost_usd"] = cost
@@ -340,7 +346,7 @@ def task_summary(task_id: str, conn: Optional[sqlite3.Connection] = None, db_pat
 
         summary["arms"][arm_name] = {
             "n": n,
-            "model": runs_list[0]["model"],
+            "model": model_override or runs_list[0]["model"],
             "mean_cost_usd": sum(costs) / n,
             "min_cost_usd": min(costs),
             "max_cost_usd": max(costs),
@@ -392,7 +398,11 @@ def task_summary(task_id: str, conn: Optional[sqlite3.Connection] = None, db_pat
     return summary
 
 
-def cumulative_savings(conn: Optional[sqlite3.Connection] = None, db_path: Optional[Path] = None) -> Dict[str, Any]:
+def cumulative_savings(
+    conn: Optional[sqlite3.Connection] = None,
+    db_path: Optional[Path] = None,
+    model_override: Optional[str] = None,
+) -> Dict[str, Any]:
     """Compute total measured savings across all tasks with baseline and icm arms."""
     should_close = False
     if conn is None:
@@ -411,7 +421,7 @@ def cumulative_savings(conn: Optional[sqlite3.Connection] = None, db_path: Optio
     task_summaries = []
 
     for tid in task_ids:
-        s = task_summary(tid, conn=conn)
+        s = task_summary(tid, conn=conn, model_override=model_override)
         task_summaries.append(s)
         if "baseline" in s.get("arms", {}) and "icm" in s.get("arms", {}):
             b_n = s["arms"]["baseline"]["n"]
@@ -461,12 +471,79 @@ def cumulative_savings(conn: Optional[sqlite3.Connection] = None, db_path: Optio
     return result
 
 
-def print_summary(task_id: Optional[str] = None) -> None:
+def print_cascade(conn: Optional[sqlite3.Connection] = None, db_path: Optional[Path] = None) -> None:
+    """Print multi-model spend cascade demonstrating how savings scale across model price tiers."""
+    should_close = False
+    if conn is None:
+        conn = get_connection(db_path)
+        should_close = True
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM pricing ORDER BY input_usd_per_mtok ASC")
+        pricing_rows = [dict(r) for r in cursor.fetchall()]
+
+        if not pricing_rows:
+            print("No pricing models found in ledger.")
+            return
+
+        print("=" * 86)
+        print("  SPEND CASCADE ACROSS FOUNDATION MODELS (Measured Token Profile)")
+        print("=" * 86)
+        header = f"{'Model':<20} | {'In/M':<7} | {'Out/M':<7} | {'Cache/M':<7} | {'Baseline':<9} | {'ICM':<9} | {'Saved ($)':<9} | {'Save %':<6} | {'100M Scale'}"
+        print(header)
+        print("-" * 86)
+
+        for p in pricing_rows:
+            m = p["model"]
+            cum = cumulative_savings(conn=conn, model_override=m)
+            b_cost = cum["total_baseline_cost_usd"]
+            i_cost = cum["total_icm_cost_usd"]
+            saved = cum["cumulative_savings_usd"]
+            pct = cum["cumulative_savings_percent"]
+            proj_100m = cum["projected_savings_100m"]
+
+            row = (
+                f"{m:<20} | "
+                f"${p['input_usd_per_mtok']:<6.3f} | "
+                f"${p['output_usd_per_mtok']:<6.2f} | "
+                f"${p['cache_read_usd_per_mtok']:<6.4f} | "
+                f"${b_cost:<8.4f} | "
+                f"${i_cost:<8.4f} | "
+                f"${saved:<8.4f} | "
+                f"{pct:>5.1f}% | "
+                f"+${proj_100m:,.2f}"
+            )
+            print(row)
+
+        print("=" * 86)
+        print("[ENTERPRISE PROJECTIONS @ 1 BILLION TOKENS]")
+        for p in pricing_rows:
+            m = p["model"]
+            cum = cumulative_savings(conn=conn, model_override=m)
+            saved_1b = cum["savings_usd_per_mtok"] * 1000.0
+            base_1b = cum["cost_per_mtok_baseline"] * 1000.0
+            icm_1b = cum["cost_per_mtok_icm"] * 1000.0
+            print(f"  • {m:<20}: Base ${base_1b:>10,.2f}  ->  ICM ${icm_1b:>10,.2f}  |  Net Savings: +${saved_1b:>10,.2f}")
+        print("=" * 86)
+    finally:
+        if should_close:
+            conn.close()
+
+
+def print_summary(task_id: Optional[str] = None, model_override: Optional[str] = None) -> None:
     """Pretty-print summary to terminal."""
     conn = get_connection()
     try:
+        if model_override:
+            rates = get_pricing(model_override, conn=conn)
+            print("~" * 72)
+            print(f"  [SIMULATED MODEL PRICING: {model_override.upper()}]")
+            print(f"  Rates: Input ${rates['input_usd_per_mtok']:.3f}/M, Cache ${rates['cache_read_usd_per_mtok']:.4f}/M, Output ${rates['output_usd_per_mtok']:.2f}/M")
+            print("~" * 72)
+
         if task_id:
-            s = task_summary(task_id, conn=conn)
+            s = task_summary(task_id, conn=conn, model_override=model_override)
             if s.get("total_runs", 0) == 0:
                 print(f"No runs found for task: {task_id}")
                 return
@@ -506,7 +583,7 @@ def print_summary(task_id: Optional[str] = None) -> None:
             print("=" * 72)
 
         else:
-            cum = cumulative_savings(conn=conn)
+            cum = cumulative_savings(conn=conn, model_override=model_override)
             print("=" * 72)
             print("  USAGE LEDGER CUMULATIVE SUMMARY (ALL TASKS)")
             print("=" * 72)
@@ -552,9 +629,14 @@ def main():
     # summary
     sum_p = subparsers.add_parser("summary", help="Print summary of tasks and savings")
     sum_p.add_argument("task_id", nargs="?", default=None, help="Task ID to summarize")
+    sum_p.add_argument("--model", "-m", default=None, help="Simulate spend under a specific model pricing rate card")
 
     # cumulative
-    subparsers.add_parser("cumulative", help="Print cumulative measured savings across all tasks")
+    cum_p = subparsers.add_parser("cumulative", help="Print cumulative measured savings across all tasks")
+    cum_p.add_argument("--model", "-m", default=None, help="Simulate spend under a specific model pricing rate card")
+
+    # cascade
+    subparsers.add_parser("cascade", help="Print multi-model spend cascade demonstrating how savings scale")
 
     args = parser.parse_args()
 
@@ -566,10 +648,12 @@ def main():
         p = Path(args.config) if args.config else None
         count = seed_pricing(pricing_path=p)
         print(f"✓ Seeded pricing for {count} model(s) from config/PRICING.json.")
+    elif args.command == "cascade":
+        print_cascade()
     elif args.command == "cumulative":
-        print_summary(None)
+        print_summary(None, model_override=args.model)
     elif args.command == "summary":
-        print_summary(args.task_id)
+        print_summary(args.task_id, model_override=args.model)
     else:
         # Default behavior: if a task_id is passed as first arg without subcommand
         if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
