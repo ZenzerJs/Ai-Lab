@@ -3,7 +3,7 @@ import { Download, RefreshCw, Layers, ShieldCheck, Database } from 'lucide-react
 import { DashboardPayload } from '../types';
 import { Button, buttonVariants } from './ui/button';
 import { Badge } from './ui/badge';
-import { cn } from '../lib/utils';
+import { cn, getPublicUrl } from '../lib/utils';
 
 interface HeaderProps {
   data: DashboardPayload | null;
@@ -51,7 +51,7 @@ export const Header: React.FC<HeaderProps> = ({ data, loading, onRefresh }) => {
           )}
 
           <a
-            href={`${(import.meta.env.BASE_URL || '/').replace(/\/+$/, '')}/data.json`}
+            href={getPublicUrl('data.json')}
             download="antigravity_usage_data.json"
             aria-label="Download usage ledger as JSON"
             className={buttonVariants({

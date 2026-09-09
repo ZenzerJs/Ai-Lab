@@ -27,7 +27,7 @@ import { Input } from './ui/input';
 import { SelectNative } from './ui/select-native';
 import { Empty, EmptyIcon, EmptyTitle, EmptyDescription } from './ui/empty';
 import { formatCurrency, formatTokens } from '../lib/formatters';
-import { cn } from '../lib/utils';
+import { cn, getPublicUrl } from '../lib/utils';
 
 interface RawLedgerTableProps {
   runs: RunRecord[];
@@ -157,7 +157,7 @@ export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs }) => {
 
           {/* Download JSON */}
           <a
-            href={`${(import.meta.env.BASE_URL || '/').replace(/\/+$/, '')}/data.json`}
+            href={getPublicUrl('data.json')}
             download="antigravity_usage_ledger.json"
             aria-label="Download raw ledger data as JSON"
             className={buttonVariants({

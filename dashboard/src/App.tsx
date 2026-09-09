@@ -16,6 +16,7 @@ import { Skeleton } from './components/ui/skeleton';
 import { Button } from './components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './components/ui/card';
 import { Empty, EmptyIcon, EmptyTitle, EmptyDescription, EmptyActions } from './components/ui/empty';
+import { getPublicUrl } from './lib/utils';
 
 export const App: React.FC = () => {
   const [data, setData] = useState<DashboardPayload | null>(null);
@@ -32,9 +33,7 @@ export const App: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const baseUrl = import.meta.env.BASE_URL || '/';
-      const dataUrl = `${baseUrl.replace(/\/+$/, '')}/data.json`;
-      const response = await fetch(dataUrl, {
+      const response = await fetch(getPublicUrl('data.json'), {
         cache: 'no-store',
         signal,
       });
