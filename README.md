@@ -42,6 +42,11 @@
 1. [System at a Glance](#1-system-at-a-glance)
 2. [The Task Lifecycle](#2-the-task-lifecycle)
 3. [The Measurement Layer](#3-the-measurement-layer)
+   - [3.1 Fairness Invariants](#31-fairness-invariants)
+   - [3.2 Cache-Aware Cost Formula](#32-cache-aware-cost-formula)
+   - [3.3 Why the Pipeline Arm Wins](#33-why-the-pipeline-arm-should-win)
+   - [3.4 Dashboard Views & Simulation Controls](#34-dashboard-views--simulation-controls)
+   - [3.5 Spend Cascade Across Foundation Models](#35-spend-cascade-across-foundation-models)
 4. [Core Components](#4-core-components)
 5. [Quickstart](#5-quickstart)
 6. [Repository Layout](#6-repository-layout)
@@ -242,7 +247,25 @@ The table below demonstrates how the **identical measured token workload** (447k
 | **`gpt-4o`** | $2.500 / $1.2500 / $10.00 | $1.2359 | $0.7905 | **+$0.4454** | 36.0% | +$98.02 | +$980.24 |
 | **`claude-3-7-sonnet`** | $3.000 / $0.3000 / $15.00 | $1.5164 | $0.5826 | **+$0.9338** | 61.6% | +$207.63 | **+$2,076.25** |
 
-> **Why the cascade occurs:** Premium models penalize unconstrained context heavily ($15/Mtok output, $3/Mtok input). Baseline agents re-read whole files and dump thousands of terminal lines every turn. ICM's byte-stable prompt prefixes achieve 90% cache discounts and AST symbol filtering cuts active context by ~80%, compounding savings by orders of magnitude as capability tiers rise.
+```text
+Measured Benchmark Spend (Baseline vs. ICM Pipeline):
+
+gemini-3.8-flash  [$0.0367] ■■■■■
+                  [$0.0173] ■■ (-52.8%)
+
+gemini-2.5-pro    [$0.6118] ■■■■■■■■■■■■■■■■■
+                  [$0.2886] ■■■■■■■■ (-52.8%)
+
+gpt-4o            [$1.2359] ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+                  [$0.7905] ■■■■■■■■■■■■■■■■■■■■■ (-36.0%)
+
+claude-3-7-sonnet [$1.5164] ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+                  [$0.5826] ■■■■■■■■■■■■■■■■ (-61.6%)
+
+Legend: Top Bar = Baseline (Unconstrained) | Bottom Bar = ICM Pipeline (Governed)
+```
+
+> **Why the cascade occurs:** Premium models penalize unconstrained context heavily ($15/Mtok output, $3/Mtok input [7](#8-references--pinned-specifications)). Baseline agents re-read whole files and dump thousands of terminal lines every turn. ICM's byte-stable prompt prefixes achieve 90% cache discounts and AST symbol filtering cuts active context by ~80%, compounding savings by orders of magnitude as capability tiers rise.
 
 ---
 
@@ -303,9 +326,13 @@ python scripts/run_experiment.py --task MOCK-001 --dry-run
 python scripts/ledger.py summary MOCK-001
 python scripts/lint_frontmatter.py
 
-# 4. Launch the local dashboard
+# 4. Launch the local dashboard (with Model Rate Card Simulator)
 python dashboard/build_data.py
 cd dashboard && npm run dev          # → http://localhost:5173
+
+# 5. Simulate multi-model spend cascade in terminal
+python scripts/ledger.py cascade
+python scripts/ledger.py summary --model claude-3-7-sonnet
 ```
 
 **Run a live A/B benchmark** (requires authenticated Antigravity CLI; consumes real quota):
@@ -320,6 +347,7 @@ python dashboard/build_data.py
 | Command | Action |
 |---|---|
 | `/Ai-Lab --status` | Cumulative savings and cache ratios |
+| `/Ai-Lab --cascade` | Multi-model spend cascade across all foundation models |
 | `/Ai-Lab --run <TASK-ID>` | Execute live A/B trial |
 | `/Ai-Lab --dashboard` | Rebuild data + launch dashboard |
 | `/Ai-Lab --dry-run` | Replay synthetic fixture |
