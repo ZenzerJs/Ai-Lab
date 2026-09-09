@@ -146,6 +146,31 @@ def export_data(output_file: Path = OUTPUT_PATH) -> Path:
 
 def main():
     out_path = Path(sys.argv[1]) if len(sys.argv) > 1 else OUTPUT_PATH
+
+    # In CI, data/usage.db may not exist (it's gitignored).
+    # The committed data.json snapshot is used directly; skip export gracefully.
+    db_path = WORKSPACE_ROOT / "data" / "usage.db"
+    if not db_path.exists():
+        if out_path.exists():
+            print(f"✓ No database found — using committed snapshot: {out_path}")
+        else:
+            # Emit a minimal valid payload so the dashboard renders without errors
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            placeholder = {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "has_data": False,
+                "cumulative": {},
+                "tasks": [],
+                "runs": [],
+                "timeline": [],
+                "pricing": [],
+                "cascade": [],
+            }
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(placeholder, f, indent=2)
+            print(f"✓ No database — wrote empty placeholder: {out_path}")
+        return
+
     export_data(out_path)
 
 

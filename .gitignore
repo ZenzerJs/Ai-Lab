@@ -21,4 +21,4 @@ dist/
 data/*.db
 data/*.db-journal
 data/*.db-wal
-dashboard/public/data.json
+# dashboard/public/data.json is intentionally tracked — serves as the Pages snapshot
