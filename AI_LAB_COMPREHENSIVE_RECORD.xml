@@ -1,0 +1,215 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<antigravity_workspace_record>
+  <metadata>
+    <workspace_name>AI-Lab</workspace_name>
+    <workspace_path>c:\Users\jayde\.gemini\AI-Lab</workspace_path>
+    <timestamp>2026-09-09T21:11:00Z</timestamp>
+    <role>Lead Software Architect</role>
+    <status>COMPLETE_AND_VERIFIED</status>
+    <hard_constraint_verification>No live model calls were made. The ledger currently contains only MOCK-001 data.</hard_constraint_verification>
+  </metadata>
+
+  <architectural_foundations>
+    <methodology name="Interpretable Context Methodology (ICM)">
+      <description>Deterministic 5-stage sequential lifecycle enforcing interpretable context transitions via stage contracts.</description>
+      <stage_contracts>
+        <stage number="01" name="intake" file="01_intake.md">Scope boundaries, constraints, out-of-scope declarations, and turn token budget table (&lt;= 8,000 tokens).</stage>
+        <stage number="02" name="plan" file="02_plan.md">Technical architecture, impacted symbol manifest, and OKR Acceptance Matrix with machine-verifiable exit criteria.</stage>
+        <stage number="03" name="exec" file="03_exec.md">Search/replace change tracking, symbol modification ledger, and escape-hatch justifications.</stage>
+        <stage number="04" name="verify" file="04_verify.md">Automated test execution logs, linter outputs, browser verification notes, and token telemetry ledger.</stage>
+        <stage number="05" name="retro" file="05_retro.md">Retrospective observations, learnings, and bidirectional updates to docs/ and docs/log.md.</stage>
+      </stage_contracts>
+    </methodology>
+
+    <specification name="Google Cloud Open Knowledge Format (OKF v0.2)">
+      <bundle_root path="docs/index.md">Strictly lowercase. Frontmatter contains ONLY okf_version: "0.2". Catalog of bundle-relative links.</bundle_root>
+      <knowledge_log path="docs/log.md">Strictly lowercase. Chronological update log fed exclusively from task retrospectives.</knowledge_log>
+      <spec_versions path="docs/SPEC-VERSIONS.md">Pinned upstream SHAs, dates, and declared versions.</spec_versions>
+      <house_rule>Strict schema validation rejecting undeclared frontmatter keys to prevent metadata sprawl and cache bust.</house_rule>
+      <visualizer path="docs/viz.html">Cytoscape.js interactive network graph mapping concept relations.</visualizer>
+    </specification>
+
+    <governance_invariants>
+      <invariant id="byte-stability">Sections 1-4 of prompt context must never contain timestamps, dynamic build counters, or volatile metadata to protect prompt prefix caching.</invariant>
+      <invariant id="diff-only-editing">Files exceeding 50 lines must use SEARCH/REPLACE blocks. Full file overwrites require logged justification in 03_exec.md.</invariant>
+      <invariant id="context-isolation">Direct complete-file dumps barred when AST symbol queries suffice. Use ast-grep or scripts/repo_map.py.</invariant>
+      <invariant id="log-sanitation">All shell commands must run via scripts/filter_output.py. Raw terminal outputs in conversational context are prohibited.</invariant>
+      <invariant id="tool-discipline">Git modification tools barred during 01_intake and 02_plan. Sequential-thinking tools barred during 03_exec and 04_verify.</invariant>
+      <invariant id="okr-gate">Transitioning from 02_plan to 03_exec strictly requires an approved OKR matrix with automated verification commands.</invariant>
+    </governance_invariants>
+  </architectural_foundations>
+
+  <runtime_and_ecosystem>
+    <preflight_runtimes>
+      <runtime name="python" version="Python 3.14.3" path="C:\Users\jayde\AppData\Local\Python\pythoncore-3.14-64\python.exe" />
+      <runtime name="git" version="git version 2.53.0.windows.1" path="C:\Program Files\Git\cmd\git.exe" />
+      <runtime name="uvx" version="uvx 0.12.12" path="C:\Users\jayde\AppData\Local\Python\bin\uvx.exe" />
+      <runtime name="npx" version="11.17.0" path="C:\Program Files\nodejs\npm.cmd" />
+    </preflight_runtimes>
+
+    <installed_packages>
+      <package name="@ast-grep/cli" version="0.45.3" manager="npm" type="global" role="Structural AST search and rewrite engine" />
+      <package name="repomix" version="1.18.0" manager="npm" type="global" role="Bounded intake context packer" />
+      <package name="grep-ast" version="0.9.0" manager="pip" role="Tree-sitter AST symbol extractor" />
+      <package name="tiktoken" version="0.14.0" manager="pip" role="BPE cl100k_base tokenizer for budget pruning" />
+    </installed_packages>
+
+    <pinned_upstream_specs>
+      <spec name="Google Cloud OKF v0.2">
+        <repo>https://github.com/GoogleCloudPlatform/open-knowledge-format.git</repo>
+        <commit_sha>ad30107c31c06aec8a7d5636e0d1058118604e6f</commit_sha>
+        <stable_ref>0b87c52</stable_ref>
+        <date>2026-08-21T20:08:36Z</date>
+        <declared_version>0.2</declared_version>
+      </spec>
+      <spec name="Interpretable Context Methodology (ICM)">
+        <repo>https://github.com/RinDig/Interpretable-Context-Methodology.git</repo>
+        <commit_sha>02ba5d85c7871b75c7c702a2d8da6524723d53d4</commit_sha>
+        <date>2026-07-25T16:17:00Z</date>
+        <variant>Numbered stage-contracts (01_intake through 05_retro)</variant>
+      </spec>
+    </pinned_upstream_specs>
+
+    <cross_platform_parity>
+      <mechanism>Python 3 core utilities paired with .ps1 (PowerShell) and .sh (POSIX Bash with 100755 permissions).</mechanism>
+    </cross_platform_parity>
+  </runtime_and_ecosystem>
+
+  <mcp_infrastructure config_file=".agents/mcp_config.json">
+    <server name="git" command="uvx">
+      <args>
+        <arg>mcp-server-git</arg>
+      </args>
+      <role>Structured git primitives (git_status, git_diff_unstaged, git_log)</role>
+    </server>
+    <server name="filesystem" command="npx">
+      <args>
+        <arg>-y</arg>
+        <arg>@modelcontextprotocol/server-filesystem</arg>
+        <arg>./tasks</arg>
+        <arg>./src</arg>
+        <arg>./docs</arg>
+        <arg>./scripts</arg>
+        <arg>./data</arg>
+        <arg>./experiments</arg>
+        <arg>./dashboard</arg>
+        <arg>./config</arg>
+      </args>
+      <role>Multi-root sandboxed filesystem operations excluding root configs and .git/</role>
+    </server>
+    <server name="sequential-thinking" command="npx">
+      <args>
+        <arg>-y</arg>
+        <arg>@modelcontextprotocol/server-sequential-thinking</arg>
+      </args>
+      <constraints>
+        <max_steps>10</max_steps>
+        <active_stages>02_plan</active_stages>
+      </constraints>
+      <role>Bounded scratchpad reasoning during planning stage</role>
+    </server>
+  </mcp_infrastructure>
+
+  <token_optimization_utilities>
+    <utility name="repo_map.py" script="scripts/repo_map.py">
+      <role>AST symbol tree extraction and signature compression</role>
+      <tokenizer_margin_rule>Target 1,800 tokens via tiktoken cl100k_base to account for OpenAI BPE vs Gemini tokenizer divergence, guaranteeing &lt;= 2,000 tokens.</tokenizer_margin_rule>
+      <algorithm>Binary search pruning incorporating telemetry header into budget evaluation across all scale targets.</algorithm>
+    </utility>
+
+    <utility name="filter_output.py" script="scripts/filter_output.py">
+      <role>CLI command execution wrapper and conversational log sanitizer</role>
+      <behavior_success>Collapses output on exit code 0 to: ✓ Command succeeded: [args]</behavior_success>
+      <behavior_failure>Strips noise and emits only failing assertions, files, line numbers, and immediate stack traces.</behavior_failure>
+      <windows_batch_resolution>Utilizes shutil.which to seamlessly execute Windows .cmd/.bat binaries (npx, npm, ast-grep).</windows_batch_resolution>
+    </utility>
+
+    <utility name="lint_frontmatter.py" script="scripts/lint_frontmatter.py">
+      <role>OKF v0.2 frontmatter schema, casing, and bundle link integrity validator</role>
+      <rules>
+        <rule>Rejects uppercase reserved names (INDEX.md, LOG.md)</rule>
+        <rule>Asserts docs/index.md contains only okf_version: "0.2"</rule>
+        <rule>Asserts valid YAML keys across docs/**/*.md</rule>
+        <rule>Enforces bundle-relative link resolution with disk case-sensitivity matching to prevent Windows NTFS drift</rule>
+      </rules>
+    </utility>
+  </token_optimization_utilities>
+
+  <measurement_system>
+    <component name="run_experiment.py" script="scripts/run_experiment.py">
+      <role>A/B comparison harness orchestrating baseline vs. ICM agent arms</role>
+      <headless_invocation>Antigravity CLI execution with --output-format stream-json</headless_invocation>
+      <parsed_stream_metrics>
+        <metric>input_tokens</metric>
+        <metric>output_tokens</metric>
+        <metric>thinking_tokens</metric>
+        <metric>cache_read_tokens</metric>
+        <metric>total_tokens</metric>
+        <metric>num_turns</metric>
+        <metric>duration_seconds</metric>
+      </parsed_stream_metrics>
+      <fairness_invariants>
+        <invariant>Model ID parity across both arms</invariant>
+        <invariant>Clean starting worktree state</invariant>
+        <invariant>Exact prompt bytes parity</invariant>
+        <invariant>Minimum sample size n &gt;= 2 (default n=3)</invariant>
+      </fairness_invariants>
+      <dry_run_fixtures>experiments/fixtures/mock_stream.ndjson</dry_run_fixtures>
+    </component>
+
+    <component name="ledger.py" script="scripts/ledger.py" database="data/usage.db">
+      <role>SQLite token usage and financial accounting ledger</role>
+      <tables>
+        <table name="runs">id, task_id, arm, model, run_index, timestamp, input_tokens, output_tokens, thinking_tokens, cache_read_tokens, total_tokens, num_turns, duration_seconds</table>
+        <table name="tasks">id, prompt_path, notes, created_at</table>
+        <table name="pricing">model, input_usd_per_mtok, cache_read_usd_per_mtok, output_usd_per_mtok, source_url, fetched_at</table>
+      </tables>
+      <external_pricing_config>config/PRICING.json</external_pricing_config>
+      <cost_formula>Cost = (Input_Tokens * Input_Rate / 1e6) + (Cache_Read_Tokens * Cache_Read_Rate / 1e6) + (Output_Tokens * Output_Rate / 1e6)</cost_formula>
+      <paired_index_savings>Ensures mathematical parity between CLI summary savings and dashboard timeline curve.</paired_index_savings>
+    </component>
+
+    <component name="dashboard" directory="dashboard/">
+      <role>Local interactive web application visualizing agent economics</role>
+      <tech_stack>Vite, React 18, TypeScript, Tailwind CSS, Recharts</tech_stack>
+      <static_data_exporter script="dashboard/build_data.py" target="dashboard/public/data.json" />
+      <views>
+        <view name="PerTaskComparison">Grouped bar chart comparing baseline vs ICM mean USD cost with min-max error bands and sample count (n=X).</view>
+        <view name="CacheHitRatio">Dual donut visualizer showing cache efficiency (cache_read / input tokens).</view>
+        <view name="CumulativeSavings">Metric summary card and running line chart of total net USD savings.</view>
+        <view name="TurnsDuration">Side-by-side metric bars comparing turn counts and total task duration.</view>
+        <view name="RawLedgerTable">Sortable, collapsible raw data table with downloadable JSON payload link.</view>
+      </views>
+      <ui_constraints>Explicit run counts (n=X) displayed on every chart; zero speculative projections; clean empty states.</ui_constraints>
+    </component>
+  </measurement_system>
+
+  <skills_and_commands>
+    <skill name="ai-lab" file=".agents/skills/ai-lab.md" global="~/.gemini/config/skills/ai-lab/SKILL.md">
+      <trigger>/Ai-Lab</trigger>
+      <subcommands>
+        <subcommand name="/Ai-Lab --status">Runs python scripts/ledger.py summary across all tasks</subcommand>
+        <subcommand name="/Ai-Lab --run &lt;TASK-ID&gt;">Executes A/B experiment and refreshes data.json</subcommand>
+        <subcommand name="/Ai-Lab --dashboard">Refreshes data.json and launches local Vite server at http://localhost:5173</subcommand>
+        <subcommand name="/Ai-Lab --dry-run">Runs synthetic dry-run verification on MOCK-001</subcommand>
+      </subcommands>
+    </skill>
+    <skill name="run_experiment" file=".agents/skills/run_experiment.md" />
+    <skill name="usage_dashboard" file=".agents/skills/usage_dashboard.md" />
+    <skill name="repo_map" file=".agents/skills/repo_map.md" />
+    <skill name="filter_output" file=".agents/skills/filter_output.md" />
+  </skills_and_commands>
+
+  <verification_records>
+    <test id="T1" command="python scripts/filter_output.py -- python -c &quot;print('test passing')&quot;" exit_code="0" status="PASSED">Output collapsed to 1-line summary: ✓ Command succeeded</test>
+    <test id="T2" command="python scripts/filter_output.py -- python -c &quot;import sys; sys.stderr.write('fatal error\n'); sys.exit(1)&quot;" exit_code="1" status="PASSED">Output isolated to error string without conversational noise</test>
+    <test id="T3" command="python scripts/repo_map.py --target scripts/_smoke_sample.py" exit_code="0" status="PASSED">Extracted AST symbols, tokens = 312 &lt;= 1,800 ceiling</test>
+    <test id="T4" command="python scripts/lint_frontmatter.py" exit_code="0" status="PASSED">Validated OKF v0.2 frontmatter, lowercase reserved files, and link integrity</test>
+    <test id="T5" command="python -c &quot;import json, shutil; ...&quot;" exit_code="0" status="PASSED">Validated .agents/mcp_config.json schema and PATH binaries</test>
+    <test id="T6" command="python scripts/run_experiment.py --task MOCK-001 --dry-run" exit_code="0" status="PASSED">Wrote 6 mock runs to data/usage.db</test>
+    <test id="T7" command="python scripts/run_experiment.py --task MOCK-001 --dry-run --runs 1" exit_code="1" status="PASSED">Correctly aborted on sample size invariant violation (n &lt; 2)</test>
+    <test id="T8" command="python scripts/ledger.py summary MOCK-001" exit_code="0" status="PASSED">Calculated baseline $0.13085 vs ICM $0.06379 (51.25% cost reduction)</test>
+    <test id="T9" command="python dashboard/build_data.py" exit_code="0" status="PASSED">Generated dashboard/public/data.json</test>
+    <test id="T10" command="cd dashboard &amp;&amp; npm run build" exit_code="0" status="PASSED">Vite production bundle compiled with zero type errors</test>
+  </verification_records>
+</antigravity_workspace_record>
