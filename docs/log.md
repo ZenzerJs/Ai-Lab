@@ -1,6 +1,7 @@
 # Knowledge Bundle Update Log
 
 ## 2026-09-09
+* **claude-sonnet-4-6 & claude-sonnet-5 Rate Cards**: Added both models to `config/PRICING.json` and SQLite pricing table. Sonnet 4.6 ($3.00/$0.30/$15.00 per M) matches claude-3-7-sonnet tier — 61.6% ICM savings, +$2,076 @ 1B tokens. Sonnet 5 ($2.00/$0.20/$10.00 per M) shows 61.6% savings, +$1,384 @ 1B tokens. Both available in dashboard Model Rate Card Simulator and CLI cascade.
 * **GitHub Pages Live Dashboard**: Added `.github/workflows/deploy-dashboard.yml` CI deploy workflow; configured Vite `base` path (`VITE_BASE_PATH=/Ai-Lab/`) for sub-path routing. Dashboard auto-deploys to [zenzerjs.github.io/Ai-Lab](https://zenzerjs.github.io/Ai-Lab/) on every push to `main`.
 * **Multi-Model Spend Cascade & Empirical Benchmarks**: Executed empirical trials (`EXP-001` through `EXP-004`, 16 runs on `gemini-3.8-flash`, 52.82% cost reduction). Added dynamic Foundation Model Rate Card simulation (`gemini-3.8-flash`, `gemini-2.5-pro`, `gpt-4o`, `claude-3-7-sonnet`) and multi-model spend cascade visualizer across 1x to 1B token scale.
 * **Measurement Layer**: Implemented A/B experiment runner (`scripts/run_experiment.py`), SQLite usage ledger (`scripts/ledger.py`), local Vite + React savings dashboard (`dashboard/`), and measurement layer OKF concept ([Measurement Layer](/concepts/measurement-layer.md)).

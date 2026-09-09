@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-09T22:53:20.643279+00:00",
+  "generated_at": "2026-09-09T22:59:37.730891+00:00",
   "has_data": true,
   "cumulative": {
     "tasks_evaluated": 4,
@@ -1336,6 +1336,22 @@
       "output_usd_per_mtok": 10.0,
       "source_url": "https://openai.com/api/pricing",
       "fetched_at": "2026-09-09T00:00:00Z"
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "input_usd_per_mtok": 3.0,
+      "cache_read_usd_per_mtok": 0.3,
+      "output_usd_per_mtok": 15.0,
+      "source_url": "https://www.anthropic.com/pricing",
+      "fetched_at": "2026-09-09T22:58:00Z"
+    },
+    {
+      "model": "claude-sonnet-5",
+      "input_usd_per_mtok": 2.0,
+      "cache_read_usd_per_mtok": 0.2,
+      "output_usd_per_mtok": 10.0,
+      "source_url": "https://www.anthropic.com/pricing",
+      "fetched_at": "2026-09-09T22:58:00Z"
     }
   ],
   "cascade": [
@@ -1423,6 +1439,40 @@
       "projected_savings_100m": 98.02388221998521,
       "projected_savings_1b": 980.2388221998522,
       "source_url": "https://openai.com/api/pricing"
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "input_usd_per_mtok": 3.0,
+      "cache_read_usd_per_mtok": 0.3,
+      "output_usd_per_mtok": 15.0,
+      "total_baseline_cost_usd": 1.51638,
+      "total_icm_cost_usd": 0.58263,
+      "cumulative_savings_usd": 0.9337500000000001,
+      "cumulative_savings_percent": 61.57757290388953,
+      "cost_per_mtok_baseline": 3.390376961946072,
+      "cost_per_mtok_icm": 1.314123962468423,
+      "savings_usd_per_mtok": 2.0762529994776493,
+      "projected_savings_10m": 20.762529994776493,
+      "projected_savings_100m": 207.62529994776492,
+      "projected_savings_1b": 2076.252999477649,
+      "source_url": "https://www.anthropic.com/pricing"
+    },
+    {
+      "model": "claude-sonnet-5",
+      "input_usd_per_mtok": 2.0,
+      "cache_read_usd_per_mtok": 0.2,
+      "output_usd_per_mtok": 10.0,
+      "total_baseline_cost_usd": 1.0109199999999998,
+      "total_icm_cost_usd": 0.38842,
+      "cumulative_savings_usd": 0.6224999999999998,
+      "cumulative_savings_percent": 61.57757290388952,
+      "cost_per_mtok_baseline": 2.2602513079640474,
+      "cost_per_mtok_icm": 0.8760826416456153,
+      "savings_usd_per_mtok": 1.384168666318432,
+      "projected_savings_10m": 13.841686663184321,
+      "projected_savings_100m": 138.4168666318432,
+      "projected_savings_1b": 1384.168666318432,
+      "source_url": "https://www.anthropic.com/pricing"
     }
   ]
 }

@@ -28,6 +28,20 @@
       "source_url": "https://www.anthropic.com/pricing",
       "fetched_at": "2026-09-09T00:00:00Z"
     },
+    "claude-sonnet-4-6": {
+      "input_usd_per_mtok": 3.00,
+      "cache_read_usd_per_mtok": 0.30,
+      "output_usd_per_mtok": 15.00,
+      "source_url": "https://www.anthropic.com/pricing",
+      "fetched_at": "2026-09-09T22:58:00Z"
+    },
+    "claude-sonnet-5": {
+      "input_usd_per_mtok": 2.00,
+      "cache_read_usd_per_mtok": 0.20,
+      "output_usd_per_mtok": 10.00,
+      "source_url": "https://www.anthropic.com/pricing",
+      "fetched_at": "2026-09-09T22:58:00Z"
+    },
     "gpt-4o": {
       "input_usd_per_mtok": 2.50,
       "cache_read_usd_per_mtok": 1.25,
