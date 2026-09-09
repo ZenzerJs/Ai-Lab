@@ -364,6 +364,13 @@ def task_summary(task_id: str, conn: Optional[sqlite3.Connection] = None, db_pat
         turns_diff = b["mean_num_turns"] - i["mean_num_turns"]
         duration_diff = b["mean_duration_seconds"] - i["mean_duration_seconds"]
 
+        # Calculate 1M token normalized metrics
+        base_tokens = b["mean_total_tokens"]
+        icm_tokens = i["mean_total_tokens"]
+        cost_per_mtok_base = (b["mean_cost_usd"] / base_tokens * 1_000_000) if base_tokens > 0 else 0.0
+        cost_per_mtok_icm = (i["mean_cost_usd"] / icm_tokens * 1_000_000) if icm_tokens > 0 else 0.0
+        savings_per_mtok = cost_per_mtok_base - cost_per_mtok_icm
+
         summary["savings"] = {
             "mean_savings_usd": cost_diff,
             "mean_savings_percent": cost_pct,
@@ -372,6 +379,11 @@ def task_summary(task_id: str, conn: Optional[sqlite3.Connection] = None, db_pat
             "mean_duration_seconds_saved": duration_diff,
             "cache_hit_ratio_baseline": b["cache_hit_ratio"],
             "cache_hit_ratio_icm": i["cache_hit_ratio"],
+            "cost_per_mtok_baseline": cost_per_mtok_base,
+            "cost_per_mtok_icm": cost_per_mtok_icm,
+            "savings_usd_per_mtok": savings_per_mtok,
+            "projected_savings_10m": savings_per_mtok * 10,
+            "projected_savings_100m": savings_per_mtok * 100,
         }
 
     if should_close:
@@ -393,6 +405,8 @@ def cumulative_savings(conn: Optional[sqlite3.Connection] = None, db_path: Optio
 
     total_baseline_cost = 0.0
     total_icm_cost = 0.0
+    total_baseline_tokens = 0
+    total_icm_tokens = 0
     total_runs = 0
     task_summaries = []
 
@@ -410,6 +424,8 @@ def cumulative_savings(conn: Optional[sqlite3.Connection] = None, db_path: Optio
             for ridx in common_indexes:
                 total_baseline_cost += b_runs[ridx]["cost_usd"]
                 total_icm_cost += i_runs[ridx]["cost_usd"]
+                total_baseline_tokens += b_runs[ridx]["total_tokens"]
+                total_icm_tokens += i_runs[ridx]["total_tokens"]
 
     measured_savings_usd = total_baseline_cost - total_icm_cost
     savings_pct = (
@@ -418,13 +434,24 @@ def cumulative_savings(conn: Optional[sqlite3.Connection] = None, db_path: Optio
         else 0.0
     )
 
+    cost_per_mtok_base = (total_baseline_cost / total_baseline_tokens * 1_000_000) if total_baseline_tokens > 0 else 0.0
+    cost_per_mtok_icm = (total_icm_cost / total_icm_tokens * 1_000_000) if total_icm_tokens > 0 else 0.0
+    savings_usd_per_mtok = cost_per_mtok_base - cost_per_mtok_icm
+
     result = {
         "tasks_evaluated": len(task_summaries),
         "total_runs": total_runs,
         "total_baseline_cost_usd": total_baseline_cost,
         "total_icm_cost_usd": total_icm_cost,
+        "total_baseline_tokens": total_baseline_tokens,
+        "total_icm_tokens": total_icm_tokens,
         "cumulative_savings_usd": measured_savings_usd,
         "cumulative_savings_percent": savings_pct,
+        "cost_per_mtok_baseline": cost_per_mtok_base,
+        "cost_per_mtok_icm": cost_per_mtok_icm,
+        "savings_usd_per_mtok": savings_usd_per_mtok,
+        "projected_savings_10m": savings_usd_per_mtok * 10,
+        "projected_savings_100m": savings_usd_per_mtok * 100,
         "tasks": task_summaries,
     }
 
@@ -469,6 +496,13 @@ def print_summary(task_id: Optional[str] = None) -> None:
                 print(f"  Turns Saved:         {sv['mean_turns_saved']:.1f}")
                 print(f"  Duration Saved:      {sv['mean_duration_seconds_saved']:.2f}s")
                 print(f"  Cache Hit Ratio:     Baseline {sv['cache_hit_ratio_baseline']*100:.1f}% -> ICM {sv['cache_hit_ratio_icm']*100:.1f}%")
+                print("-" * 72)
+                print("[1M TOKEN SCALE MULTIPLIER & PROJECTIONS]")
+                print(f"  Baseline / 1M Tokens:   ${sv['cost_per_mtok_baseline']:.4f}")
+                print(f"  ICM / 1M Tokens:        ${sv['cost_per_mtok_icm']:.4f}")
+                print(f"  Net Savings / 1M Tokens: +${sv['savings_usd_per_mtok']:.4f} ({sv['mean_savings_percent']:.1f}%)")
+                print(f"  Projected Savings @ 10M:  +${sv['projected_savings_10m']:.3f}")
+                print(f"  Projected Savings @ 100M: +${sv['projected_savings_100m']:.2f}")
             print("=" * 72)
 
         else:
@@ -481,15 +515,22 @@ def print_summary(task_id: Optional[str] = None) -> None:
             print(f"Total Baseline Cost:   ${cum['total_baseline_cost_usd']:.5f}")
             print(f"Total ICM Cost:        ${cum['total_icm_cost_usd']:.5f}")
             print(f"Cumulative Savings:    ${cum['cumulative_savings_usd']:.5f} ({cum['cumulative_savings_percent']:.2f}%)")
+            print("-" * 72)
+            print("[1M TOKEN SCALE MULTIPLIER & VOLUME PROJECTIONS]")
+            print(f"  Baseline / 1M Tokens:   ${cum['cost_per_mtok_baseline']:.4f}")
+            print(f"  ICM / 1M Tokens:        ${cum['cost_per_mtok_icm']:.4f}")
+            print(f"  Net Savings / 1M Tokens: +${cum['savings_usd_per_mtok']:.4f} ({cum['cumulative_savings_percent']:.1f}%)")
+            print(f"  Projected Savings @ 10M:  +${cum['projected_savings_10m']:.3f}")
+            print(f"  Projected Savings @ 100M: +${cum['projected_savings_100m']:.2f}")
             print("=" * 72)
             for t in cum["tasks"]:
                 tid = t["task_id"]
                 if "savings" in t:
                     sv = t["savings"]
-                    print(f"  • {tid:12s} | Saved: ${sv['mean_savings_usd']:.5f} ({sv['mean_savings_percent']:5.1f}%) | Cache: Base {sv['cache_hit_ratio_baseline']*100:.1f}% vs ICM {sv['cache_hit_ratio_icm']*100:.1f}%")
+                    print(f"  • {tid:10s} | Saved: ${sv['mean_savings_usd']:.5f} ({sv['mean_savings_percent']:4.1f}%) | 1M Rate: Base ${sv['cost_per_mtok_baseline']:.3f} vs ICM ${sv['cost_per_mtok_icm']:.3f} (Save +${sv['savings_usd_per_mtok']:.3f}/M)")
                 elif t.get("total_runs", 0) > 0:
                     arms = list(t.get("arms", {}).keys())
-                    print(f"  • {tid:12s} | Runs: {t['total_runs']} | Arms present: {arms} (partial)")
+                    print(f"  • {tid:10s} | Runs: {t['total_runs']} | Arms: {arms} (partial)")
             print("=" * 72)
     finally:
         conn.close()

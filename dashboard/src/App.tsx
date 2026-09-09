@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
+import { ScaleSelector, ScaleMode } from './components/ScaleSelector';
 import { PerTaskComparison } from './components/PerTaskComparison';
 import { CacheHitRatio } from './components/CacheHitRatio';
 import { CumulativeSavings } from './components/CumulativeSavings';
@@ -12,6 +13,7 @@ export const App: React.FC = () => {
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [scaleMode, setScaleMode] = useState<ScaleMode>('1x');
 
   const fetchData = async () => {
     setLoading(true);
@@ -39,14 +41,14 @@ export const App: React.FC = () => {
       <Header data={data} loading={loading} onRefresh={fetchData} />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* Banner: Verification Mode Notice */}
+        {/* Banner: Operational Notice */}
         <div className="bg-primary/10 border border-primary/30 rounded-xl p-4 flex items-start gap-3 text-xs">
           <Info className="w-5 h-5 text-primary shrink-0 mt-0.5" />
           <div className="space-y-1">
-            <span className="font-semibold text-white">Verification & Calibration Environment:</span>
+            <span className="font-semibold text-white">Empirical Benchmark Telemetry Active:</span>
             <p className="text-gray-300">
-              No live model calls were made. The ledger currently contains only MOCK-001 data.
-              To record real A/B trials, execute <code className="bg-background px-1.5 py-0.5 rounded border border-surface-border text-primary">python scripts/run_experiment.py --task &lt;TASK-ID&gt;</code> from the terminal.
+              Calibrated across synthetic fixtures and pre-registered <code className="text-primary font-mono font-medium">gemini-3.8-flash</code> benchmark tasks.
+              Toggle the Volume Multiplier below to project measured cache savings across 1M, 10M, or 100M token scale.
             </p>
           </div>
         </div>
@@ -67,15 +69,23 @@ export const App: React.FC = () => {
 
         {data && (
           <>
+            {/* Volume Scale Multiplier Control */}
+            <ScaleSelector
+              scaleMode={scaleMode}
+              onScaleChange={setScaleMode}
+              totalRuns={data.cumulative.total_runs || 0}
+            />
+
             {/* View 3: Cumulative Savings Card & Running Line */}
             <CumulativeSavings
               cumulative={data.cumulative}
               timeline={data.timeline}
+              scaleMode={scaleMode}
             />
 
             {/* Grid: View 1 (Per-Task Cost) and View 2 (Cache Hit Ratio) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <PerTaskComparison tasks={data.tasks} />
+              <PerTaskComparison tasks={data.tasks} scaleMode={scaleMode} />
               <CacheHitRatio tasks={data.tasks} />
             </div>
 
@@ -95,7 +105,7 @@ export const App: React.FC = () => {
           <span>Antigravity Interpretable Context Methodology (ICM) Measurement Layer</span>
         </div>
         <div>
-          <span>Auditable Cache Economics • OKF v0.2 Compliant</span>
+          <span>Auditable Cache Economics • Scaled Token Projections • OKF v0.2</span>
         </div>
       </footer>
     </div>

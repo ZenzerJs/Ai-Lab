@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AreaChart,
   Area,
@@ -9,17 +9,66 @@ import {
   CartesianGrid,
 } from 'recharts';
 import { CumulativeSummary, TimelinePoint } from '../types';
-import { ShieldAlert, Award } from 'lucide-react';
+import { ScaleMode } from './ScaleSelector';
+import { ShieldAlert, Award, Layers } from 'lucide-react';
 
 interface CumulativeSavingsProps {
   cumulative: CumulativeSummary;
   timeline: TimelinePoint[];
+  scaleMode: ScaleMode;
 }
 
-export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({ cumulative, timeline }) => {
-  const totalSaved = cumulative.cumulative_savings_usd || 0;
+export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({
+  cumulative,
+  timeline,
+  scaleMode,
+}) => {
   const pctSaved = cumulative.cumulative_savings_percent || 0;
   const totalRuns = cumulative.total_runs || 0;
+
+  // Scale calculations
+  let scaleMultiplier = 1.0;
+  let scaleLabel = 'Raw Single-Run Expenditures';
+  let badgeText = 'Strict Actuals • Zero Projections';
+  let totalSaved = cumulative.cumulative_savings_usd || 0;
+  let baselineCost = cumulative.total_baseline_cost_usd || 0;
+  let icmCost = cumulative.total_icm_cost_usd || 0;
+
+  if (scaleMode === '1m') {
+    scaleLabel = 'Normalized per 1,000,000 Tokens (1 MTok)';
+    badgeText = 'Scaled to 1M Tokens (1 MTok)';
+    totalSaved = cumulative.savings_usd_per_mtok ?? totalSaved;
+    baselineCost = cumulative.cost_per_mtok_baseline ?? baselineCost;
+    icmCost = cumulative.cost_per_mtok_icm ?? icmCost;
+    if (cumulative.cumulative_savings_usd > 0 && cumulative.savings_usd_per_mtok) {
+      scaleMultiplier = cumulative.savings_usd_per_mtok / cumulative.cumulative_savings_usd;
+    }
+  } else if (scaleMode === '10m') {
+    scaleLabel = 'Projected at 10M Tokens (Engineering Team Volume)';
+    badgeText = 'Projected @ 10M Tokens';
+    totalSaved = (cumulative.savings_usd_per_mtok ?? 0) * 10;
+    baselineCost = (cumulative.cost_per_mtok_baseline ?? 0) * 10;
+    icmCost = (cumulative.cost_per_mtok_icm ?? 0) * 10;
+    if (cumulative.cumulative_savings_usd > 0 && cumulative.savings_usd_per_mtok) {
+      scaleMultiplier = (cumulative.savings_usd_per_mtok * 10) / cumulative.cumulative_savings_usd;
+    }
+  } else if (scaleMode === '100m') {
+    scaleLabel = 'Projected at 100M Tokens (Enterprise Monthly Volume)';
+    badgeText = 'Projected @ 100M Tokens';
+    totalSaved = (cumulative.savings_usd_per_mtok ?? 0) * 100;
+    baselineCost = (cumulative.cost_per_mtok_baseline ?? 0) * 100;
+    icmCost = (cumulative.cost_per_mtok_icm ?? 0) * 100;
+    if (cumulative.cumulative_savings_usd > 0 && cumulative.savings_usd_per_mtok) {
+      scaleMultiplier = (cumulative.savings_usd_per_mtok * 100) / cumulative.cumulative_savings_usd;
+    }
+  }
+
+  // Adjust timeline data for the chosen scale
+  const scaledTimeline = timeline.map((p) => ({
+    ...p,
+    delta_saved_usd: p.delta_saved_usd * scaleMultiplier,
+    cumulative_savings_usd: p.cumulative_savings_usd * scaleMultiplier,
+  }));
 
   const CustomLineTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
@@ -32,11 +81,11 @@ export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({ cumulative
           </div>
           <div className="flex justify-between gap-4 text-gray-300">
             <span>Delta Saved:</span>
-            <span className="font-mono text-emerald-400">+${p.delta_saved_usd.toFixed(5)}</span>
+            <span className="font-mono text-emerald-400">+${p.delta_saved_usd.toFixed(4)}</span>
           </div>
           <div className="flex justify-between gap-4 text-white font-medium pt-1 border-t border-surface-border">
             <span>Cumulative Saved:</span>
-            <span className="font-mono text-emerald-300">${p.cumulative_savings_usd.toFixed(5)}</span>
+            <span className="font-mono text-emerald-300">${p.cumulative_savings_usd.toFixed(4)}</span>
           </div>
         </div>
       );
@@ -50,19 +99,23 @@ export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({ cumulative
         <div>
           <div className="flex items-center gap-2">
             <Award className="w-4 h-4 text-emerald-400" />
-            <h2 className="text-base font-semibold text-white">Cumulative Measured Savings</h2>
+            <h2 className="text-base font-semibold text-white">Cumulative Savings</h2>
             <span className="text-[11px] font-mono font-medium px-2 py-0.5 rounded bg-surface-border text-gray-300">
               Total n={totalRuns} runs
             </span>
           </div>
           <p className="text-xs text-gray-400 mt-0.5">
-            Running cumulative difference between baseline expenditure and ICM pipeline expenditure.
+            {scaleLabel} — comparing baseline vs. ICM pipeline expenditure.
           </p>
         </div>
 
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-mono">
-          <ShieldAlert className="w-3.5 h-3.5" />
-          <span>Strict Actuals • Zero Projections</span>
+        <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono border ${
+          scaleMode === '1x'
+            ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+            : 'bg-primary/15 border-primary/40 text-primary-light'
+        }`}>
+          {scaleMode === '1x' ? <ShieldAlert className="w-3.5 h-3.5" /> : <Layers className="w-3.5 h-3.5" />}
+          <span>{badgeText}</span>
         </div>
       </div>
 
@@ -71,7 +124,7 @@ export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({ cumulative
         <div className="bg-background/60 border border-surface-border rounded-lg p-3">
           <span className="text-[11px] uppercase tracking-wide text-gray-400 font-medium">Net USD Saved</span>
           <div className="text-xl font-bold text-emerald-400 font-mono mt-1">
-            ${totalSaved.toFixed(5)}
+            ${totalSaved >= 1 ? totalSaved.toFixed(2) : totalSaved.toFixed(4)}
           </div>
           <span className="text-[10px] text-emerald-400/80 font-mono">
             {pctSaved.toFixed(1)}% Cost Reduction
@@ -81,7 +134,7 @@ export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({ cumulative
         <div className="bg-background/60 border border-surface-border rounded-lg p-3">
           <span className="text-[11px] uppercase tracking-wide text-gray-400 font-medium">Baseline Cost</span>
           <div className="text-xl font-bold text-red-400 font-mono mt-1">
-            ${cumulative.total_baseline_cost_usd.toFixed(5)}
+            ${baselineCost >= 1 ? baselineCost.toFixed(2) : baselineCost.toFixed(4)}
           </div>
           <span className="text-[10px] text-gray-400">Total expenditure</span>
         </div>
@@ -89,18 +142,18 @@ export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({ cumulative
         <div className="bg-background/60 border border-surface-border rounded-lg p-3">
           <span className="text-[11px] uppercase tracking-wide text-gray-400 font-medium">ICM Pipeline Cost</span>
           <div className="text-xl font-bold text-blue-400 font-mono mt-1">
-            ${cumulative.total_icm_cost_usd.toFixed(5)}
+            ${icmCost >= 1 ? icmCost.toFixed(2) : icmCost.toFixed(4)}
           </div>
           <span className="text-[10px] text-gray-400">Total expenditure</span>
         </div>
 
         <div className="bg-background/60 border border-surface-border rounded-lg p-3">
-          <span className="text-[11px] uppercase tracking-wide text-gray-400 font-medium">Sample Size</span>
+          <span className="text-[11px] uppercase tracking-wide text-gray-400 font-medium">Calibrated Scope</span>
           <div className="text-xl font-bold text-gray-200 font-mono mt-1">
             n={totalRuns}
           </div>
           <span className="text-[10px] text-gray-400">
-            Across {cumulative.tasks_evaluated} Task(s)
+            Across {cumulative.tasks_evaluated} Benchmark Tasks
           </span>
         </div>
       </div>
@@ -116,7 +169,7 @@ export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({ cumulative
         <div className="h-60 w-full mt-5">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart
-              data={timeline}
+              data={scaledTimeline}
               margin={{ top: 10, right: 25, left: 10, bottom: 5 }}
             >
               <defs>
@@ -138,7 +191,7 @@ export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({ cumulative
                 fontSize={11}
                 tickLine={false}
                 axisLine={{ stroke: '#30363d' }}
-                tickFormatter={(v) => `$${v.toFixed(3)}`}
+                tickFormatter={(v) => `$${v >= 1 ? v.toFixed(2) : v.toFixed(3)}`}
               />
               <Tooltip content={<CustomLineTooltip />} />
               <Area

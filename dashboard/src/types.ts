@@ -39,6 +39,11 @@ export interface TaskSavings {
   mean_duration_seconds_saved: number;
   cache_hit_ratio_baseline: number;
   cache_hit_ratio_icm: number;
+  cost_per_mtok_baseline?: number;
+  cost_per_mtok_icm?: number;
+  savings_usd_per_mtok?: number;
+  projected_savings_10m?: number;
+  projected_savings_100m?: number;
 }
 
 export interface TaskSummaryItem {
@@ -57,8 +62,15 @@ export interface CumulativeSummary {
   total_runs: number;
   total_baseline_cost_usd: number;
   total_icm_cost_usd: number;
+  total_baseline_tokens?: number;
+  total_icm_tokens?: number;
   cumulative_savings_usd: number;
   cumulative_savings_percent: number;
+  cost_per_mtok_baseline?: number;
+  cost_per_mtok_icm?: number;
+  savings_usd_per_mtok?: number;
+  projected_savings_10m?: number;
+  projected_savings_100m?: number;
   tasks: TaskSummaryItem[];
 }
 
