@@ -266,3 +266,25 @@ sequential-thinking npx True
       05_retro.md
 ```
 *Result: PASSED (Complete directory tree matches architectural specification).*
+
+---
+
+## Post-Review Hardening Ledger
+
+During architectural code review, four critical operational edge cases were detected, isolated, and permanently resolved:
+
+1. **Windows Command Resolution (`scripts/filter_output.py`)**:
+   - *Issue:* Executing Node/npm CLI tools (`npx`, `ast-grep`, `repomix`) threw `Command not found` on Windows due to un-resolved `.cmd` extensions.
+   - *Fix:* Integrated `shutil.which` command resolution into process launcher.
+2. **Strict Output Token Budgeting & Telemetry Alignment (`scripts/repo_map.py`)**:
+   - *Issue:* Header output tokens were printed outside the pruning budget, causing small budget targets (e.g. 300, 150, 80) to exceed limits and report contradictory telemetry.
+   - *Fix:* Integrated telemetry header directly into candidate evaluation and binary search pruning, guaranteeing total emitted tokens strictly satisfy `<= max_tokens` across all scales.
+3. **Module Docstring Ingestion (`scripts/repo_map.py`)**:
+   - *Issue:* Files beginning with `#!/usr/bin/env python3` or comments had top-level docstrings skipped.
+   - *Fix:* Added resilient header scanner skipping shebangs and comments before extracting module docstrings.
+4. **Cross-Platform Link Casing & Syntax Validation (`scripts/lint_frontmatter.py`)**:
+   - *Issue:* Windows case-insensitive filesystem masked case-mismatched bundle links, and links with title strings were skipped.
+   - *Fix:* Added strict path string equality against `Path.resolve()` to catch Windows casing drift, expanded regex to parse link titles, and converted relative link `viz.html` in `docs/index.md` to bundle-relative `/viz.html`.
+5. **POSIX Executable Permissions (`scripts/*.sh`)**:
+   - *Issue:* Bash shims lacked git executable bits (`100644`).
+   - *Fix:* Updated git index to `100755` executable permissions across all `.sh` shims.
