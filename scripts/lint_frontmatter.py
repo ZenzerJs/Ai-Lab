@@ -127,7 +127,7 @@ def lint_docs(docs_dir: Path) -> list:
         rel_str = str(rel_to_docs).replace("\\", "/")
 
         try:
-            content = md_file.read_text(encoding="utf-8")
+            content = md_file.read_text(encoding="utf-8-sig")
         except Exception as exc:
             errors.append(f"File Read Error in '{rel_str}': {exc}")
             continue

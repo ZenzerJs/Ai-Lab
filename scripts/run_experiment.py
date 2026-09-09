@@ -49,7 +49,7 @@ def parse_task_file(task_path: Path) -> Dict[str, Any]:
     if not task_path.exists():
         raise FileNotFoundError(f"Task definition file not found: {task_path}")
 
-    content = task_path.read_text(encoding="utf-8")
+    content = task_path.read_text(encoding="utf-8-sig")
     frontmatter: Dict[str, Any] = {}
     body = content
 
