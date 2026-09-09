@@ -402,6 +402,7 @@ def cumulative_savings(
     conn: Optional[sqlite3.Connection] = None,
     db_path: Optional[Path] = None,
     model_override: Optional[str] = None,
+    include_mock: bool = False,
 ) -> Dict[str, Any]:
     """Compute total measured savings across all tasks with baseline and icm arms."""
     should_close = False
@@ -411,7 +412,11 @@ def cumulative_savings(
 
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT task_id FROM runs ORDER BY task_id")
-    task_ids = [row["task_id"] for row in cursor.fetchall()]
+    task_ids = [
+        row["task_id"]
+        for row in cursor.fetchall()
+        if include_mock or not row["task_id"].upper().startswith("MOCK")
+    ]
 
     total_baseline_cost = 0.0
     total_icm_cost = 0.0
@@ -531,9 +536,13 @@ def print_cascade(conn: Optional[sqlite3.Connection] = None, db_path: Optional[P
             conn.close()
 
 
-def print_summary(task_id: Optional[str] = None, model_override: Optional[str] = None) -> None:
+def print_summary(
+    task_id: Optional[str] = None,
+    model_override: Optional[str] = None,
+    db_path: Optional[Path] = None,
+) -> None:
     """Pretty-print summary to terminal."""
-    conn = get_connection()
+    conn = get_connection(db_path)
     try:
         if model_override:
             rates = get_pricing(model_override, conn=conn)

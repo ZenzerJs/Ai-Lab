@@ -45,8 +45,8 @@ def build_data_payload() -> Dict[str, Any]:
         # Fetch all tasks and cumulative metrics
         cum = ledger.cumulative_savings(conn=conn)
 
-        # Fetch all raw runs
-        cursor.execute("SELECT * FROM runs ORDER BY id ASC")
+        # Fetch all raw runs (excluding synthetic MOCK fixtures from production export)
+        cursor.execute("SELECT * FROM runs WHERE task_id NOT LIKE 'MOCK%' ORDER BY id ASC")
         raw_runs = [dict(r) for r in cursor.fetchall()]
 
         for r in raw_runs:

@@ -37,10 +37,10 @@
 > [!IMPORTANT]
 > **Empirical Benchmark vs. Rate-Card Simulation Disclaimer:**
 > - **Empirical Benchmark (`gemini-3.8-flash`):** All 16 experimental runs across `EXP-001` through `EXP-004` (8 baseline, 8 ICM) were executed live against the `gemini-3.8-flash` endpoint using Antigravity's headless CLI event stream, measuring actual prompt tokens, prompt-cached tokens, completion tokens, turn counts, and wall-clock latencies.
-> - **Rate-Card Simulated Models (`claude-sonnet-4-6`, `claude-sonnet-5`, `claude-3-7-sonnet`, `gpt-4o`, `gemini-2.5-pro`):** These models were **not** executed over paid live API endpoints. Instead, the simulation engine in `scripts/ledger.py` and `dashboard/` takes the exact empirical token workload (input tokens, prompt-cached tokens, output tokens) captured during the live `gemini-3.8-flash` trials and re-prices it against the published official rate cards from Anthropic, OpenAI, and Google (`config/PRICING.json`). This simulates the theoretical dollar economics and prompt-caching savings of the identical workload across higher-cost foundation models without making paid live API calls to those specific endpoints.
+> - **Rate-Card Simulated Models (`claude-sonnet-4-6`, `claude-sonnet-5`, `claude-3-7-sonnet`, `gpt-4o`, `gemini-2.5-pro`, `gemini-2.5-flash`):** These models were **not** executed over paid live API endpoints. Instead, the simulation engine in `scripts/ledger.py` and `dashboard/` takes the exact empirical token workload (input tokens, prompt-cached tokens, output tokens) captured during the live `gemini-3.8-flash` trials and re-prices it against the published official rate cards from Anthropic, OpenAI, and Google (`config/PRICING.json`). This simulates the theoretical dollar economics and prompt-caching savings of the identical workload across higher-cost foundation models without making paid live API calls to those specific endpoints.
 
 > [!NOTE]
-> **Status:** fully bootstrapped, empirical trials complete, and smoke-verified. The measurement ledger contains **16 empirical runs across 4 benchmark tasks** on `gemini-3.8-flash`, with dynamic rate-card simulations for `gemini-2.5-pro`, `gpt-4o`, `claude-3-7-sonnet`, `claude-sonnet-4-6`, and `claude-sonnet-5`.
+> **Status:** fully bootstrapped, empirical trials complete, and smoke-verified. The measurement ledger contains **16 empirical runs across 4 benchmark tasks** on `gemini-3.8-flash`, with dynamic rate-card simulations for `gemini-2.5-pro`, `gemini-2.5-flash`, `gpt-4o`, `claude-3-7-sonnet`, `claude-sonnet-4-6`, and `claude-sonnet-5`.
 
 ---
 
@@ -249,6 +249,7 @@ The table below shows how the **same measured token workload** (447k baseline to
 
 | Model | Rate Card (In / Cache / Out) | Baseline Spend | ICM Spend | Net Savings ($) | Cost Reduction | Projected Savings @ 100M Tokens | Enterprise Savings @ 1B Tokens |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| **`gemini-2.5-flash`** | $0.075 / $0.0187 / $0.30 | $0.0367 | $0.0173 | **+$0.0194** | 52.8% | +$4.30 | +$43.01 |
 | **`gemini-3.8-flash`** | $0.075 / $0.0187 / $0.30 | $0.0367 | $0.0173 | **+$0.0194** | 52.8% | +$4.30 | +$43.01 |
 | **`gemini-2.5-pro`** | $1.250 / $0.3125 / $5.00 | $0.6118 | $0.2886 | **+$0.3232** | 52.8% | +$71.68 | +$716.85 |
 | **`gpt-4o`** | $2.500 / $1.2500 / $10.00 | $1.2359 | $0.7905 | **+$0.4454** | 36.0% | +$98.02 | +$980.24 |
@@ -258,6 +259,9 @@ The table below shows how the **same measured token workload** (447k baseline to
 
 ```text
 Measured Benchmark Spend (Baseline vs. ICM Pipeline):
+
+gemini-2.5-flash  [$0.0367] ■■■■■
+                  [$0.0173] ■■ (-52.8%)
 
 gemini-3.8-flash  [$0.0367] ■■■■■
                   [$0.0173] ■■ (-52.8%)
@@ -423,13 +427,13 @@ python dashboard/build_data.py
 ## 7. Verification Ledger
 
 <details open>
-<summary><strong>Expand all 18 verified tests: 14 smoke & simulation tests and 4 empirical trials</strong></summary>
+<summary><strong>Expand all 19 verified tests: 15 smoke & simulation tests and 4 empirical trials</strong></summary>
 
 | Test | Command | Exit | Result |
 |---|---|:---:|---|
 | Log sanitizer (success) | `filter_output.py -- python -c "print('ok')"` | `0` | 1-line summary |
 | Log sanitizer (failure) | `filter_output.py -- python -c "...; sys.exit(1)"` | `1` | Isolated trace |
-| AST extraction | `repo_map.py --target scripts/_smoke_sample.py` | `0` | 312 tokens ≤ 1,800 |
+| AST extraction | `repo_map.py --target scripts/filter_output.py` | `0` | 283 tokens ≤ 1,800 |
 | OKF linter | `lint_frontmatter.py` | `0` | Schema, casing, and links valid |
 | MCP config | JSON + PATH validation | `0` | All servers resolvable |
 | A/B dry run | `run_experiment.py --task MOCK-001 --dry-run` | `0` | 6 fixture runs recorded |
@@ -443,13 +447,14 @@ python dashboard/build_data.py
 | Model spend cascade CLI | `ledger.py cascade` | `0` | Multi-model economics computed |
 | Rate-card simulation Sonnet 4.6 | `ledger.py summary --model claude-sonnet-4-6` | `0` | 61.6% savings ($1.516 vs $0.583) |
 | Rate-card simulation Sonnet 5 | `ledger.py summary --model claude-sonnet-5` | `0` | 61.6% savings ($1.011 vs $0.388) |
+| Rate-card simulation Claude 3.7 | `ledger.py summary --model claude-3-7-sonnet` | `0` | 61.6% savings ($1.516 vs $0.583) |
 | Dashboard export | `dashboard/build_data.py` | `0` | Static payload with cascade |
 | Frontend build | `npm --prefix dashboard run build` | `0` | 0 type errors, clean bundle |
 
 </details>
 
 > [!NOTE]
-> All empirical runs reported in the table above reflect **16 live benchmark runs** across tasks `EXP-001` through `EXP-004` on `gemini-3.8-flash`. All other model figures (`claude-sonnet-4-6`, `claude-sonnet-5`, `claude-3-7-sonnet`, `gpt-4o`, `gemini-2.5-pro`) are auditable rate-card simulations derived from this empirical token telemetry without making paid live calls to those specific endpoints.
+> All empirical runs reported in the table above reflect **16 live benchmark runs** across tasks `EXP-001` through `EXP-004` on `gemini-3.8-flash`. All other model figures (`claude-sonnet-4-6`, `claude-sonnet-5`, `claude-3-7-sonnet`, `gpt-4o`, `gemini-2.5-pro`, `gemini-2.5-flash`) are auditable rate-card simulations derived from this empirical token telemetry without making paid live calls to those specific endpoints.
 
 ---
 

@@ -243,6 +243,7 @@ def execute_dry_run(
     task_id: str,
     fixtures_path: Path,
     runs_per_arm: int,
+    db_path: Optional[Path] = None,
 ) -> List[int]:
     """
     Replay synthetic NDJSON event fixtures from mock_stream.ndjson
@@ -332,7 +333,7 @@ def execute_dry_run(
 
     recorded_run_ids = []
     print(f"[*] Parsing and storing {len(filtered_keys)} simulated run(s) for task '{task_id}' ({runs_per_arm} per arm)...")
-    ledger.clear_task_runs(task_id)
+    ledger.clear_task_runs(task_id, db_path=db_path)
 
     for key in filtered_keys:
         ev_lines = runs_events[key]
@@ -353,6 +354,7 @@ def execute_dry_run(
             total_tokens=u["total_tokens"],
             num_turns=parsed["num_turns"],
             duration_seconds=parsed["duration_seconds"],
+            db_path=db_path,
         )
         recorded_run_ids.append(run_id)
         print(
@@ -477,8 +479,14 @@ def main():
         default="antigravity",
         help="Name or path of Antigravity CLI executable (default: antigravity)",
     )
+    parser.add_argument(
+        "--db",
+        default=None,
+        help="Custom path to SQLite database (default: data/usage.db)",
+    )
 
     args = parser.parse_args()
+    db_path = Path(args.db) if args.db else None
 
     # Resolve task definition file
     task_arg = args.task
@@ -514,7 +522,7 @@ def main():
 
     # Ensure DB and pricing are ready
     try:
-        ledger.get_pricing(task["model"])
+        ledger.get_pricing(task["model"], db_path=db_path)
     except (ValueError, FileNotFoundError) as exc:
         sys.stderr.write(f"✗ Pricing Configuration Error: {exc}\n")
         sys.exit(1)
@@ -532,6 +540,7 @@ def main():
             task_id=task_id,
             fixtures_path=Path(args.fixtures),
             runs_per_arm=runs_per_arm,
+            db_path=db_path,
         )
     else:
         # Live execution mode
@@ -564,6 +573,7 @@ def main():
                 total_tokens=u["total_tokens"],
                 num_turns=res["parsed"]["num_turns"],
                 duration_seconds=res["parsed"]["duration_seconds"],
+                db_path=db_path,
             )
 
         # ICM Arm Runs
@@ -585,10 +595,11 @@ def main():
                 total_tokens=u["total_tokens"],
                 num_turns=res["parsed"]["num_turns"],
                 duration_seconds=res["parsed"]["duration_seconds"],
+                db_path=db_path,
             )
 
     print("\n✓ Experiment completed. Ledger updated successfully.\n")
-    ledger.print_summary(task_id)
+    ledger.print_summary(task_id, db_path=db_path)
 
 
 if __name__ == "__main__":
