@@ -1,0 +1,52 @@
+name: CI & Governance Checks
+
+on:
+  push:
+    branches: [main, chore/agentic-scaffold]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify-stack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Run OKF v0.2 Frontmatter Linter
+        run: python scripts/lint_frontmatter.py
+
+      - name: Smoke-Test Filter Output Script
+        run: |
+          python scripts/filter_output.py -- python -c "print('test passing')"
+          python scripts/filter_output.py -- python -c "import sys; sys.stderr.write('err\n'); sys.exit(1)" || true
+
+      - name: Test Dry-Run A/B Benchmark & Ledger
+        run: |
+          python scripts/run_experiment.py --task MOCK-001 --dry-run
+          python scripts/ledger.py summary MOCK-001
+
+      - name: Build Dashboard Data & Compile Vite App
+        run: |
+          python dashboard/build_data.py
+          cd dashboard
+          npm ci
+          npm run build

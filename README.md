@@ -1,4 +1,4 @@
-﻿# Antigravity AI-Lab
+# Antigravity AI-Lab
 
 > **Deterministic Autonomous Agent Engineering: Interpretable Context Methodology (ICM), Google Cloud Open Knowledge Format (OKF v0.2), AST Code Navigation, and an Empirical Token-Savings Measurement System.**
 
@@ -8,7 +8,23 @@
 [![Vite](https://img.shields.io/badge/Vite-5.4+-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.4+-38B2AC?style=flat-square&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
 [![OKF](https://img.shields.io/badge/Spec-OKF_v0.2-4285F4?style=flat-square)](https://github.com/GoogleCloudPlatform/open-knowledge-format)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
+
+---
+
+## Current Status & Benchmark Telemetry
+
+> **Notice:** The current SQLite ledger and dashboard visualization display **synthetic fixture data (`MOCK-001`)** generated during bootstrap to smoke-test parser mechanics without incurring API costs. All reported savings (e.g., 51.25% cost reduction) are synthetic baselines.
+>
+> **Live Benchmark Status:** The pre-registered `EXP-001` trial against `gemini-3.8-flash` is currently in progress. Live empirical data will replace mock fixtures upon task completion.
+
+| Milestone | Status | Details |
+| :--- | :--- | :--- |
+| **Scaffolding & Directives** | Verified | ICM Stage Contracts & OKF v0.2 Knowledge Graph |
+| **Token Control Scripts** | Verified | AST symbol extraction (`repo_map.py`), CLI log sanitization |
+| **Measurement Harness** | Verified | Headless A/B runner (`run_experiment.py`) & SQLite ledger |
+| **Local Dashboard** | Active | Vite + React + Recharts app (`localhost:5173`) |
+| **First Live Trial (`EXP-001`)** | Pre-Registered | Headless comparison running 2 arms x 2 runs |
 
 ---
 

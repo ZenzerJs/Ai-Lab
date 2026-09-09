@@ -16,3 +16,9 @@ Thumbs.db
 .coverage
 htmlcov/
 dist/
+
+# Runtime Data & Dashboard Exports
+data/*.db
+data/*.db-journal
+data/*.db-wal
+dashboard/public/data.json
