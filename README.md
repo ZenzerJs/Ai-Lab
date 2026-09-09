@@ -28,14 +28,19 @@
 | **Measurement Harness** | Verified | Headless A/B runner (`run_experiment.py`) and SQLite ledger |
 | **Local Dashboard** | Active | Vite, React, and Recharts app with Model Rate Card Simulator (`localhost:5173`) · [**Live on GitHub Pages →**](https://zenzerjs.github.io/Ai-Lab/) |
 | **Empirical Trials (`EXP-001–004`)** | Complete | 16 runs evaluated on `gemini-3.8-flash` with 52.82% measured savings |
-| **Model Spend Cascade Engine** | Active | Dynamic re-pricing across Flash, Pro, GPT-4o, and Claude 3.7 Sonnet |
+| **Model Spend Cascade Engine** | Active | Dynamic re-pricing across Flash, Pro, GPT-4o, Claude 3.7 Sonnet, Claude Sonnet 4.6, and Claude Sonnet 5 |
 
 **The problem:** AI coding agents burn tokens re-reading whole repositories, hallucinate from stale context, and declare untested code "done."
 
 **The fix:** a governance layer that treats the filesystem as the agent's state machine. It uses bounded context per stage, AST navigation instead of file dumps, machine-verifiable completion gates, and an A/B harness that *measures* whether any of it actually saves tokens.
 
+> [!IMPORTANT]
+> **Empirical Benchmark vs. Rate-Card Simulation Disclaimer:**
+> - **Empirical Benchmark (`gemini-3.8-flash`):** All 16 experimental runs across `EXP-001` through `EXP-004` (8 baseline, 8 ICM) were executed live against the `gemini-3.8-flash` endpoint using Antigravity's headless CLI event stream, measuring actual prompt tokens, prompt-cached tokens, completion tokens, turn counts, and wall-clock latencies.
+> - **Rate-Card Simulated Models (`claude-sonnet-4-6`, `claude-sonnet-5`, `claude-3-7-sonnet`, `gpt-4o`, `gemini-2.5-pro`):** These models were **not** executed over paid live API endpoints. Instead, the simulation engine in `scripts/ledger.py` and `dashboard/` takes the exact empirical token workload (input tokens, prompt-cached tokens, output tokens) captured during the live `gemini-3.8-flash` trials and re-prices it against the published official rate cards from Anthropic, OpenAI, and Google (`config/PRICING.json`). This simulates the theoretical dollar economics and prompt-caching savings of the identical workload across higher-cost foundation models without making paid live API calls to those specific endpoints.
+
 > [!NOTE]
-> **Status:** fully bootstrapped, empirical trials complete, and smoke-verified. The measurement ledger contains **16 empirical runs across 4 benchmark tasks** on `gemini-3.8-flash`, with dynamic rate-card simulations for `gemini-2.5-pro`, `gpt-4o`, and `claude-3-7-sonnet`.
+> **Status:** fully bootstrapped, empirical trials complete, and smoke-verified. The measurement ledger contains **16 empirical runs across 4 benchmark tasks** on `gemini-3.8-flash`, with dynamic rate-card simulations for `gemini-2.5-pro`, `gpt-4o`, `claude-3-7-sonnet`, `claude-sonnet-4-6`, and `claude-sonnet-5`.
 
 ---
 
@@ -227,7 +232,7 @@ All rates live in `config/PRICING.json` with source URLs and fetch dates. They c
 
 ### 3.4 Dashboard Views & Simulation Controls
 
-1. **Model Rate Card Simulator:** Dynamically re-prices recorded token workloads across foundation models (`gemini-3.8-flash`, `gemini-2.5-pro`, `gpt-4o`, and `claude-3-7-sonnet`).
+1. **Model Rate Card Simulator:** Dynamically re-prices recorded token workloads across foundation models (`gemini-3.8-flash`, `gemini-2.5-pro`, `gemini-2.5-flash`, `gpt-4o`, `claude-3-7-sonnet`, `claude-sonnet-4-6`, and `claude-sonnet-5`).
 2. **Spend Cascade Visualizer:** Compares baseline and ICM economics across 1x, 10x, 100x, 100M, and 1B token scales.
 3. **Volume Scale Multiplier:** Projects measured cache savings across 1x, 10x, 100x, and 1M-token workloads.
 4. **Per-task cost comparison:** Grouped bars, min–max error bands, and sample tags ($n=X$).
@@ -272,6 +277,28 @@ claude-sonnet-4-6 [$1.5164] ■■■■■■■■■■■■■■■■■�
 
 Legend: Top Bar = Baseline (Unconstrained) | Bottom Bar = ICM Pipeline (Governed)
 ```
+
+#### Focus: Claude Sonnet 4.6 & Claude Sonnet 5 Simulated Economics
+
+Anthropic's prompt caching structure provides a **90% discount** on cache-read tokens ($0.30/M vs. $3.00/M input for Sonnet 4.6 / Sonnet 3.7, and $0.20/M vs. $2.00/M input for Sonnet 5). Because ICM structures context into byte-stable prefixes (increasing cache-read ratios from 4.8% to 390.5%), the steeper cache discount produces an even higher percentage cost reduction (**61.6%**) than on Google Flash tiers (**52.8%**):
+
+* **`claude-sonnet-4-6` ($3.00 / $0.30 / $15.00 per M tokens):**
+  - **Baseline Spend:** $1.5164 | **ICM Spend:** $0.5826
+  - **Net Savings:** **+$0.9338 (61.58% cost reduction)**
+  - **Normalized Rate per 1M Tokens:** Baseline $3.3904/M → ICM $1.3141/M (+$2.0763 saved per million tokens)
+  - **Scale Projections:** +$20.76 at 10M tokens · +$207.63 at 100M tokens · **+$2,076.25 at 1B tokens**
+  - **Simulation Method:** Re-prices empirical token telemetry from `EXP-001–004` (447k baseline vs. 443k ICM tokens) using Anthropic's published rates; no live calls to `claude-sonnet-4-6`.
+
+* **`claude-sonnet-5` ($2.00 / $0.20 / $10.00 per M tokens):**
+  - **Baseline Spend:** $1.0109 | **ICM Spend:** $0.3884
+  - **Net Savings:** **+$0.6225 (61.58% cost reduction)**
+  - **Normalized Rate per 1M Tokens:** Baseline $2.2603/M → ICM $0.8761/M (+$1.3842 saved per million tokens)
+  - **Scale Projections:** +$13.84 at 10M tokens · +$138.42 at 100M tokens · **+$1,384.17 at 1B tokens**
+  - **Simulation Method:** Re-prices empirical token telemetry from `EXP-001–004` using Anthropic's published rates; no live calls to `claude-sonnet-5`.
+
+> [!IMPORTANT]
+> **Methodology Reminder on Model Economics:**
+> Live empirical runs were conducted solely on `gemini-3.8-flash`. Claude Sonnet, GPT-4o, and Gemini Pro numbers represent deterministic rate-card simulations calculated by evaluating the identical token count distribution (fresh input, cached input, output) against respective provider pricing schedules. They demonstrate theoretical dollar impact without incurring live commercial API charges.
 
 > **Why the gap grows:** Premium models make repeated input and output more expensive [7](#8-references--pinned-specifications). Baseline agents may repeatedly read large files and carry noisy terminal output forward. The ICM pipeline reduces unnecessary context through stable prefixes, AST symbol filtering, and sanitized command output. Exact savings depend on the model, task, and cache behavior.
 
@@ -340,7 +367,8 @@ cd dashboard && npm run dev          # → http://localhost:5173
 
 # 5. Simulate the multi-model spend cascade in terminal
 python scripts/ledger.py cascade
-python scripts/ledger.py summary --model claude-3-7-sonnet
+python scripts/ledger.py summary --model claude-sonnet-4-6
+python scripts/ledger.py summary --model claude-sonnet-5
 ```
 
 **Run a live A/B benchmark** (requires an authenticated Antigravity CLI and consumes real quota):
@@ -395,7 +423,7 @@ python dashboard/build_data.py
 ## 7. Verification Ledger
 
 <details open>
-<summary><strong>Expand all 16 verified tests: 12 smoke tests and 4 empirical trials</strong></summary>
+<summary><strong>Expand all 18 verified tests: 14 smoke & simulation tests and 4 empirical trials</strong></summary>
 
 | Test | Command | Exit | Result |
 |---|---|:---:|---|
@@ -413,13 +441,15 @@ python dashboard/build_data.py
 | Empirical Trial `EXP-004` | `run_experiment.py --task EXP-004` | `0` | 4 runs, 52.7% savings |
 | Ledger summary | `ledger.py summary` | `0` | Cumulative metrics computed |
 | Model spend cascade CLI | `ledger.py cascade` | `0` | Multi-model economics computed |
+| Rate-card simulation Sonnet 4.6 | `ledger.py summary --model claude-sonnet-4-6` | `0` | 61.6% savings ($1.516 vs $0.583) |
+| Rate-card simulation Sonnet 5 | `ledger.py summary --model claude-sonnet-5` | `0` | 61.6% savings ($1.011 vs $0.388) |
 | Dashboard export | `dashboard/build_data.py` | `0` | Static payload with cascade |
 | Frontend build | `npm --prefix dashboard run build` | `0` | 0 type errors, clean bundle |
 
 </details>
 
 > [!NOTE]
-> All economics reported in the table above and displayed in the dashboard reflect **16 empirical benchmark runs** across tasks `EXP-001` through `EXP-004` on `gemini-3.8-flash`.
+> All empirical runs reported in the table above reflect **16 live benchmark runs** across tasks `EXP-001` through `EXP-004` on `gemini-3.8-flash`. All other model figures (`claude-sonnet-4-6`, `claude-sonnet-5`, `claude-3-7-sonnet`, `gpt-4o`, `gemini-2.5-pro`) are auditable rate-card simulations derived from this empirical token telemetry without making paid live calls to those specific endpoints.
 
 ---
 

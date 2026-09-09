@@ -56,7 +56,7 @@ export const SpendCascadeComparison: React.FC<SpendCascadeComparisonProps> = ({
             </Badge>
           </div>
           <CardDescription className="text-xs text-muted-foreground mt-1">
-            Re-prices identical benchmark tokens to reveal how prompt caching and AST isolation prevent exponential cost runaways on higher-tier models.
+            Rate-card simulation: re-prices empirical token telemetry (EXP-001–004 on gemini-3.8-flash) across published rate cards without live commercial API calls.
           </CardDescription>
         </div>
 
@@ -212,7 +212,7 @@ export const SpendCascadeComparison: React.FC<SpendCascadeComparisonProps> = ({
           <div className="space-y-1">
             <span className="font-semibold text-white">Why the Savings Cascade:</span>
             <p className="text-gray-400 text-[11px] leading-relaxed">
-              Premium models (e.g., Claude 3.7 Sonnet at $15/M output, $3/M input) heavily penalize unconstrained agents that repeatedly dump whole repositories and multi-megabyte log files into context.
+              Premium models (e.g., Claude Sonnet 4.6, Sonnet 5, and Claude 3.7 Sonnet) heavily penalize unconstrained agents that repeatedly dump whole repositories and multi-megabyte log files into context.
               By combining <strong className="text-emerald-300">AST symbol filtering</strong> with <strong className="text-primary">byte-stable prompt caching</strong> (90% cache read discount), ICM compounds monetary savings from cents on lightweight flash models to <strong className="text-white">thousands of dollars</strong> on enterprise-tier models.
             </p>
           </div>

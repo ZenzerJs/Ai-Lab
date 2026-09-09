@@ -64,16 +64,17 @@ export const App: React.FC = () => {
       <Header data={activeData} loading={loading} onRefresh={() => fetchData()} />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 flex flex-col gap-6">
-        {/* Banner: Operational Notice */}
+        {/* Banner: Operational Notice & Model Disclaimer */}
         <Alert variant="info">
           <Info className="size-5 text-primary shrink-0 mt-0.5" />
           <div className="flex flex-col gap-1">
             <AlertTitle className="text-white font-semibold">
-              Empirical Benchmark Telemetry Active:
+              Empirical Benchmark Telemetry vs. Rate-Card Simulations:
             </AlertTitle>
-            <AlertDescription className="text-gray-300">
-              Calibrated across synthetic fixtures and pre-registered <code className="text-primary font-mono font-medium">gemini-3.8-flash</code> benchmark tasks.
-              Select any foundation model rate card below to observe spend cascading, or adjust the volume scale multiplier across 1M, 10M, or 100M tokens.
+            <AlertDescription className="text-gray-300 text-xs leading-relaxed">
+              <strong className="text-white">Empirical Benchmark:</strong> 16 runs evaluated live against <code className="text-primary font-mono font-medium">gemini-3.8-flash</code> via Antigravity CLI event streams (52.82% cost reduction, cache ratio 4.8% → 390.5%).
+              <br />
+              <strong className="text-white">Rate-Card Simulations:</strong> Models such as <code className="text-emerald-300 font-mono">claude-sonnet-4-6</code>, <code className="text-emerald-300 font-mono">claude-sonnet-5</code>, <code className="text-emerald-300 font-mono">claude-3-7-sonnet</code>, <code className="text-emerald-300 font-mono">gpt-4o</code>, and <code className="text-emerald-300 font-mono">gemini-2.5-pro</code> dynamically re-price this exact measured token workload across published rate cards without incurring paid live API calls to those specific endpoints.
             </AlertDescription>
           </div>
         </Alert>
