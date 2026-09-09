@@ -21,4 +21,4 @@ Welcome to the **Antigravity Knowledge Bundle**. This catalog indexes core archi
 
 ## Visualization
 
-* [Knowledge Graph Visualizer](viz.html) - Interactive Cytoscape.js visualizer exploring knowledge bundle concept relationships.
+* [Knowledge Graph Visualizer](/viz.html) - Interactive Cytoscape.js visualizer exploring knowledge bundle concept relationships.

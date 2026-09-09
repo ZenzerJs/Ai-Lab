@@ -140,13 +140,23 @@ def extract_symbols_from_file(file_path: Path) -> Optional[str]:
                 for sig_l in range(node.start_point[0], sig_end):
                     lois.add(sig_l)
 
-    # Top-of-file module docstring detection
-    if tc.lines and tc.lines[0].strip().startswith(('"""', "'''")):
-        in_doc = True
-        for i, l in enumerate(tc.lines):
+    # Top-of-file module docstring detection (skips shebang, encoding comments, blank lines)
+    for i, line in enumerate(tc.lines):
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        if s.startswith(('"""', "'''", 'r"""', "r'''", 'u"""', "u'''")):
+            delimiter = s[:3] if s.startswith(('"""', "'''")) else s[1:4]
+            rest = s[len(delimiter):]
             lois.add(i)
-            if i > 0 and ('"""' in l or "'''" in l):
+            if delimiter in rest:
                 break
+            for j in range(i + 1, len(tc.lines)):
+                lois.add(j)
+                if delimiter in tc.lines[j]:
+                    break
+            break
+        break
 
     # Fallback to regex if AST didn't capture symbols
     if not lois:
@@ -188,75 +198,119 @@ def collect_target_files(target_path: Path, root_path: Path) -> List[Path]:
     return collected
 
 
-def render_map(file_blocks: List[Tuple[str, str]], prune_ratio: float = 1.0) -> str:
-    """
-    Render repo map given a list of (relative_path, symbol_content) tuples
-    and an inclusion pruning ratio [0.0, 1.0].
-    """
-    total_blocks = len(file_blocks)
-    if total_blocks == 0:
-        return ""
-
-    num_to_include = max(1, int(round(total_blocks * prune_ratio)))
-    included_blocks = file_blocks[:num_to_include]
-
+def format_map_candidate(
+    file_blocks: List[Tuple[str, str]],
+    num_full_files: int,
+    partial_lines: Optional[int],
+    max_tokens: int,
+    enc,
+) -> Tuple[str, int]:
+    """Format full repository map candidate with telemetry header and return (rendered_text, token_count)."""
+    total_files = len(file_blocks)
     chunks = []
-    for rel_path, content in included_blocks:
-        chunks.append(f"### {rel_path}\n{content}")
+    included_files_count = num_full_files
 
-    rendered = "\n\n".join(chunks)
-    if num_to_include < total_blocks:
-        rendered += (
-            f"\n\n# [Repo map pruned via binary search: {num_to_include}/{total_blocks} files "
+    for i in range(num_full_files):
+        path, content = file_blocks[i]
+        chunks.append(f"### {path}\n{content}")
+
+    prune_msg = ""
+    if partial_lines is not None and num_full_files < total_files:
+        path, content = file_blocks[num_full_files]
+        lines = content.splitlines()
+        if partial_lines > 0:
+            sub = "\n".join(lines[:partial_lines])
+            chunks.append(f"### {path}\n{sub}")
+            included_files_count += 1
+            if num_full_files > 0:
+                prune_msg = (
+                    f"\n\n# [Repo map pruned via binary search: {num_full_files} full files + "
+                    f"first {partial_lines}/{len(lines)} lines of {path} included]"
+                )
+            else:
+                prune_msg = (
+                    f"\n\n# [Repo map pruned via binary search: "
+                    f"first {partial_lines}/{len(lines)} lines included]"
+                )
+    elif num_full_files < total_files:
+        prune_msg = (
+            f"\n\n# [Repo map pruned via binary search: {num_full_files}/{total_files} files "
             f"included to enforce token budget]"
         )
-    return rendered
+
+    body = "\n\n".join(chunks)
+    if prune_msg:
+        body += prune_msg
+
+    # Telemetry header: compute exact token count with header included in total
+    header_prefix = f"# Repository Map (Symbols: {total_files} files | Tokens: "
+    header_suffix = f" / {max_tokens})\n"
+    candidate_tokens = count_tokens(header_prefix + f"0000{header_suffix}" + body, enc)
+    candidate_header = f"# Repository Map (Symbols: {total_files} files | Tokens: {candidate_tokens} / {max_tokens})\n"
+    full_output = candidate_header + body
+    exact_tokens = count_tokens(full_output, enc)
+    if exact_tokens != candidate_tokens:
+        candidate_header = f"# Repository Map (Symbols: {total_files} files | Tokens: {exact_tokens} / {max_tokens})\n"
+        full_output = candidate_header + body
+        exact_tokens = count_tokens(full_output, enc)
+
+    return full_output, exact_tokens
 
 
 def binary_search_prune(file_blocks: List[Tuple[str, str]], max_tokens: int, enc) -> str:
     """
-    Binary search over inclusion ratios to find the maximum symbol payload
-    that fits strictly within max_tokens.
+    Binary search over file blocks and lines to maximize symbol payload
+    while strictly guaranteeing the total emitted output remains <= max_tokens.
     """
-    full_text = render_map(file_blocks, prune_ratio=1.0)
-    if count_tokens(full_text, enc) <= max_tokens:
+    total_files = len(file_blocks)
+    if total_files == 0:
+        return "# Repository Map: No AST symbols detected."
+
+    # 1. Check if complete repo map fits
+    full_text, tokens = format_map_candidate(file_blocks, total_files, None, max_tokens, enc)
+    if tokens <= max_tokens:
         return full_text
 
-    low = 1
-    high = len(file_blocks)
+    # 2. Binary search over number of full files [0, total_files]
+    low = 0
+    high = total_files
+    best_full_files = 0
     best_text = ""
 
     while low <= high:
         mid = (low + high) // 2
-        ratio = mid / len(file_blocks)
-        candidate = render_map(file_blocks, prune_ratio=ratio)
-        tokens = count_tokens(candidate, enc)
-
-        if tokens <= max_tokens:
-            best_text = candidate
-            low = mid + 1  # Try including more
+        cand_text, cand_tokens = format_map_candidate(file_blocks, mid, None, max_tokens, enc)
+        if cand_tokens <= max_tokens:
+            best_full_files = mid
+            best_text = cand_text
+            low = mid + 1
         else:
-            high = mid - 1  # Reduce inclusion
+            high = mid - 1
 
-    if not best_text and file_blocks:
-        # Edge case: Even 1 file exceeds max_tokens. Binary search lines of first file.
-        first_path, first_content = file_blocks[0]
-        lines = first_content.splitlines()
-        l_low, l_high = 1, len(lines)
-        best_lines = ""
+    # 3. If there is a boundary file, binary search lines of the next file
+    if best_full_files < total_files:
+        next_path, next_content = file_blocks[best_full_files]
+        next_lines = next_content.splitlines()
+        l_low = 1
+        l_high = len(next_lines)
         while l_low <= l_high:
             l_mid = (l_low + l_high) // 2
-            sub_content = "\n".join(lines[:l_mid])
-            candidate = (
-                f"### {first_path}\n{sub_content}\n\n# [Repo map pruned via binary search: "
-                f"first {l_mid}/{len(lines)} lines included]"
+            cand_text, cand_tokens = format_map_candidate(
+                file_blocks, best_full_files, l_mid, max_tokens, enc
             )
-            if count_tokens(candidate, enc) <= max_tokens:
-                best_lines = candidate
+            if cand_tokens <= max_tokens:
+                best_text = cand_text
                 l_low = l_mid + 1
             else:
                 l_high = l_mid - 1
-        return best_lines or candidate[:500]
+
+    # 4. Fallback for extremely tight budgets: ensure <= max_tokens
+    if not best_text or count_tokens(best_text, enc) > max_tokens:
+        minimal_header = f"# Repository Map (Symbols: {total_files} files | Tokens: {max_tokens} / {max_tokens})\n"
+        best_text = minimal_header
+        encoded = enc.encode(best_text)
+        if len(encoded) > max_tokens:
+            best_text = enc.decode(encoded[:max_tokens])
 
     return best_text
 
@@ -310,13 +364,9 @@ def main():
         print("# Repository Map: No AST symbols detected.")
         sys.exit(0)
 
-    # Perform binary-search pruning against max_tokens
-    final_map = binary_search_prune(file_blocks, max_tokens, enc)
-    token_count = count_tokens(final_map, enc)
-
-    # Header with token telemetry
-    print(f"# Repository Map (Symbols: {len(file_blocks)} files | Tokens: {token_count} / {max_tokens})")
-    print(final_map)
+    # Perform binary-search pruning against max_tokens (strictly bounded)
+    final_output = binary_search_prune(file_blocks, max_tokens, enc)
+    print(final_output)
 
 
 if __name__ == "__main__":

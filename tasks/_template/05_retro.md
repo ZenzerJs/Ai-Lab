@@ -44,5 +44,5 @@
 - [ ] Retrospective observations documented.
 - [ ] Knowledge propagated to appropriate `docs/` concept documents.
 - [ ] Chronological entry appended to `docs/log.md`.
-- [ ] `docs/lint_frontmatter.py` re-run and confirmed clean.
+- [ ] `scripts/lint_frontmatter.py` re-run and confirmed clean.
 - [ ] Task marked as CLOSED.

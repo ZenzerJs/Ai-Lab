@@ -74,18 +74,37 @@ def check_casing_and_reserved(docs_dir: Path, errors: list):
 
 def check_bundle_links(file_path: Path, body: str, docs_dir: Path, errors: list):
     """Find and validate bundle-relative markdown links (/path/to/target.md)."""
-    # Match markdown links: [text](/path/to/file.md) or [text](/path/to/file.md#anchor)
-    pattern = re.compile(r'\[([^\]]+)\]\((/[^\)#\s]+)(?:#[^\)]*)?\)')
+    # Match markdown links: [text](target) or [text](target "title")
+    pattern = re.compile(r'\[([^\]]+)\]\(([^\)\s]+)(?:\s+"[^"]*")?\)')
+    rel_source = file_path.relative_to(docs_dir.parent)
+
     for match in pattern.finditer(body):
-        link_target = match.group(2)
-        # Target path relative to docs/
-        relative_target = link_target.lstrip("/")
-        resolved_path = docs_dir / relative_target
-        if not resolved_path.exists():
-            rel_source = file_path.relative_to(docs_dir.parent)
+        raw_target = match.group(2)
+        # Strip anchor fragment
+        link_target = raw_target.split("#")[0]
+        if not link_target or link_target.startswith(("#", "http://", "https://", "mailto:")):
+            continue
+
+        if not link_target.startswith("/"):
             errors.append(
-                f"Broken Link in '{rel_source}': bundle-relative link '{link_target}' does not exist on disk"
+                f"Link Format Error in '{rel_source}': link '{raw_target}' must be bundle-relative starting with '/' (e.g. '/{link_target}')"
             )
+            continue
+
+        relative_target = link_target.lstrip("/")
+        target_path = docs_dir / relative_target
+        if not target_path.exists():
+            errors.append(
+                f"Broken Link in '{rel_source}': bundle-relative link '{raw_target}' does not exist on disk"
+            )
+        else:
+            # Case sensitivity assertion across Windows and POSIX
+            resolved_real = target_path.resolve().as_posix()
+            expected_real = (docs_dir.resolve() / relative_target).as_posix()
+            if resolved_real != expected_real:
+                errors.append(
+                    f"Casing Error in '{rel_source}': link '{raw_target}' casing does not match disk file casing"
+                )
 
 
 def lint_docs(docs_dir: Path) -> list:

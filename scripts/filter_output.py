@@ -15,6 +15,7 @@ Behavior:
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 
@@ -94,13 +95,13 @@ def extract_failure_context(stdout: str, stderr: str) -> str:
             continue
 
         # Direct assertions, errors, and file/line references
-        if re.search(r"(?:AssertionError|Error|Exception|FAILED|FAILURE|fatal):", line, re.IGNORECASE):
+        if re.search(r"(?:AssertionError|Error|Exception|FAILED|FAILURE|fatal):?", line, re.IGNORECASE):
             failure_blocks.append(line)
         elif re.search(r'File ".*", line \d+', line):
             failure_blocks.append(line)
         elif line.strip().startswith("E   ") or line.strip().startswith(">   "):
             failure_blocks.append(line)
-        elif "fatal error" in line.lower() or "error:" in line.lower():
+        elif "fatal error" in line.lower() or "error:" in line.lower() or "err!" in line.lower():
             failure_blocks.append(line)
 
     if traceback_lines:
@@ -137,9 +138,12 @@ def main():
 
     cmd_display = " ".join(cmd_args)
 
+    resolved_cmd = shutil.which(cmd_args[0])
+    exec_args = [resolved_cmd] + cmd_args[1:] if resolved_cmd else cmd_args
+
     try:
         proc = subprocess.run(
-            cmd_args,
+            exec_args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
