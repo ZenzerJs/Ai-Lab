@@ -1,5 +1,7 @@
-﻿import React from 'react';
+import React from 'react';
 import { Layers, TrendingUp } from 'lucide-react';
+import { Badge } from './ui/badge';
+import { ToggleGroup, ToggleGroupItem } from './ui/toggle-group';
 
 export type ScaleMode = '1x' | '1m' | '10m' | '100m';
 
@@ -23,43 +25,40 @@ export const ScaleSelector: React.FC<ScaleSelectorProps> = ({
 
   return (
     <div className="bg-surface border border-surface-border rounded-xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm">
-      <div className="flex items-center gap-2.5">
-        <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/30 flex items-center justify-center shrink-0">
-          <TrendingUp className="w-4 h-4 text-primary" />
+      <div className="flex items-center gap-3">
+        <div className="size-8 rounded-lg bg-primary/10 border border-primary/30 flex items-center justify-center shrink-0">
+          <TrendingUp className="size-4 text-primary" />
         </div>
-        <div>
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-white">Token Volume Scale Multiplier</span>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-surface-border text-gray-300">
+            <Badge variant="secondary" className="text-[10px] py-0 px-1.5 font-normal">
               n={totalRuns} calibrated runs
-            </span>
+            </Badge>
           </div>
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-muted-foreground">
             Project measured cache economics across standard token volume scales.
           </p>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5 bg-background/80 p-1 rounded-lg border border-surface-border self-stretch md:self-auto justify-start">
-        {options.map((opt) => {
-          const active = scaleMode === opt.id;
-          return (
-            <button
-              key={opt.id}
-              onClick={() => onScaleChange(opt.id)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium font-mono transition-all flex items-center gap-1.5 ${
-                active
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'text-gray-400 hover:text-white hover:bg-surface-hover'
-              }`}
-              title={opt.desc}
-            >
-              <Layers className="w-3 h-3 opacity-70" />
-              <span>{opt.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      <ToggleGroup
+        value={scaleMode}
+        onValueChange={(val) => onScaleChange(val as ScaleMode)}
+        aria-label="Token volume scale multiplier selector"
+        className="self-stretch md:self-auto justify-start"
+      >
+        {options.map((opt) => (
+          <ToggleGroupItem
+            key={opt.id}
+            value={opt.id}
+            title={opt.desc}
+          >
+            <Layers className="size-3 opacity-70" />
+            <span>{opt.label}</span>
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
     </div>
   );
 };

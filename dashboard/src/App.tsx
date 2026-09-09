@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from './components/Header';
 import { ScaleSelector, ScaleMode } from './components/ScaleSelector';
 import { PerTaskComparison } from './components/PerTaskComparison';
@@ -7,7 +7,12 @@ import { CumulativeSavings } from './components/CumulativeSavings';
 import { TurnsDuration } from './components/TurnsDuration';
 import { RawLedgerTable } from './components/RawLedgerTable';
 import { DashboardPayload } from './types';
-import { Info, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Info, AlertTriangle, ShieldCheck, RefreshCw, Terminal, PlayCircle } from 'lucide-react';
+import { Alert, AlertTitle, AlertDescription } from './components/ui/alert';
+import { Skeleton } from './components/ui/skeleton';
+import { Button } from './components/ui/button';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './components/ui/card';
+import { Empty, EmptyIcon, EmptyTitle, EmptyDescription, EmptyActions } from './components/ui/empty';
 
 export const App: React.FC = () => {
   const [data, setData] = useState<DashboardPayload | null>(null);
@@ -15,59 +20,137 @@ export const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [scaleMode, setScaleMode] = useState<ScaleMode>('1x');
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/data.json', { cache: 'no-store' });
+      const response = await fetch('/data.json', {
+        cache: 'no-store',
+        signal,
+      });
       if (!response.ok) {
         throw new Error(`Failed to load data.json: HTTP ${response.status}`);
       }
       const json: DashboardPayload = await response.json();
       setData(json);
-    } catch (err: any) {
-      setError(err.message || 'Error fetching dashboard data');
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
+      const message = err instanceof Error ? err.message : 'Error fetching dashboard data';
+      setError(message);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    const controller = new AbortController();
+    fetchData(controller.signal);
+    return () => controller.abort();
+  }, [fetchData]);
 
   return (
     <div className="min-h-screen bg-background text-gray-100 flex flex-col font-sans">
-      <Header data={data} loading={loading} onRefresh={fetchData} />
+      <Header data={data} loading={loading} onRefresh={() => fetchData()} />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 flex flex-col gap-6">
         {/* Banner: Operational Notice */}
-        <div className="bg-primary/10 border border-primary/30 rounded-xl p-4 flex items-start gap-3 text-xs">
-          <Info className="w-5 h-5 text-primary shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <span className="font-semibold text-white">Empirical Benchmark Telemetry Active:</span>
-            <p className="text-gray-300">
+        <Alert variant="info">
+          <Info className="size-5 text-primary shrink-0 mt-0.5" />
+          <div className="flex flex-col gap-1">
+            <AlertTitle className="text-white font-semibold">
+              Empirical Benchmark Telemetry Active:
+            </AlertTitle>
+            <AlertDescription className="text-gray-300">
               Calibrated across synthetic fixtures and pre-registered <code className="text-primary font-mono font-medium">gemini-3.8-flash</code> benchmark tasks.
               Toggle the Volume Multiplier below to project measured cache savings across 1M, 10M, or 100M token scale.
-            </p>
+            </AlertDescription>
           </div>
-        </div>
+        </Alert>
 
         {error && (
-          <div className="bg-red-500/15 border border-red-500/40 rounded-xl p-4 text-xs text-red-300 flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-red-400" />
-            <span>{error}</span>
-          </div>
+          <Alert variant="destructive" className="items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="size-4 text-red-400 shrink-0" />
+              <span>{error}</span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fetchData()}
+              className="text-xs border-red-500/40 text-red-300 hover:bg-red-500/20 gap-1.5"
+            >
+              <RefreshCw className="size-3" /> Retry
+            </Button>
+          </Alert>
         )}
 
         {loading && !data && (
-          <div className="py-24 text-center space-y-3">
-            <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
-            <p className="text-xs text-gray-400 font-mono">Loading usage ledger data...</p>
+          <div className="flex flex-col gap-6">
+            <div className="rounded-xl border border-surface-border p-5 bg-surface flex flex-col gap-3">
+              <Skeleton className="h-6 w-1/3" />
+              <Skeleton className="h-4 w-1/2" />
+            </div>
+            <div className="rounded-xl border border-surface-border p-5 bg-surface flex flex-col gap-4">
+              <Skeleton className="h-7 w-1/4" />
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Skeleton className="h-20" />
+                <Skeleton className="h-20" />
+                <Skeleton className="h-20" />
+                <Skeleton className="h-20" />
+              </div>
+              <Skeleton className="h-60 w-full" />
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Skeleton className="h-80 rounded-xl" />
+              <Skeleton className="h-80 rounded-xl" />
+            </div>
           </div>
         )}
 
-        {data && (
+        {data && !data.has_data && (
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center gap-2">
+                <PlayCircle className="size-5 text-primary" />
+                <CardTitle>Welcome to Antigravity AI-Lab Benchmark Dashboard</CardTitle>
+              </div>
+              <CardDescription>
+                No benchmark runs have been recorded in the local ledger database yet.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Empty className="py-12">
+                <EmptyIcon>
+                  <Terminal className="size-8 text-primary" />
+                </EmptyIcon>
+                <EmptyTitle>Ready to execute your first benchmark</EmptyTitle>
+                <EmptyDescription>
+                  Generate synthetic dry-run data or execute live model evaluations to populate token economics and cache ratio curves:
+                </EmptyDescription>
+                <div className="mt-4 p-3 bg-background rounded-lg border border-surface-border text-left font-mono text-xs text-gray-300 space-y-1 w-full max-w-lg">
+                  <div className="text-gray-500"># 1. Populate synthetic fixtures (zero model quota):</div>
+                  <div className="text-emerald-400">python scripts/run_experiment.py --task MOCK-001 --dry-run</div>
+                  <div className="text-gray-500 pt-1"># 2. Export database to dashboard:</div>
+                  <div className="text-emerald-400">python dashboard/build_data.py</div>
+                </div>
+                <EmptyActions>
+                  <Button
+                    onClick={() => fetchData()}
+                    variant="default"
+                    size="sm"
+                    className="gap-2"
+                  >
+                    <RefreshCw className="size-3.5" /> Check for New Runs
+                  </Button>
+                </EmptyActions>
+              </Empty>
+            </CardContent>
+          </Card>
+        )}
+
+        {data && data.has_data && (
           <>
             {/* Volume Scale Multiplier Control */}
             <ScaleSelector
@@ -99,9 +182,9 @@ export const App: React.FC = () => {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-surface-border bg-surface/50 py-4 px-6 mt-12 text-xs text-gray-500 text-center flex flex-col sm:flex-row justify-between items-center max-w-7xl mx-auto w-full gap-2 font-mono">
+      <footer className="border-t border-surface-border bg-surface/50 py-4 px-6 mt-12 text-xs text-muted-foreground text-center flex flex-col sm:flex-row justify-between items-center max-w-7xl mx-auto w-full gap-2 font-mono">
         <div className="flex items-center gap-2">
-          <ShieldCheck className="w-4 h-4 text-emerald-400" />
+          <ShieldCheck className="size-4 text-emerald-400" />
           <span>Antigravity Interpretable Context Methodology (ICM) Measurement Layer</span>
         </div>
         <div>
