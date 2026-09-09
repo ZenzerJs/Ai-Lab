@@ -10,6 +10,7 @@ Welcome to the **Antigravity Knowledge Bundle**. This catalog indexes core archi
 
 * [Architecture Overview](/concepts/architecture-overview.md) - System topology, module boundaries, MCP layer, and execution rules.
 * [Coding Standards](/concepts/coding-standards.md) - Code conventions, typing invariants, error boundaries, and diff protocols.
+* [Measurement Layer](/concepts/measurement-layer.md) - A/B experiment harness, fairness invariants, and cache-aware pricing economics.
 
 ## Schemas & Contracts
 

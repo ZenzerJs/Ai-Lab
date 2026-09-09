@@ -16,9 +16,13 @@
         "./tasks",
         "./src",
         "./docs",
-        "./scripts"
+        "./scripts",
+        "./data",
+        "./experiments",
+        "./dashboard",
+        "./config"
       ],
-      "description": "Sandboxed multi-root file access restricted to ./tasks, ./src, ./docs, and ./scripts"
+      "description": "Sandboxed multi-root file access restricted to ./tasks, ./src, ./docs, ./scripts, ./data, ./experiments, ./dashboard, and ./config"
     },
     "sequential-thinking": {
       "command": "npx",
