@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json.schemastore.org/mcp-config.json",
+  "mcpServers": {
+    "git": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-git"
+      ],
+      "description": "Structured Git primitives (git_status, git_diff_unstaged, git_log)"
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "./tasks",
+        "./src",
+        "./docs",
+        "./scripts"
+      ],
+      "description": "Sandboxed multi-root file access restricted to ./tasks, ./src, ./docs, and ./scripts"
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "description": "Dynamic cognitive scratchpad constrained to max 10 steps during 02_plan stage",
+      "constraints": {
+        "max_steps": 10,
+        "active_stages": [
+          "02_plan"
+        ]
+      }
+    }
+  }
+}

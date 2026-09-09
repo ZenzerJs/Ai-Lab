@@ -1,0 +1,17 @@
+# Environments & dependencies
+.venv/
+venv/
+node_modules/
+__pycache__/
+*.pyc
+
+# IDEs & System
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Test & coverage
+.pytest_cache/
+.coverage
+htmlcov/
