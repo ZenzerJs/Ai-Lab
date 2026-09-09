@@ -32,7 +32,9 @@ export const App: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/data.json', {
+      const baseUrl = import.meta.env.BASE_URL || '/';
+      const dataUrl = `${baseUrl.replace(/\/+$/, '')}/data.json`;
+      const response = await fetch(dataUrl, {
         cache: 'no-store',
         signal,
       });

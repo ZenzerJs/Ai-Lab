@@ -157,7 +157,7 @@ export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs }) => {
 
           {/* Download JSON */}
           <a
-            href="/data.json"
+            href={`${(import.meta.env.BASE_URL || '/').replace(/\/+$/, '')}/data.json`}
             download="antigravity_usage_ledger.json"
             aria-label="Download raw ledger data as JSON"
             className={buttonVariants({

@@ -51,7 +51,7 @@ export const Header: React.FC<HeaderProps> = ({ data, loading, onRefresh }) => {
           )}
 
           <a
-            href="/data.json"
+            href={`${(import.meta.env.BASE_URL || '/').replace(/\/+$/, '')}/data.json`}
             download="antigravity_usage_data.json"
             aria-label="Download usage ledger as JSON"
             className={buttonVariants({
