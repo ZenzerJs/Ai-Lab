@@ -10,6 +10,8 @@
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 [![Last Commit](https://img.shields.io/github/last-commit/ZenzerJs/Ai-Lab?style=flat-square)](https://github.com/ZenzerJs/Ai-Lab/commits/main)
 [![Repo Size](https://img.shields.io/github/repo-size/ZenzerJs/Ai-Lab?style=flat-square)](https://github.com/ZenzerJs/Ai-Lab)
+[![Deploy Dashboard](https://github.com/ZenzerJs/Ai-Lab/actions/workflows/deploy-dashboard.yml/badge.svg)](https://github.com/ZenzerJs/Ai-Lab/actions/workflows/deploy-dashboard.yml)
+[![Live Dashboard](https://img.shields.io/badge/Live_Dashboard-GitHub_Pages-0969DA?style=flat-square&logo=githubpages&logoColor=white)](https://zenzerjs.github.io/Ai-Lab/)
 
 ---
 
@@ -24,7 +26,7 @@
 | **Scaffolding & Directives** | Verified | ICM stage contracts and OKF v0.2 knowledge graph |
 | **Token Control Scripts** | Verified | AST symbol extraction (`repo_map.py`) and CLI log sanitization |
 | **Measurement Harness** | Verified | Headless A/B runner (`run_experiment.py`) and SQLite ledger |
-| **Local Dashboard** | Active | Vite, React, and Recharts app with Model Rate Card Simulator (`localhost:5173`) |
+| **Local Dashboard** | Active | Vite, React, and Recharts app with Model Rate Card Simulator (`localhost:5173`) · [**Live on GitHub Pages →**](https://zenzerjs.github.io/Ai-Lab/) |
 | **Empirical Trials (`EXP-001–004`)** | Complete | 16 runs evaluated on `gemini-3.8-flash` with 52.82% measured savings |
 | **Model Spend Cascade Engine** | Active | Dynamic re-pricing across Flash, Pro, GPT-4o, and Claude 3.7 Sonnet |
 
@@ -342,6 +344,12 @@ python scripts/run_experiment.py --task EXP-001 --runs 2
 python dashboard/build_data.py
 ```
 
+**Enable the live GitHub Pages dashboard** (one-time, repo owner only):
+
+1. Go to **Settings → Pages → Source → GitHub Actions** in the repo.
+2. Push any commit to `main` — the `deploy-dashboard.yml` workflow builds and publishes automatically.
+3. Dashboard will be live at: **[https://zenzerjs.github.io/Ai-Lab/](https://zenzerjs.github.io/Ai-Lab/)**
+
 ### `/Ai-Lab` Skill Commands
 
 | Command | Action |
@@ -435,4 +443,4 @@ Each reference states **what this project actually adopted** from it, not just a
 - [x] Model rate-card simulation and spend-cascade visualizer
 - [x] Publish first measured savings results: 52.82% cost reduction
 - [x] GitHub Actions CI: linter, smoke tests, and dashboard build
-- [ ] GitHub Pages deployment of the live dashboard
+- [x] GitHub Pages deployment of the live dashboard ([zenzerjs.github.io/Ai-Lab](https://zenzerjs.github.io/Ai-Lab/))
