@@ -4,22 +4,23 @@
       "input_usd_per_mtok": 1.25,
       "cache_read_usd_per_mtok": 0.125,
       "output_usd_per_mtok": 10.00,
-      "source_url": "https://ai.google.dev/pricing",
-      "fetched_at": "2026-09-09T00:00:00Z"
+      "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "fetched_at": "2026-09-10T00:01:50Z",
+      "prompt_tier_note": "These rates apply to prompt requests <=200k tokens; prompt requests >200k tokens use higher provider pricing."
     },
     "gemini-2.5-flash": {
       "input_usd_per_mtok": 0.30,
       "cache_read_usd_per_mtok": 0.03,
       "output_usd_per_mtok": 2.50,
-      "source_url": "https://ai.google.dev/pricing",
-      "fetched_at": "2026-09-09T00:00:00Z"
+      "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "fetched_at": "2026-09-10T00:01:50Z"
     },
     "gemini-3.8-flash": {
       "input_usd_per_mtok": 0.75,
       "cache_read_usd_per_mtok": 0.075,
       "output_usd_per_mtok": 3.75,
-      "source_url": "https://ai.google.dev/pricing",
-      "fetched_at": "2026-09-09T00:00:00Z"
+      "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "fetched_at": "2026-09-10T00:01:50Z"
     },
     "claude-3-7-sonnet": {
       "input_usd_per_mtok": 3.00,
