@@ -231,7 +231,7 @@ The experiment runner (`scripts/run_experiment.py`) strictly enforces four progr
 
 $$\text{Cost} = \frac{\text{Input} \times \text{Input Rate} + \text{CacheRead} \times \text{Cache Rate} + \text{Output} \times \text{Output Rate}}{10^6}$$
 
-All pricing schedules are decoupled from code and maintained in [`config/PRICING.json`](file:///config/PRICING.json). Each rate card explicitly records verified provider source URLs and fetch timestamps to ensure full mathematical auditability:
+All pricing schedules are decoupled from code and maintained in [`config/PRICING.json`](config/PRICING.json). Each rate card explicitly records verified provider source URLs and fetch timestamps to ensure full mathematical auditability:
 
 | Provider / Model Tier | Input ($/MTok) | Cache Read ($/MTok) | Output ($/MTok) | Published Rate Card Source | Pricing Mode |
 |---|:---:|:---:|:---:|---|---|

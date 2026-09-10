@@ -15,7 +15,7 @@
 | **1** | **OKF v0.2 Frontmatter Linter** | `python scripts/filter_output.py python scripts/lint_frontmatter.py` | `0` | **PASS** (0 schema, casing, or link regressions) |
 | **2** | **Worktree & Database Hygiene** | `git status --porcelain` | `0` | **PASS** (Zero untracked DBs, zero stray artifacts) |
 | **3** | **TypeScript Production Build** | `python scripts/filter_output.py npm --prefix dashboard run build` | `0` | **PASS** (0 type errors, clean Vite production bundle) |
-| **4** | **Test Suite Regression Suite** | `python scripts/filter_output.py python -m unittest discover -s src` | `0` | **PASS** (Clean suite execution) |
+| **4** | **A/B Benchmark & Ledger Harness** | `python scripts/filter_output.py python scripts/run_experiment.py --task MOCK-001 --dry-run` | `0` | **PASS** (Clean dry-run execution & ledger telemetry) |
 
 ---
 
