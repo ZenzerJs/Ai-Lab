@@ -33,6 +33,15 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                 Simulated
               </Badge>
             )}
+            {currentPricing?.pricing_mode === 'provider-equivalent' && (
+              <Badge
+                variant="outline"
+                className="text-xs border-amber-500/40 text-amber-400 bg-amber-500/10"
+                title={currentPricing.provider_note ?? undefined}
+              >
+                Provider-equivalent · $0 direct cost
+              </Badge>
+            )}
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
             Re-price identical token workloads across foundation models to demonstrate spend cascade.
@@ -63,7 +72,8 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             <option value="recorded">As Recorded (Original)</option>
             {pricing.map((p) => (
               <option key={p.model} value={p.model}>
-                {p.model} (${p.input_usd_per_mtok}/M in, ${p.output_usd_per_mtok}/M out)
+                {p.model}
+                {p.pricing_mode === 'provider-equivalent' ? ' (provider-equivalent, $0 direct)' : ''} (${p.input_usd_per_mtok}/M in, ${p.output_usd_per_mtok}/M out)
               </option>
             ))}
           </SelectNative>

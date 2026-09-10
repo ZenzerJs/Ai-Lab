@@ -45,7 +45,7 @@ Autonomous agents must strictly comply with the modular rules defined in `.agent
 ### Multi-Root MCP Server Configuration (`.agents/mcp_config.json`)
 The workspace provides sandboxed MCP servers configured in `.agents/mcp_config.json`:
 - **`git` (`uvx mcp-server-git`)**: Structured git status, diffs, and commit history.
-- **`filesystem` (`npx @modelcontextprotocol/server-filesystem`)**: Multi-root mounting sandboxed exclusively to `./tasks`, `./src`, `./docs`, and `./scripts`. Root configuration and `.git` are protected from MCP write operations.
+- **`filesystem` (`npx @modelcontextprotocol/server-filesystem`)**: Multi-root mounting sandboxed to `./tasks`, `./src`, `./docs`, `./scripts`, `./data`, `./experiments`, `./dashboard`, and `./config`. Root configuration and `.git` are protected from MCP write operations.
 - **`sequential-thinking` (`npx @modelcontextprotocol/server-sequential-thinking`)**: Cognitive scratchpad constrained to max 10 steps per invocation, active strictly during the `02_plan` stage.
 
 ### Automation Scripts (`scripts/`)

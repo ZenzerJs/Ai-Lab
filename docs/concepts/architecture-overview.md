@@ -20,9 +20,9 @@ The Antigravity workspace implements an agentic software engineering environment
 
 ## 2. Module Boundaries & Sandboxing
 To protect project governance files and repository metadata, file access is segregated:
-- **Sandbox Root Boundaries**: MCP filesystem servers mount only `./tasks`, `./src`, `./docs`, and `./scripts`.
+- **Sandbox Root Boundaries**: MCP filesystem servers mount `./tasks`, `./src`, `./docs`, `./scripts`, `./data`, `./experiments`, `./dashboard`, and `./config`.
 - **Protected Paths**: Root configuration files (`.agents/`, `AGENTS.md`) and `.git/` are strictly isolated from agentic write access via MCP.
-- **Application Source**: Net-new application logic lives strictly under `src/`.
+- **Application Source**: `src/` is the reserved application source root; the empirical measurement tooling lives under `scripts/` and `dashboard/`.
 
 ## 3. Tool Coordination
 Tool access is gated by stage lifecycle contracts:
