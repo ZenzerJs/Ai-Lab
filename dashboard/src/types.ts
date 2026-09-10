@@ -93,6 +93,8 @@ export interface PricingRecord {
   output_usd_per_mtok: number;
   source_url: string;
   fetched_at: string;
+  pricing_mode?: string;
+  provider_note?: string;
 }
 
 export interface ModelCascadeItem {
@@ -100,6 +102,8 @@ export interface ModelCascadeItem {
   input_usd_per_mtok: number;
   cache_read_usd_per_mtok: number;
   output_usd_per_mtok: number;
+  pricing_mode?: string | null;
+  provider_note?: string | null;
   total_baseline_cost_usd: number;
   total_icm_cost_usd: number;
   cumulative_savings_usd: number;

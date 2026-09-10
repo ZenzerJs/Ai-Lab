@@ -106,6 +106,8 @@ def build_data_payload() -> Dict[str, Any]:
                 "input_usd_per_mtok": p["input_usd_per_mtok"],
                 "cache_read_usd_per_mtok": p["cache_read_usd_per_mtok"],
                 "output_usd_per_mtok": p["output_usd_per_mtok"],
+                "pricing_mode": p.get("pricing_mode"),
+                "provider_note": p.get("provider_note"),
                 "total_baseline_cost_usd": m_cum["total_baseline_cost_usd"],
                 "total_icm_cost_usd": m_cum["total_icm_cost_usd"],
                 "cumulative_savings_usd": m_cum["cumulative_savings_usd"],

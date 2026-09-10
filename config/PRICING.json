@@ -43,6 +43,15 @@
       "source_url": "https://www.anthropic.com/pricing",
       "fetched_at": "2026-09-09T22:58:00Z"
     },
+    "glm-5.3-flash": {
+      "input_usd_per_mtok": 0.075,
+      "cache_read_usd_per_mtok": 0.015,
+      "output_usd_per_mtok": 0.25,
+      "source_url": "https://openrouter.ai/z-ai/glm-5.3-flash",
+      "fetched_at": "2026-09-09T00:00:00Z",
+      "pricing_mode": "provider-equivalent",
+      "provider_note": "Benchmarked through FreeBuff at $0 direct user cost. These values model public discounted API-equivalent pricing and are not FreeBuff charges."
+    },
     "gpt-4o": {
       "input_usd_per_mtok": 2.50,
       "cache_read_usd_per_mtok": 1.25,

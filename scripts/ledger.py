@@ -69,9 +69,18 @@ def init_db(conn: sqlite3.Connection) -> None:
                 cache_read_usd_per_mtok REAL NOT NULL,
                 output_usd_per_mtok REAL NOT NULL,
                 source_url TEXT NOT NULL,
-                fetched_at TEXT NOT NULL
+                fetched_at TEXT NOT NULL,
+                pricing_mode TEXT,
+                provider_note TEXT
             );
         """)
+
+        # Migrate pricing table for provider-equivalent metadata (pre-existing DBs)
+        pricing_columns = {row[1] for row in conn.execute("PRAGMA table_info(pricing)").fetchall()}
+        if "pricing_mode" not in pricing_columns:
+            conn.execute("ALTER TABLE pricing ADD COLUMN pricing_mode TEXT")
+        if "provider_note" not in pricing_columns:
+            conn.execute("ALTER TABLE pricing ADD COLUMN provider_note TEXT")
 
 
 def seed_pricing(
@@ -103,14 +112,16 @@ def seed_pricing(
                 """
                 INSERT INTO pricing (
                     model, input_usd_per_mtok, cache_read_usd_per_mtok,
-                    output_usd_per_mtok, source_url, fetched_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    output_usd_per_mtok, source_url, fetched_at, pricing_mode, provider_note
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(model) DO UPDATE SET
                     input_usd_per_mtok = excluded.input_usd_per_mtok,
                     cache_read_usd_per_mtok = excluded.cache_read_usd_per_mtok,
                     output_usd_per_mtok = excluded.output_usd_per_mtok,
                     source_url = excluded.source_url,
-                    fetched_at = excluded.fetched_at
+                    fetched_at = excluded.fetched_at,
+                    pricing_mode = excluded.pricing_mode,
+                    provider_note = excluded.provider_note
                 """,
                 (
                     model_id,
@@ -119,6 +130,8 @@ def seed_pricing(
                     float(rates["output_usd_per_mtok"]),
                     str(rates["source_url"]),
                     str(rates.get("fetched_at", datetime.now(timezone.utc).isoformat())),
+                    rates.get("pricing_mode"),
+                    rates.get("provider_note"),
                 ),
             )
             count += 1

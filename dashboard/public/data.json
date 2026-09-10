@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-09T23:22:14.417050+00:00",
+  "generated_at": "2026-09-10T00:40:48.933961+00:00",
   "has_data": true,
   "cumulative": {
     "tasks_evaluated": 4,
@@ -1303,7 +1303,9 @@
       "cache_read_usd_per_mtok": 0.3125,
       "output_usd_per_mtok": 5.0,
       "source_url": "https://ai.google.dev/pricing",
-      "fetched_at": "2026-09-09T00:00:00Z"
+      "fetched_at": "2026-09-09T00:00:00Z",
+      "pricing_mode": null,
+      "provider_note": null
     },
     {
       "model": "gemini-2.5-flash",
@@ -1311,7 +1313,9 @@
       "cache_read_usd_per_mtok": 0.01875,
       "output_usd_per_mtok": 0.3,
       "source_url": "https://ai.google.dev/pricing",
-      "fetched_at": "2026-09-09T00:00:00Z"
+      "fetched_at": "2026-09-09T00:00:00Z",
+      "pricing_mode": null,
+      "provider_note": null
     },
     {
       "model": "gemini-3.8-flash",
@@ -1319,7 +1323,9 @@
       "cache_read_usd_per_mtok": 0.01875,
       "output_usd_per_mtok": 0.3,
       "source_url": "https://ai.google.dev/pricing",
-      "fetched_at": "2026-09-09T00:00:00Z"
+      "fetched_at": "2026-09-09T00:00:00Z",
+      "pricing_mode": null,
+      "provider_note": null
     },
     {
       "model": "claude-3-7-sonnet",
@@ -1327,7 +1333,9 @@
       "cache_read_usd_per_mtok": 0.3,
       "output_usd_per_mtok": 15.0,
       "source_url": "https://www.anthropic.com/pricing",
-      "fetched_at": "2026-09-09T00:00:00Z"
+      "fetched_at": "2026-09-09T00:00:00Z",
+      "pricing_mode": null,
+      "provider_note": null
     },
     {
       "model": "gpt-4o",
@@ -1335,7 +1343,9 @@
       "cache_read_usd_per_mtok": 1.25,
       "output_usd_per_mtok": 10.0,
       "source_url": "https://openai.com/api/pricing",
-      "fetched_at": "2026-09-09T00:00:00Z"
+      "fetched_at": "2026-09-09T00:00:00Z",
+      "pricing_mode": null,
+      "provider_note": null
     },
     {
       "model": "claude-sonnet-4-6",
@@ -1343,7 +1353,9 @@
       "cache_read_usd_per_mtok": 0.3,
       "output_usd_per_mtok": 15.0,
       "source_url": "https://www.anthropic.com/pricing",
-      "fetched_at": "2026-09-09T22:58:00Z"
+      "fetched_at": "2026-09-09T22:58:00Z",
+      "pricing_mode": null,
+      "provider_note": null
     },
     {
       "model": "claude-sonnet-5",
@@ -1351,7 +1363,19 @@
       "cache_read_usd_per_mtok": 0.2,
       "output_usd_per_mtok": 10.0,
       "source_url": "https://www.anthropic.com/pricing",
-      "fetched_at": "2026-09-09T22:58:00Z"
+      "fetched_at": "2026-09-09T22:58:00Z",
+      "pricing_mode": null,
+      "provider_note": null
+    },
+    {
+      "model": "glm-5.3-flash",
+      "input_usd_per_mtok": 0.075,
+      "cache_read_usd_per_mtok": 0.015,
+      "output_usd_per_mtok": 0.25,
+      "source_url": "https://openrouter.ai/z-ai/glm-5.3-flash",
+      "fetched_at": "2026-09-09T00:00:00Z",
+      "pricing_mode": "provider-equivalent",
+      "provider_note": "Benchmarked through FreeBuff at $0 direct user cost. These values model public discounted API-equivalent pricing and are not FreeBuff charges."
     }
   ],
   "cascade": [
@@ -1360,6 +1384,8 @@
       "input_usd_per_mtok": 1.25,
       "cache_read_usd_per_mtok": 0.3125,
       "output_usd_per_mtok": 5.0,
+      "pricing_mode": null,
+      "provider_note": null,
       "total_baseline_cost_usd": 0.6118,
       "total_icm_cost_usd": 0.28864375000000003,
       "cumulative_savings_usd": 0.32315625,
@@ -1377,6 +1403,8 @@
       "input_usd_per_mtok": 0.075,
       "cache_read_usd_per_mtok": 0.01875,
       "output_usd_per_mtok": 0.3,
+      "pricing_mode": null,
+      "provider_note": null,
       "total_baseline_cost_usd": 0.036708,
       "total_icm_cost_usd": 0.017318625,
       "cumulative_savings_usd": 0.019389374999999997,
@@ -1394,6 +1422,8 @@
       "input_usd_per_mtok": 0.075,
       "cache_read_usd_per_mtok": 0.01875,
       "output_usd_per_mtok": 0.3,
+      "pricing_mode": null,
+      "provider_note": null,
       "total_baseline_cost_usd": 0.036708,
       "total_icm_cost_usd": 0.017318625,
       "cumulative_savings_usd": 0.019389374999999997,
@@ -1411,6 +1441,8 @@
       "input_usd_per_mtok": 3.0,
       "cache_read_usd_per_mtok": 0.3,
       "output_usd_per_mtok": 15.0,
+      "pricing_mode": null,
+      "provider_note": null,
       "total_baseline_cost_usd": 1.51638,
       "total_icm_cost_usd": 0.58263,
       "cumulative_savings_usd": 0.9337500000000001,
@@ -1428,6 +1460,8 @@
       "input_usd_per_mtok": 2.5,
       "cache_read_usd_per_mtok": 1.25,
       "output_usd_per_mtok": 10.0,
+      "pricing_mode": null,
+      "provider_note": null,
       "total_baseline_cost_usd": 1.2358500000000001,
       "total_icm_cost_usd": 0.790475,
       "cumulative_savings_usd": 0.4453750000000001,
@@ -1445,6 +1479,8 @@
       "input_usd_per_mtok": 3.0,
       "cache_read_usd_per_mtok": 0.3,
       "output_usd_per_mtok": 15.0,
+      "pricing_mode": null,
+      "provider_note": null,
       "total_baseline_cost_usd": 1.51638,
       "total_icm_cost_usd": 0.58263,
       "cumulative_savings_usd": 0.9337500000000001,
@@ -1462,6 +1498,8 @@
       "input_usd_per_mtok": 2.0,
       "cache_read_usd_per_mtok": 0.2,
       "output_usd_per_mtok": 10.0,
+      "pricing_mode": null,
+      "provider_note": null,
       "total_baseline_cost_usd": 1.0109199999999998,
       "total_icm_cost_usd": 0.38842,
       "cumulative_savings_usd": 0.6224999999999998,
@@ -1473,6 +1511,25 @@
       "projected_savings_100m": 138.4168666318432,
       "projected_savings_1b": 1384.168666318432,
       "source_url": "https://www.anthropic.com/pricing"
+    },
+    {
+      "model": "glm-5.3-flash",
+      "input_usd_per_mtok": 0.075,
+      "cache_read_usd_per_mtok": 0.015,
+      "output_usd_per_mtok": 0.25,
+      "pricing_mode": "provider-equivalent",
+      "provider_note": "Benchmarked through FreeBuff at $0 direct user cost. These values model public discounted API-equivalent pricing and are not FreeBuff charges.",
+      "total_baseline_cost_usd": 0.0356865,
+      "total_icm_cost_usd": 0.015316499999999999,
+      "cumulative_savings_usd": 0.020370000000000006,
+      "cumulative_savings_percent": 57.08040855785803,
+      "cost_per_mtok_baseline": 0.07978916066717347,
+      "cost_per_mtok_icm": 0.03454641826055575,
+      "savings_usd_per_mtok": 0.045242742406617714,
+      "projected_savings_10m": 0.45242742406617714,
+      "projected_savings_100m": 4.5242742406617715,
+      "projected_savings_1b": 45.242742406617715,
+      "source_url": "https://openrouter.ai/z-ai/glm-5.3-flash"
     }
   ]
 }

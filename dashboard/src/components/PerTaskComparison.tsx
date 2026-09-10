@@ -176,25 +176,25 @@ export const PerTaskComparison: React.FC<PerTaskComparisonProps> = ({ tasks, sca
         </CardHeader>
 
         <CardContent className="pt-4">
-          <div className="h-64 w-full">
+          <div className="min-h-[220px] h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={chartData}
                 margin={{ top: 20, right: 20, left: 0, bottom: 5 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="#21262d" vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#1D2433" vertical={false} />
                 <XAxis
                   dataKey="taskId"
-                  stroke="#8b949e"
+                  stroke="#75859C"
                   fontSize={11}
                   tickLine={false}
-                  axisLine={{ stroke: '#30363d' }}
+                  axisLine={{ stroke: '#2D3748' }}
                 />
                 <YAxis
-                  stroke="#8b949e"
+                  stroke="#75859C"
                   fontSize={11}
                   tickLine={false}
-                  axisLine={{ stroke: '#30363d' }}
+                  axisLine={{ stroke: '#2D3748' }}
                   tickFormatter={(val) => formatCurrency(val)}
                 />
                 <Tooltip content={<CustomTooltip />} />
@@ -217,28 +217,28 @@ export const PerTaskComparison: React.FC<PerTaskComparisonProps> = ({ tasks, sca
                 <Bar
                   name="Baseline Cost"
                   dataKey="baselineCost"
-                  fill="#f85149"
+                  fill="#E06C54"
                   radius={[4, 4, 0, 0]}
                 >
                   <ErrorBar
                     dataKey="baselineError"
                     width={4}
                     strokeWidth={1.5}
-                    stroke="#ffa198"
+                    stroke="#F1A189"
                     direction="y"
                   />
                 </Bar>
                 <Bar
                   name="ICM Cost"
                   dataKey="icmCost"
-                  fill="#2ea043"
+                  fill="#6366F1"
                   radius={[4, 4, 0, 0]}
                 >
                   <ErrorBar
                     dataKey="icmError"
                     width={4}
                     strokeWidth={1.5}
-                    stroke="#7ee787"
+                    stroke="#818CF8"
                     direction="y"
                   />
                 </Bar>
