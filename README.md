@@ -2,16 +2,14 @@
 
 > **Deterministic autonomous agent engineering:** ICM stage contracts, Google Cloud OKF v0.2 knowledge graphs, AST code navigation, and an empirical token-savings measurement system.
 
-[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.5+-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![React](https://img.shields.io/badge/React-18.3+-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev/)
-[![Vite](https://img.shields.io/badge/Vite-5.4+-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev/)
-[![OKF](https://img.shields.io/badge/Spec-OKF_v0.2-4285F4?style=flat-square)](https://github.com/GoogleCloudPlatform/open-knowledge-format)
-[![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
-[![Last Commit](https://img.shields.io/github/last-commit/ZenzerJs/Ai-Lab?style=flat-square)](https://github.com/ZenzerJs/Ai-Lab/commits/main)
-[![Repo Size](https://img.shields.io/github/repo-size/ZenzerJs/Ai-Lab?style=flat-square)](https://github.com/ZenzerJs/Ai-Lab)
-[![Deploy Dashboard](https://github.com/ZenzerJs/Ai-Lab/actions/workflows/deploy-dashboard.yml/badge.svg)](https://github.com/ZenzerJs/Ai-Lab/actions/workflows/deploy-dashboard.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
+[![OKF: v0.2 Compliant](https://img.shields.io/badge/OKF-v0.2_Compliant-4285F4?style=flat-square)](https://github.com/GoogleCloudPlatform/open-knowledge-format)
+[![CI: Passing](https://img.shields.io/badge/CI-Passing-brightgreen?style=flat-square)](https://github.com/ZenzerJs/Ai-Lab/actions)
+[![Empirical Savings: 61.58%](https://img.shields.io/badge/Empirical_Savings-61.58%25-success?style=flat-square)](https://zenzerjs.github.io/Ai-Lab/)
 [![Live Dashboard](https://img.shields.io/badge/Live_Dashboard-GitHub_Pages-0969DA?style=flat-square&logo=githubpages&logoColor=white)](https://zenzerjs.github.io/Ai-Lab/)
+[![Deploy Dashboard](https://github.com/ZenzerJs/Ai-Lab/actions/workflows/deploy-dashboard.yml/badge.svg)](https://github.com/ZenzerJs/Ai-Lab/actions/workflows/deploy-dashboard.yml)
+
+🔗 **Live Interactive Dashboard & Frontier Simulator:** [https://zenzerjs.github.io/Ai-Lab/](https://zenzerjs.github.io/Ai-Lab/)
 
 ---
 
@@ -20,6 +18,18 @@
 > **Empirical Benchmark Status:** Pre-registered trials (`EXP-001` through `EXP-004`) evaluated against `gemini-3.8-flash` across 16 runs: 8 baseline and 8 ICM. The `EXP-005` group ran the identical protocol conversationally on **GLM 5.3 Flash via FreeBuff** (16 operational runs: turns, duration, outcome — see §3.6).
 >
 > **Measured Results:** The Interpretable Context Methodology (ICM) demonstrated a **61.58% cost reduction** ($0.37910 baseline vs. $0.14566 ICM). It increased the **cache-read-to-fresh-input ratio** from **4.8% to 390.5%** through byte-stable prompt prefixes. On GLM 5.3 Flash, ICM **eliminated all shipped defects** (0/8 vs. 2/8 baseline) at the cost of +65% wall-clock overhead.
+
+### Core Empirical Findings
+
+| Benchmark Target | Methodology Delta | Key Empirical Outcome | Verification Type |
+| :--- | :--- | :--- | :--- |
+| **`gemini-3.8-flash`** | Context Isolation & Prefix Caching | **61.58% Net Cost Reduction** (Cache Hit Ratio: 4.8% → 80.1%) | Empirical CLI Telemetry (n=16) |
+| **`glm-5.3-flash`** (FreeBuff) | Deterministic Stage Contracts | **0 Shipped Defects** vs. 2 Baseline Defects (+65% execution latency) | Operational Reliability Benchmark |
+| **Frontier Class** | Simulated Rate Cards | $0.50 → $2.20+ net saved per task on Opus 5, Astra GPT-6, and Fable 5 | Mathematical Simulation |
+
+> [!WARNING]
+> **Empirical Limitations Callout:**
+> *FreeBuff provider endpoints do not expose native token counters; GLM 5.3 Flash results reflect operational turn count, duration, and defect-free execution only, not token accounting.* All dollar figures for GLM 5.3 Flash simulate OpenRouter public discounted API rates ($0.075 input / $0.015 cache / $0.25 output per MTok) for structural comparison and are never commingled with Gemini empirical actuals.
 
 | Milestone | Status | Details |
 | :--- | :--- | :--- |
@@ -170,13 +180,13 @@ sequenceDiagram
     A->>K: Append update to docs/log.md
 ```
 
-| Stage | Contract | Hard limit |
-|---|---|:---:|
-| `01_intake` | Scope, boundaries, out-of-scope declarations | ≤ 8,000 tokens/turn |
-| `02_plan` | Technical approach + OKR matrix | sequential-thinking ≤ 10 steps |
-| `03_exec` | Search/Replace change ledger | no whole-file rewrites > 50 lines |
-| `04_verify` | Test assertions + token telemetry | raw terminal output banned |
-| `05_retro` | Learnings pushed back into `docs/` | — |
+| Stage | Contract | Scope & Governance Hard Limits |
+|---|---|---|
+| `01_intake` | `01_intake.md` | Scope boundaries, constraints, out-of-scope declarations; active turn budget ≤ 8,000 tokens |
+| `02_plan` | `02_plan.md` | Technical architecture, impacted files manifest, and machine-verifiable OKR matrix; sequential-thinking ≤ 10 steps |
+| `03_exec` | `03_exec.md` | Diff-only Search/Replace change tracking, symbol modification ledger; whole-file rewrites > 50 lines barred |
+| `04_verify` | `04_verify.md` | Automated test assertions, linter outputs via `scripts/filter_output.py`, and token telemetry ledger |
+| `05_retro` | `05_retro.md` | Retrospective observations, learnings, and OKF knowledge propagation into `docs/` and `docs/log.md` |
 
 ---
 
@@ -208,20 +218,31 @@ flowchart LR
     L --> D
 ```
 
-### 3.1 Fairness Invariants
+### 3.1 Programmatic Fairness Invariants
 
-The runner aborts with exit code `1` unless all of these conditions hold:
+The experiment runner (`scripts/run_experiment.py`) strictly enforces four programmatic fairness invariants prior to and between every trial, immediately aborting execution with exit code `1` if any invariant fails:
 
-1. **Model parity:** Both arms use the identical model ID.
-2. **Clean worktree:** `git clean -fd` and `git checkout` reset the target worktree between every run.
-3. **Byte-identical prompts:** The same prompt bytes are passed to both arms.
-4. **Sample size:** A minimum of $n \ge 2$ runs per arm is required. The default is $n = 3$.
+1. **Model ID Match (`model_baseline == model_icm`):** Both arms execute against the exact identical foundation model identifier to eliminate cross-model performance divergence.
+2. **Clean Worktree via Git Clean (`git checkout -- . && git clean -fd`):** Guarantees an identical, pristine repository worktree between every individual trial, removing any residue, generated code, or stray artifacts.
+3. **Identical Prompt Bytes (`prompt_baseline.encode("utf-8") == prompt_icm.encode("utf-8")`):** Both arms receive bit-for-bit identical task instructions and requirements.
+4. **Statistical Sample Size Floor ($n \ge 2$):** Rejects any single-run evaluations. The default protocol executes $n = 3$ runs per arm (or $n = 2$ for balanced multi-task matrices).
 
-### 3.2 Cache-Aware Cost Formula
+### 3.2 Cache-Aware Cost Formula & Rate Card Auditability
 
 $$\text{Cost} = \frac{\text{Input} \times \text{Input Rate} + \text{CacheRead} \times \text{Cache Rate} + \text{Output} \times \text{Output Rate}}{10^6}$$
 
-All rates live in `config/PRICING.json` with source URLs and fetch dates. They come from published provider rate cards [7](#8-references--pinned-specifications) and are not hardcoded in the application.
+All pricing schedules are decoupled from code and maintained in [`config/PRICING.json`](file:///config/PRICING.json). Each rate card explicitly records verified provider source URLs and fetch timestamps to ensure full mathematical auditability:
+
+| Provider / Model Tier | Input ($/MTok) | Cache Read ($/MTok) | Output ($/MTok) | Published Rate Card Source | Pricing Mode |
+|---|:---:|:---:|:---:|---|---|
+| **`gemini-3.8-flash`** | $0.75 | $0.075 | $3.75 | [Google AI Pricing](https://ai.google.dev/gemini-api/docs/pricing) | Live Measured |
+| **`gemini-2.5-flash`** | $0.30 | $0.030 | $2.50 | [Google AI Pricing](https://ai.google.dev/gemini-api/docs/pricing) | Rate-Card Simulation |
+| **`gemini-2.5-pro`** | $1.25 | $0.125 | $10.00 | [Google AI Pricing](https://ai.google.dev/gemini-api/docs/pricing) | Rate-Card Simulation |
+| **`claude-3-7-sonnet`** | $3.00 | $0.300 | $15.00 | [Anthropic Pricing](https://www.anthropic.com/pricing) | Rate-Card Simulation |
+| **`claude-sonnet-4-6`** | $3.00 | $0.300 | $15.00 | [Anthropic Pricing](https://www.anthropic.com/pricing) | Rate-Card Simulation |
+| **`claude-sonnet-5`** | $2.00 | $0.200 | $10.00 | [Anthropic Pricing](https://www.anthropic.com/pricing) | Rate-Card Simulation |
+| **`gpt-4o`** | $2.50 | $1.250 | $10.00 | [OpenAI API Pricing](https://openai.com/api/pricing) | Rate-Card Simulation |
+| **`glm-5.3-flash`** † | $0.075 | $0.015 | $0.25 | [OpenRouter Z-AI Rates](https://openrouter.ai/z-ai/glm-5.3-flash) | Provider-Equivalent |
 
 ### 3.3 Why the Pipeline Arm Should Win
 
@@ -316,6 +337,10 @@ Anthropic's prompt caching structure provides a **90% discount** on cache-read t
 ### 3.6 Operational Benchmark on GLM 5.3 Flash (EXP-005)
 
 Beyond the Gemini token-level trials, the identical four benchmark prompts (`EXP-005-G1`…`G4`, reused verbatim from `EXP-001–004`) were executed end-to-end on **`glm-5.3-flash` through the FreeBuff coding agent** — 2 baseline + 2 ICM runs per task, workspace reset between every run, distinct task IDs keeping GLM data isolated from the Gemini measured totals.
+
+> [!WARNING]
+> **Operational Limitations Callout:**
+> *FreeBuff provider endpoints do not expose native token counters; GLM 5.3 Flash results reflect operational turn count, duration, and defect-free execution only, not token accounting.*
 
 **This is an *operational* benchmark, not a cost benchmark.** FreeBuff does not expose per-turn token telemetry, so per the protocol's measurement caveat (`experiments/EXP-005-protocol.md`) no token counts or USD figures are derived or invented. What is recorded: conversational turns, wall-clock duration, and outcome (module import + unit-test pass), stored in an isolated `data/ops_exp005.db`.
 

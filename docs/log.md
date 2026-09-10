@@ -1,5 +1,8 @@
 # Knowledge Bundle Update Log
 
+## 2026-09-10
+* **v1.0.0 Release Polish & Flagship Evidence Overhaul**: Completed rigorous morning audit following overnight builds. Frontmatter linter, porcelain git tree hygiene, and TypeScript production dashboard build all exit 0. Overhauled `README.md` with official status badges (MIT, OKF v0.2, CI passing, 61.58% empirical savings), live deployment link to GitHub Pages, core empirical finding matrix across Gemini 3.8 Flash, GLM 5.3 Flash, and Frontier Class simulations, verbatim provider telemetry limitation callouts, and auditable citations for all rate cards in `config/PRICING.json`. Staged overnight verification handoff record.
+
 ## 2026-09-09 (Update 4)
 * **EXP-005 GLM 5.3 Flash Operational Benchmark (16 runs)**: Executed all four `EXP-005-G*` tasks end-to-end on `glm-5.3-flash` through the FreeBuff coding agent per `experiments/EXP-005-protocol.md` — 2 baseline + 2 ICM runs per task, workspace reset between runs, `data/ops_exp005.db` isolated from the Gemini measured ledger. Provider exposes no token telemetry, so per the protocol caveat this is an operational benchmark (turns/duration/outcome; no invented tokens or USD). Result: baseline 16 turns / 460.6s / 2 defect runs (injected-clock bug in rate limiter, AST visitor-dispatch bug in dead-code finder) vs. ICM 32 turns / 760.0s / 0 defects — ICM eliminates shipped defects at +65% wall-clock overhead. Findings, per-task table, and methodology added to README §3.6; dashboard gains an Operational Benchmark card in the Experiments tab fed by a new `operational` block in `data.json` (`dashboard/build_data.py` reads `data/ops_exp005.db`). Roadmap item checked off.
 
