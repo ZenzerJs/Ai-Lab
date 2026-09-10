@@ -1,47 +1,29 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { ModelCascadeItem } from '../types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './ui/card';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
-import { ToggleGroup, ToggleGroupItem } from './ui/toggle-group';
 import { Layers, Check, Zap, Sparkles } from 'lucide-react';
 import { Info } from 'lucide-react';
 import { formatCurrency, formatSignedCurrency, formatSignedPercent } from '../lib/formatters';
+import { ScaleMode } from './ScaleSelector';
 
 interface SpendCascadeComparisonProps {
   cascade: ModelCascadeItem[];
   selectedModel: string;
   onSelectModel: (model: string) => void;
+  scaleMode: ScaleMode;
 }
-
-type CascadeScale = '1x' | '10x' | '100x' | '100m' | '1b';
 
 export const SpendCascadeComparison: React.FC<SpendCascadeComparisonProps> = ({
   cascade,
   selectedModel,
   onSelectModel,
+  scaleMode,
 }) => {
-  const [scale, setScale] = useState<CascadeScale>('1x');
-
   if (!cascade || cascade.length === 0) {
     return null;
   }
-
-  const getMultiplier = (s: CascadeScale): number => {
-    switch (s) {
-      case '10x':
-        return 10;
-      case '100x':
-        return 100;
-      case '100m':
-      case '1b':
-      case '1x':
-      default:
-        return 1;
-    }
-  };
-
-  const multiplier = getMultiplier(scale);
 
   return (
     <Card className="border-surface-border bg-surface">
@@ -61,30 +43,9 @@ export const SpendCascadeComparison: React.FC<SpendCascadeComparisonProps> = ({
           </CardDescription>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-400">Scale Projection:</span>
-          <ToggleGroup
-            value={scale}
-            onValueChange={(val) => val && setScale(val as CascadeScale)}
-            className="bg-background/80 p-0.5 rounded-lg border border-surface-border text-xs"
-          >
-            <ToggleGroupItem value="1x" className="px-2.5 py-1 text-xs">
-              1x Run
-            </ToggleGroupItem>
-            <ToggleGroupItem value="10x" className="px-2.5 py-1 text-xs">
-              10x Batch
-            </ToggleGroupItem>
-            <ToggleGroupItem value="100x" className="px-2.5 py-1 text-xs">
-              100x Batch
-            </ToggleGroupItem>
-            <ToggleGroupItem value="100m" className="px-2.5 py-1 text-xs">
-              100M Tok
-            </ToggleGroupItem>
-            <ToggleGroupItem value="1b" className="px-2.5 py-1 text-xs">
-              1B Tok
-            </ToggleGroupItem>
-          </ToggleGroup>
-        </div>
+        <span className="text-xs font-mono text-muted-foreground">
+          Scale: <span className="text-white font-medium">{scaleMode.toUpperCase()}</span> (set via Token Volume Scale Multiplier above)
+        </span>
       </CardHeader>
 
       <CardContent className="space-y-4">
@@ -105,18 +66,22 @@ export const SpendCascadeComparison: React.FC<SpendCascadeComparisonProps> = ({
               {cascade.map((item) => {
                 const isSelected = selectedModel === item.model;
 
-                let bSpend = item.total_baseline_cost_usd * multiplier;
-                let iSpend = item.total_icm_cost_usd * multiplier;
-                let saved = item.cumulative_savings_usd * multiplier;
+                let bSpend = item.total_baseline_cost_usd;
+                let iSpend = item.total_icm_cost_usd;
+                let saved = item.cumulative_savings_usd;
 
-                if (scale === '100m') {
+                if (scaleMode === '1m') {
+                  bSpend = item.cost_per_mtok_baseline;
+                  iSpend = item.cost_per_mtok_icm;
+                  saved = item.cost_per_mtok_baseline - item.cost_per_mtok_icm;
+                } else if (scaleMode === '10m') {
+                  bSpend = item.cost_per_mtok_baseline * 10;
+                  iSpend = item.cost_per_mtok_icm * 10;
+                  saved = (item.cost_per_mtok_baseline - item.cost_per_mtok_icm) * 10;
+                } else if (scaleMode === '100m') {
                   bSpend = item.cost_per_mtok_baseline * 100;
                   iSpend = item.cost_per_mtok_icm * 100;
                   saved = item.projected_savings_100m;
-                } else if (scale === '1b') {
-                  bSpend = item.cost_per_mtok_baseline * 1000;
-                  iSpend = item.cost_per_mtok_icm * 1000;
-                  saved = item.projected_savings_1b;
                 }
 
                 // Relative bar width

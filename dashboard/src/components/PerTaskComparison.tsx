@@ -1,15 +1,4 @@
-import React from 'react';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-  Legend,
-  ErrorBar,
-} from 'recharts';
+import React, { useMemo } from 'react';
 import { TaskSummaryItem } from '../types';
 import { ScaleMode } from './ScaleSelector';
 import { DollarSign, AlertCircle } from 'lucide-react';
@@ -34,7 +23,63 @@ interface PerTaskComparisonProps {
   scaleMode: ScaleMode;
 }
 
+interface TaskRowModel {
+  taskId: string;
+  model: string;
+  baselineCost: number;
+  baselineN: number;
+  icmCost: number;
+  icmN: number;
+  savingsPct: number;
+  savingsUsd: number;
+}
+
+/** Horizontal HTML bar meters ported from the code.html prototype (Base vs ICM per task). */
 export const PerTaskComparison: React.FC<PerTaskComparisonProps> = ({ tasks, scaleMode }) => {
+  const chartData = useMemo<TaskRowModel[]>(() => {
+    if (!tasks) return [];
+    const mult = scaleMode === '1m' ? 1 : scaleMode === '10m' ? 10 : scaleMode === '100m' ? 100 : 1;
+    const isScaled = scaleMode !== '1x';
+
+    return tasks.map((t) => {
+      const b = t.arms.baseline;
+      const i = t.arms.icm;
+
+      let bMean = b?.mean_cost_usd ?? 0;
+      let iMean = i?.mean_cost_usd ?? 0;
+      let savingsUsd = t.savings?.mean_savings_usd ?? (bMean - iMean);
+
+      if (isScaled) {
+        const rawBMean = b?.mean_cost_usd ?? 0;
+        const rawIMean = i?.mean_cost_usd ?? 0;
+        const scaledBMean = (t.savings?.cost_per_mtok_baseline ?? (rawBMean * 20)) * mult;
+        const scaledIMean = (t.savings?.cost_per_mtok_icm ?? (rawIMean * 20)) * mult;
+
+        bMean = scaledBMean;
+        iMean = scaledIMean;
+        savingsUsd = (t.savings?.savings_usd_per_mtok ?? (bMean - iMean)) * mult;
+      }
+
+      return {
+        taskId: t.task_id,
+        model: b?.model || i?.model || 'unknown',
+        baselineCost: Number(bMean.toFixed(5)),
+        baselineN: b?.n ?? 0,
+        icmCost: Number(iMean.toFixed(5)),
+        icmN: i?.n ?? 0,
+        savingsPct: t.savings?.mean_savings_percent ?? (bMean > 0 ? ((bMean - iMean) / bMean) * 100 : 0),
+        savingsUsd,
+      };
+    });
+  }, [tasks, scaleMode]);
+
+  const maxCost = useMemo(
+    () => Math.max(1e-9, ...chartData.map((d) => Math.max(d.baselineCost, d.icmCost))),
+    [chartData],
+  );
+
+  const isScaled = scaleMode !== '1x';
+
   if (!tasks || tasks.length === 0) {
     return (
       <Card>
@@ -53,101 +98,6 @@ export const PerTaskComparison: React.FC<PerTaskComparisonProps> = ({ tasks, sca
     );
   }
 
-  const mult = scaleMode === '1m' ? 1 : scaleMode === '10m' ? 10 : scaleMode === '100m' ? 100 : 1;
-  const isScaled = scaleMode !== '1x';
-
-  // Transform data for Recharts grouped bar with empirical error bands
-  const chartData = tasks.map((t) => {
-    const b = t.arms.baseline;
-    const i = t.arms.icm;
-
-    let bMean = b?.mean_cost_usd ?? 0;
-    let bMin = b?.min_cost_usd ?? bMean;
-    let bMax = b?.max_cost_usd ?? bMean;
-
-    let iMean = i?.mean_cost_usd ?? 0;
-    let iMin = i?.min_cost_usd ?? iMean;
-    let iMax = i?.max_cost_usd ?? iMean;
-
-    let savingsUsd = t.savings?.mean_savings_usd ?? (bMean - iMean);
-
-    if (isScaled) {
-      const rawBMean = b?.mean_cost_usd ?? 0;
-      const rawIMean = i?.mean_cost_usd ?? 0;
-      const scaledBMean = (t.savings?.cost_per_mtok_baseline ?? (rawBMean * 20)) * mult;
-      const scaledIMean = (t.savings?.cost_per_mtok_icm ?? (rawIMean * 20)) * mult;
-
-      const bScaleFactor = rawBMean > 0 ? scaledBMean / rawBMean : mult;
-      const iScaleFactor = rawIMean > 0 ? scaledIMean / rawIMean : mult;
-
-      bMean = scaledBMean;
-      bMin = b?.min_cost_usd !== undefined ? b.min_cost_usd * bScaleFactor : bMean;
-      bMax = b?.max_cost_usd !== undefined ? b.max_cost_usd * bScaleFactor : bMean;
-
-      iMean = scaledIMean;
-      iMin = i?.min_cost_usd !== undefined ? i.min_cost_usd * iScaleFactor : iMean;
-      iMax = i?.max_cost_usd !== undefined ? i.max_cost_usd * iScaleFactor : iMean;
-
-      savingsUsd = (t.savings?.savings_usd_per_mtok ?? (bMean - iMean)) * mult;
-    }
-
-    const baselineErrLow = Math.max(0, Number((bMean - bMin).toFixed(5)));
-    const baselineErrHigh = Math.max(0, Number((bMax - bMean).toFixed(5)));
-    const icmErrLow = Math.max(0, Number((iMean - iMin).toFixed(5)));
-    const icmErrHigh = Math.max(0, Number((iMax - iMean).toFixed(5)));
-
-    return {
-      taskId: t.task_id,
-      model: b?.model || i?.model || 'unknown',
-      baselineCost: Number(bMean.toFixed(5)),
-      baselineError: [baselineErrLow, baselineErrHigh],
-      baselineN: b?.n ?? 0,
-      baselineMin: bMin,
-      baselineMax: bMax,
-      icmCost: Number(iMean.toFixed(5)),
-      icmError: [icmErrLow, icmErrHigh],
-      icmN: i?.n ?? 0,
-      icmMin: iMin,
-      icmMax: iMax,
-      savingsPct: t.savings?.mean_savings_percent ?? (bMean > 0 ? ((bMean - iMean) / bMean) * 100 : 0),
-      savingsUsd: savingsUsd,
-    };
-  });
-
-  const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
-      const item = payload[0].payload;
-      return (
-        <div className="bg-surface border border-surface-border p-3 rounded-lg shadow-xl text-xs flex flex-col gap-2 min-w-[220px]">
-          <div className="font-semibold text-white border-b border-surface-border pb-1">
-            Task: {label} ({item.model})
-          </div>
-          <div className="flex flex-col gap-1">
-            <div className="text-red-400">
-              <span className="font-medium">Baseline (n={item.baselineN}):</span> {formatCurrency(item.baselineCost)}
-              <div className="text-[10px] text-gray-400 pl-2">
-                Min: {formatCurrency(item.baselineMin)} | Max: {formatCurrency(item.baselineMax)}
-              </div>
-            </div>
-            <div className="text-emerald-400">
-              <span className="font-medium">ICM Pipeline (n={item.icmN}):</span> {formatCurrency(item.icmCost)}
-              <div className="text-[10px] text-gray-400 pl-2">
-                Min: {formatCurrency(item.icmMin)} | Max: {formatCurrency(item.icmMax)}
-              </div>
-            </div>
-            <div className="pt-1 border-t border-surface-border text-white font-medium flex justify-between">
-              <span>Savings:</span>
-              <span className={item.savingsUsd >= 0 ? "text-emerald-300 font-mono" : "text-red-300 font-mono"}>
-                {formatSignedCurrency(item.savingsUsd)} ({item.savingsPct >= 0 ? `-${item.savingsPct.toFixed(1)}%` : `+${Math.abs(item.savingsPct).toFixed(1)}%`})
-              </span>
-            </div>
-          </div>
-        </div>
-      );
-    }
-    return null;
-  };
-
   const titleText =
     scaleMode === '1x'
       ? 'Per-Task Cost Comparison'
@@ -161,7 +111,7 @@ export const PerTaskComparison: React.FC<PerTaskComparisonProps> = ({ tasks, sca
         <CardHeader className="flex flex-col gap-1 pb-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
-              <DollarSign className="size-4 text-emerald-400" />
+              <DollarSign className="size-4 text-sage" />
               <CardTitle>{titleText}</CardTitle>
             </div>
             <Badge variant="outline" className="font-normal font-mono text-xs">
@@ -171,79 +121,73 @@ export const PerTaskComparison: React.FC<PerTaskComparisonProps> = ({ tasks, sca
           <CardDescription>
             {isScaled
               ? `Extrapolated economics at ${scaleMode.toUpperCase()} token volume based on empirical cache rates.`
-              : 'Mean expenditure with min–max error bands across individual runs.'}
+              : 'Mean expenditure per task across recorded runs.'}
           </CardDescription>
         </CardHeader>
 
         <CardContent className="pt-4">
-          <div className="min-h-[220px] h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={chartData}
-                margin={{ top: 20, right: 20, left: 0, bottom: 5 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#1D2433" vertical={false} />
-                <XAxis
-                  dataKey="taskId"
-                  stroke="#75859C"
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={{ stroke: '#2D3748' }}
-                />
-                <YAxis
-                  stroke="#75859C"
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={{ stroke: '#2D3748' }}
-                  tickFormatter={(val) => formatCurrency(val)}
-                />
-                <Tooltip content={<CustomTooltip />} />
-                <Legend
-                  verticalAlign="top"
-                  align="right"
-                  wrapperStyle={{ paddingBottom: '10px', fontSize: '11px' }}
-                  formatter={(value, entry: any) => {
-                    const isBase = entry.dataKey === 'baselineCost';
-                    const nList = chartData.map((d) => (isBase ? d.baselineN : d.icmN));
-                    const allEqual = nList.every((val) => val === nList[0]);
-                    const nLabel = allEqual ? `n=${nList[0] || 0}` : 'per-task n in tooltip';
-                    return (
-                      <span className="text-gray-300">
-                        {value} ({nLabel})
+          {/* Legend (prototype style) */}
+          <div className="flex items-center gap-3.5 text-xs font-mono mb-4">
+            <span className="flex items-center gap-1.5 text-baseline">
+              <span className="w-2.5 h-2.5 rounded bg-baseline inline-block" /> Baseline Cost
+            </span>
+            <span className="flex items-center gap-1.5 text-primary-light">
+              <span className="w-2.5 h-2.5 rounded bg-primary inline-block" /> ICM Cost
+            </span>
+          </div>
+
+          {/* Horizontal bar meters (ported from code.html #costTaskRows) */}
+          <div className="space-y-4 pt-2">
+            {chartData.map((d) => {
+              const baseWidthPct = Math.max(2, (d.baselineCost / maxCost) * 100);
+              const icmWidthPct = Math.max(2, (d.icmCost / maxCost) * 100);
+              const isReduced = d.savingsPct > 0.05;
+
+              return (
+                <div
+                  key={d.taskId}
+                  data-task-id={d.taskId}
+                  className="interactive-task-row p-2.5 rounded-lg border border-surface-border/40 cursor-pointer bg-card/50 transition-opacity hover:border-primary/40"
+                >
+                  <div className="flex justify-between text-xs font-mono mb-1.5 gap-2 flex-wrap">
+                    <span className="text-gray-200 font-medium flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary-light inline-block" />
+                      {d.taskId}
+                    </span>
+                    <span className="text-sage font-medium tabular-nums">
+                      {formatSignedCurrency(d.savingsUsd)}
+                      {isReduced ? ` (-${d.savingsPct.toFixed(1)}%)` : ` (+${Math.abs(d.savingsPct).toFixed(1)}%)`}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center text-[11px] font-mono">
+                      <span className="w-12 text-muted-foreground shrink-0">Base</span>
+                      <div className="w-full bg-background h-3.5 rounded overflow-hidden border border-surface-border/40">
+                        <div
+                          className="bg-baseline h-full rounded-sm"
+                          style={{ width: `${baseWidthPct}%` }}
+                        />
+                      </div>
+                      <span className="w-20 text-right text-gray-200 ml-2 tabular-nums shrink-0">
+                        {formatCurrency(d.baselineCost)}
                       </span>
-                    );
-                  }}
-                />
-                <Bar
-                  name="Baseline Cost"
-                  dataKey="baselineCost"
-                  fill="#E06C54"
-                  radius={[4, 4, 0, 0]}
-                >
-                  <ErrorBar
-                    dataKey="baselineError"
-                    width={4}
-                    strokeWidth={1.5}
-                    stroke="#F1A189"
-                    direction="y"
-                  />
-                </Bar>
-                <Bar
-                  name="ICM Cost"
-                  dataKey="icmCost"
-                  fill="#6366F1"
-                  radius={[4, 4, 0, 0]}
-                >
-                  <ErrorBar
-                    dataKey="icmError"
-                    width={4}
-                    strokeWidth={1.5}
-                    stroke="#818CF8"
-                    direction="y"
-                  />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+                    </div>
+                    <div className="flex items-center text-[11px] font-mono">
+                      <span className="w-12 text-muted-foreground shrink-0">ICM</span>
+                      <div className="w-full bg-background h-3.5 rounded overflow-hidden border border-surface-border/40">
+                        <div
+                          className="bg-primary h-full rounded-sm"
+                          style={{ width: `${icmWidthPct}%` }}
+                        />
+                      </div>
+                      <span className="w-20 text-right text-primary-light ml-2 tabular-nums shrink-0">
+                        {formatCurrency(d.icmCost)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </CardContent>
       </div>
@@ -282,13 +226,13 @@ export const PerTaskComparison: React.FC<PerTaskComparisonProps> = ({ tasks, sca
                   </div>
                   <div className="flex justify-between">
                     <span>ICM Pipeline (n={d.icmN}):</span>
-                    <span className="font-mono text-emerald-400">
+                    <span className="font-mono text-sage">
                       {formatCurrency(d.icmCost)}
                     </span>
                   </div>
                   <div className="flex justify-between pt-1 border-t border-surface-border/50 text-gray-300 font-medium">
                     <span>{isScaled ? 'Net Savings/Vol:' : 'Net Savings/Run:'}</span>
-                    <span className={d.savingsUsd >= 0 ? "font-mono text-emerald-300" : "font-mono text-red-300"}>
+                    <span className={d.savingsUsd >= 0 ? 'font-mono text-sage' : 'font-mono text-red-300'}>
                       {formatSignedCurrency(d.savingsUsd)}
                     </span>
                   </div>

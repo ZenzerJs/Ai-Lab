@@ -138,7 +138,7 @@ export const App: React.FC = () => {
   );
 
   const renderOverview = activeData && data?.has_data && (
-    <>
+    <div className="flex flex-col gap-5">
       <CumulativeSavings
         cumulative={activeData.cumulative}
         timeline={activeData.timeline}
@@ -155,11 +155,11 @@ export const App: React.FC = () => {
       </div>
 
       <TurnsDuration tasks={activeData.tasks} />
-    </>
+    </div>
   );
 
   const renderSimulator = data?.has_data && (
-    <>
+    <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-3">
         <ModelSelector
           selectedModel={selectedModel}
@@ -178,25 +178,25 @@ export const App: React.FC = () => {
           cascade={data.cascade}
           selectedModel={selectedModel}
           onSelectModel={setSelectedModel}
+          scaleMode={scaleMode}
         />
       )}
-    </>
+    </div>
   );
 
   const renderExperiments = data?.has_data && activeData && (
-    <ExperimentCards tasks={activeData.tasks} />
+    <div className="flex flex-col gap-5">
+      <ExperimentCards tasks={activeData.tasks} />
+    </div>
   );
 
   const renderEvidence = data?.has_data && activeData && (
-    <RawLedgerTable runs={activeData.runs} />
+    <div className="flex flex-col gap-5">
+      <RawLedgerTable runs={activeData.runs} />
+    </div>
   );
 
-  const tabPanels: { id: DashboardTab; render: React.ReactNode }[] = [
-    { id: 'overview', render: renderOverview },
-    { id: 'simulator', render: renderSimulator },
-    { id: 'experiments', render: renderExperiments },
-    { id: 'evidence', render: renderEvidence },
-  ];
+
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
@@ -208,7 +208,7 @@ export const App: React.FC = () => {
         onTabChange={setActiveTab}
       />
 
-      <main className="max-w-[1600px] mx-auto w-full px-5 lg:px-8 py-6 flex-1 flex flex-col gap-5">
+      <main className="max-w-[1600px] mx-auto w-full px-5 lg:px-8 py-6 flex-1 space-y-5">
         {/* Telemetry protocol banner: measured vs simulated separation */}
         <Alert variant="info">
           <Info className="size-5 text-primary-light shrink-0 mt-0.5" />
@@ -221,7 +221,7 @@ export const App: React.FC = () => {
               <span className="bg-card text-primary-light border border-surface-border px-1.5 py-0.5 rounded font-medium">
                 gemini-3.8-flash
               </span>{' '}
-              16 paired runs via Antigravity CLI event streams (52.8% cost reduction, cache-read-to-input ratio 4.8% → 390.5%).
+              16 paired runs via Antigravity CLI event streams (61.6% cost reduction, cache-read-to-input ratio 4.8% → 390.5%).
               <br />
               <strong className="text-white ml-2">Rate-Card Simulations:</strong>{' '}
               <code className="text-slate-200 font-mono">claude-sonnet-4-6</code>,{' '}
@@ -240,20 +240,17 @@ export const App: React.FC = () => {
         {renderEmpty}
 
         {data && data.has_data && (
-          <>
-            {tabPanels.map((panel) => (
-              <section
-                key={panel.id}
-                role="tabpanel"
-                id={`panel-${panel.id}`}
-                aria-labelledby={`tab-${panel.id}`}
-                hidden={activeTab !== panel.id}
-                className="flex flex-col gap-5"
-              >
-                {panel.render}
-              </section>
-            ))}
-          </>
+          <section
+            role="tabpanel"
+            id={`panel-${activeTab}`}
+            aria-labelledby={`tab-${activeTab}`}
+            className="flex flex-col gap-5"
+          >
+            {activeTab === 'overview' && renderOverview}
+            {activeTab === 'simulator' && renderSimulator}
+            {activeTab === 'experiments' && renderExperiments}
+            {activeTab === 'evidence' && renderEvidence}
+          </section>
         )}
       </main>
 

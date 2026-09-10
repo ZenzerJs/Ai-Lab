@@ -47,6 +47,40 @@ export default {
           light: "#34D399",
         },
         terracotta: "#E06C54",
+        // Prototype telemetry palette (code.html): nested telemetry.* tokens
+        telemetry: {
+          bg: "#0B0D11",
+          surface: "#11151D",
+          card: "#161B26",
+          elevated: "#1D2433",
+          border: "#232B3B",
+          borderLight: "#2D3748",
+          borderHighlight: "#3E4C64",
+          indigo: {
+            DEFAULT: "#6366F1",
+            hover: "#4F46E5",
+            soft: "#818CF8",
+            subtle: "rgba(99, 102, 241, 0.12)",
+            border: "rgba(99, 102, 241, 0.28)",
+          },
+          baseline: {
+            DEFAULT: "#E06C54",
+            muted: "#9E4733",
+            subtle: "rgba(224, 108, 84, 0.12)",
+            border: "rgba(224, 108, 84, 0.3)",
+          },
+          sage: {
+            DEFAULT: "#10B981",
+            light: "#34D399",
+            subtle: "rgba(16, 185, 129, 0.12)",
+            border: "rgba(16, 185, 129, 0.3)",
+          },
+          text: {
+            primary: "#F1F5F9",
+            secondary: "#94A3B8",
+            muted: "#64748B",
+          },
+        },
         steel: {
           400: "#94A3B8",
           500: "#75859C",
