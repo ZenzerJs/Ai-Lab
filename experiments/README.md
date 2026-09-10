@@ -63,8 +63,8 @@ Pricing rates are never hardcoded in Python. Token rates are maintained in `conf
   "models": {
     "gemini-2.5-pro": {
       "input_usd_per_mtok": 1.25,
-      "cache_read_usd_per_mtok": 0.3125,
-      "output_usd_per_mtok": 5.00,
+      "cache_read_usd_per_mtok": 0.125,
+      "output_usd_per_mtok": 10.00,
       "source_url": "https://ai.google.dev/pricing",
       "fetched_at": "2026-09-09T00:00:00Z"
     }

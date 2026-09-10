@@ -1,20 +1,20 @@
 {
-  "generated_at": "2026-09-10T00:40:48.933961+00:00",
+  "generated_at": "2026-09-10T01:44:10.223460+00:00",
   "has_data": true,
   "cumulative": {
     "tasks_evaluated": 4,
     "total_runs": 16,
-    "total_baseline_cost_usd": 0.036708,
-    "total_icm_cost_usd": 0.017318625,
+    "total_baseline_cost_usd": 0.379095,
+    "total_icm_cost_usd": 0.1456575,
     "total_baseline_tokens": 447260,
     "total_icm_tokens": 443360,
-    "cumulative_savings_usd": 0.019389374999999997,
-    "cumulative_savings_percent": 52.82057044785877,
-    "cost_per_mtok_baseline": 0.08207306711979609,
-    "cost_per_mtok_icm": 0.039062218062071455,
-    "savings_usd_per_mtok": 0.043010849057724634,
-    "projected_savings_10m": 0.4301084905772463,
-    "projected_savings_100m": 4.301084905772464,
+    "cumulative_savings_usd": 0.23343750000000002,
+    "cumulative_savings_percent": 61.57757290388953,
+    "cost_per_mtok_baseline": 0.847594240486518,
+    "cost_per_mtok_icm": 0.3285309906171057,
+    "savings_usd_per_mtok": 0.5190632498694123,
+    "projected_savings_10m": 5.190632498694123,
+    "projected_savings_100m": 51.90632498694123,
     "tasks": [
       {
         "task_id": "EXP-001",
@@ -23,9 +23,9 @@
           "baseline": {
             "n": 2,
             "model": "gemini-3.8-flash",
-            "mean_cost_usd": 0.0039823125,
-            "min_cost_usd": 0.003918375,
-            "max_cost_usd": 0.00404625,
+            "mean_cost_usd": 0.04111125,
+            "min_cost_usd": 0.0404325,
+            "max_cost_usd": 0.04179,
             "mean_input_tokens": 44400.0,
             "mean_cache_read_tokens": 2150.0,
             "mean_output_tokens": 2040.0,
@@ -48,7 +48,7 @@
                 "total_tokens": 49300,
                 "num_turns": 5,
                 "duration_seconds": 25.4,
-                "cost_usd": 0.00404625
+                "cost_usd": 0.04179
               },
               {
                 "id": 6,
@@ -64,16 +64,16 @@
                 "total_tokens": 47880,
                 "num_turns": 5,
                 "duration_seconds": 24.1,
-                "cost_usd": 0.003918375
+                "cost_usd": 0.0404325
               }
             ]
           },
           "icm": {
             "n": 2,
             "model": "gemini-3.8-flash",
-            "mean_cost_usd": 0.0019366875,
-            "min_cost_usd": 0.0019215,
-            "max_cost_usd": 0.001951875,
+            "mean_cost_usd": 0.0162075,
+            "min_cost_usd": 0.01599,
+            "max_cost_usd": 0.016425,
             "mean_input_tokens": 9650.0,
             "mean_cache_read_tokens": 38850.0,
             "mean_output_tokens": 1615.0,
@@ -96,7 +96,7 @@
                 "total_tokens": 49950,
                 "num_turns": 3,
                 "duration_seconds": 13.2,
-                "cost_usd": 0.001951875
+                "cost_usd": 0.016425
               },
               {
                 "id": 8,
@@ -112,24 +112,24 @@
                 "total_tokens": 50280,
                 "num_turns": 3,
                 "duration_seconds": 12.7,
-                "cost_usd": 0.0019215
+                "cost_usd": 0.01599
               }
             ]
           }
         },
         "savings": {
-          "mean_savings_usd": 0.0020456249999999997,
-          "mean_savings_percent": 51.36776684401336,
+          "mean_savings_usd": 0.024903750000000002,
+          "mean_savings_percent": 60.576484538903586,
           "mean_total_tokens_saved": -1525.0,
           "mean_turns_saved": 2.0,
           "mean_duration_seconds_saved": 11.8,
           "cache_hit_ratio_baseline": 0.04842342342342342,
           "cache_hit_ratio_icm": 4.025906735751295,
-          "cost_per_mtok_baseline": 0.08195745009261164,
-          "cost_per_mtok_icm": 0.03864486680634541,
-          "savings_usd_per_mtok": 0.043312583286266235,
-          "projected_savings_10m": 0.4331258328626624,
-          "projected_savings_100m": 4.331258328626624
+          "cost_per_mtok_baseline": 0.8460845853056185,
+          "cost_per_mtok_icm": 0.3234061658186172,
+          "savings_usd_per_mtok": 0.5226784194870013,
+          "projected_savings_10m": 5.226784194870014,
+          "projected_savings_100m": 52.26784194870013
         }
       },
       {
@@ -139,9 +139,9 @@
           "baseline": {
             "n": 2,
             "model": "gemini-3.8-flash",
-            "mean_cost_usd": 0.0046738125,
-            "min_cost_usd": 0.00464325,
-            "max_cost_usd": 0.004704375,
+            "mean_cost_usd": 0.04831125,
+            "min_cost_usd": 0.0479775,
+            "max_cost_usd": 0.048645,
             "mean_input_tokens": 52100.0,
             "mean_cache_read_tokens": 2150.0,
             "mean_output_tokens": 2420.0,
@@ -164,7 +164,7 @@
                 "total_tokens": 56950,
                 "num_turns": 6,
                 "duration_seconds": 28.3,
-                "cost_usd": 0.004704375
+                "cost_usd": 0.048645
               },
               {
                 "id": 10,
@@ -180,16 +180,16 @@
                 "total_tokens": 56390,
                 "num_turns": 6,
                 "duration_seconds": 27.1,
-                "cost_usd": 0.00464325
+                "cost_usd": 0.0479775
               }
             ]
           },
           "icm": {
             "n": 2,
             "model": "gemini-3.8-flash",
-            "mean_cost_usd": 0.0021691875,
-            "min_cost_usd": 0.002154,
-            "max_cost_usd": 0.002184375,
+            "mean_cost_usd": 0.018277500000000002,
+            "min_cost_usd": 0.01806,
+            "max_cost_usd": 0.018495,
             "mean_input_tokens": 11050.0,
             "mean_cache_read_tokens": 42450.0,
             "mean_output_tokens": 1815.0,
@@ -212,7 +212,7 @@
                 "total_tokens": 55150,
                 "num_turns": 3,
                 "duration_seconds": 14.5,
-                "cost_usd": 0.002184375
+                "cost_usd": 0.018495
               },
               {
                 "id": 12,
@@ -228,24 +228,24 @@
                 "total_tokens": 55480,
                 "num_turns": 3,
                 "duration_seconds": 13.9,
-                "cost_usd": 0.002154
+                "cost_usd": 0.01806
               }
             ]
           }
         },
         "savings": {
-          "mean_savings_usd": 0.002504625,
-          "mean_savings_percent": 53.58847835680186,
+          "mean_savings_usd": 0.030033749999999998,
+          "mean_savings_percent": 62.16719708142513,
           "mean_total_tokens_saved": 1355.0,
           "mean_turns_saved": 3.0,
           "mean_duration_seconds_saved": 13.500000000000004,
           "cache_hit_ratio_baseline": 0.04126679462571977,
           "cache_hit_ratio_icm": 3.841628959276018,
-          "cost_per_mtok_baseline": 0.08247419269454738,
-          "cost_per_mtok_icm": 0.03921517671517672,
-          "savings_usd_per_mtok": 0.04325901597937066,
-          "projected_savings_10m": 0.4325901597937066,
-          "projected_savings_100m": 4.325901597937066
+          "cost_per_mtok_baseline": 0.8525013234515616,
+          "cost_per_mtok_icm": 0.33042574346922177,
+          "savings_usd_per_mtok": 0.5220755799823398,
+          "projected_savings_10m": 5.220755799823397,
+          "projected_savings_100m": 52.20755799823398
         }
       },
       {
@@ -255,9 +255,9 @@
           "baseline": {
             "n": 2,
             "model": "gemini-3.8-flash",
-            "mean_cost_usd": 0.00542925,
-            "min_cost_usd": 0.005368125,
-            "max_cost_usd": 0.005490375,
+            "mean_cost_usd": 0.05604375,
+            "min_cost_usd": 0.055395,
+            "max_cost_usd": 0.0566925,
             "mean_input_tokens": 60500.0,
             "mean_cache_read_tokens": 3000.0,
             "mean_output_tokens": 2785.0,
@@ -280,7 +280,7 @@
                 "total_tokens": 66920,
                 "num_turns": 7,
                 "duration_seconds": 32.6,
-                "cost_usd": 0.005490375
+                "cost_usd": 0.0566925
               },
               {
                 "id": 14,
@@ -296,16 +296,16 @@
                 "total_tokens": 65650,
                 "num_turns": 7,
                 "duration_seconds": 31.4,
-                "cost_usd": 0.005368125
+                "cost_usd": 0.055395
               }
             ]
           },
           "icm": {
             "n": 2,
             "model": "gemini-3.8-flash",
-            "mean_cost_usd": 0.002535,
-            "min_cost_usd": 0.002523375,
-            "max_cost_usd": 0.002546625,
+            "mean_cost_usd": 0.0213225,
+            "min_cost_usd": 0.0211575,
+            "max_cost_usd": 0.0214875,
             "mean_input_tokens": 12950.0,
             "mean_cache_read_tokens": 49800.0,
             "mean_output_tokens": 2100.0,
@@ -328,7 +328,7 @@
                 "total_tokens": 64720,
                 "num_turns": 4,
                 "duration_seconds": 15.8,
-                "cost_usd": 0.002546625
+                "cost_usd": 0.0214875
               },
               {
                 "id": 16,
@@ -344,24 +344,24 @@
                 "total_tokens": 64980,
                 "num_turns": 4,
                 "duration_seconds": 15.2,
-                "cost_usd": 0.002523375
+                "cost_usd": 0.0211575
               }
             ]
           }
         },
         "savings": {
-          "mean_savings_usd": 0.00289425,
-          "mean_savings_percent": 53.30846802044481,
+          "mean_savings_usd": 0.03472125,
+          "mean_savings_percent": 61.95383071261291,
           "mean_total_tokens_saved": 1435.0,
           "mean_turns_saved": 3.0,
           "mean_duration_seconds_saved": 16.5,
           "cache_hit_ratio_baseline": 0.049586776859504134,
           "cache_hit_ratio_icm": 3.8455598455598454,
-          "cost_per_mtok_baseline": 0.08190767141887305,
-          "cost_per_mtok_icm": 0.03909020817270624,
-          "savings_usd_per_mtok": 0.04281746324616681,
-          "projected_savings_10m": 0.4281746324616681,
-          "projected_savings_100m": 4.281746324616681
+          "cost_per_mtok_baseline": 0.8454967187146414,
+          "cost_per_mtok_icm": 0.3287972243639168,
+          "savings_usd_per_mtok": 0.5166994943507246,
+          "projected_savings_10m": 5.166994943507246,
+          "projected_savings_100m": 51.66994943507246
         }
       },
       {
@@ -371,9 +371,9 @@
           "baseline": {
             "n": 2,
             "model": "gemini-3.8-flash",
-            "mean_cost_usd": 0.004268625,
-            "min_cost_usd": 0.00421575,
-            "max_cost_usd": 0.0043215,
+            "mean_cost_usd": 0.04408125,
+            "min_cost_usd": 0.0435075,
+            "max_cost_usd": 0.044655,
             "mean_input_tokens": 47350.0,
             "mean_cache_read_tokens": 2500.0,
             "mean_output_tokens": 2235.0,
@@ -396,7 +396,7 @@
                 "total_tokens": 52580,
                 "num_turns": 5,
                 "duration_seconds": 26.8,
-                "cost_usd": 0.0043215
+                "cost_usd": 0.044655
               },
               {
                 "id": 18,
@@ -412,16 +412,16 @@
                 "total_tokens": 51590,
                 "num_turns": 5,
                 "duration_seconds": 25.5,
-                "cost_usd": 0.00421575
+                "cost_usd": 0.0435075
               }
             ]
           },
           "icm": {
             "n": 2,
             "model": "gemini-3.8-flash",
-            "mean_cost_usd": 0.0020184375000000003,
-            "min_cost_usd": 0.00200775,
-            "max_cost_usd": 0.002029125,
+            "mean_cost_usd": 0.01702125,
+            "min_cost_usd": 0.01686,
+            "max_cost_usd": 0.0171825,
             "mean_input_tokens": 10250.0,
             "mean_cache_read_tokens": 39450.0,
             "mean_output_tokens": 1700.0,
@@ -444,7 +444,7 @@
                 "total_tokens": 51220,
                 "num_turns": 3,
                 "duration_seconds": 13.7,
-                "cost_usd": 0.002029125
+                "cost_usd": 0.0171825
               },
               {
                 "id": 20,
@@ -460,24 +460,24 @@
                 "total_tokens": 51580,
                 "num_turns": 3,
                 "duration_seconds": 13.1,
-                "cost_usd": 0.00200775
+                "cost_usd": 0.01686
               }
             ]
           }
         },
         "savings": {
-          "mean_savings_usd": 0.0022501874999999996,
-          "mean_savings_percent": 52.71457436528155,
+          "mean_savings_usd": 0.02706,
+          "mean_savings_percent": 61.386643981284564,
           "mean_total_tokens_saved": 685.0,
           "mean_turns_saved": 2.0,
           "mean_duration_seconds_saved": 12.75,
           "cache_hit_ratio_baseline": 0.05279831045406547,
           "cache_hit_ratio_icm": 3.848780487804878,
-          "cost_per_mtok_baseline": 0.08195497744072189,
-          "cost_per_mtok_icm": 0.039269212062256816,
-          "savings_usd_per_mtok": 0.04268576537846507,
-          "projected_savings_10m": 0.42685765378465074,
-          "projected_savings_100m": 4.268576537846507
+          "cost_per_mtok_baseline": 0.846332917346645,
+          "cost_per_mtok_icm": 0.3311527237354086,
+          "savings_usd_per_mtok": 0.5151801936112363,
+          "projected_savings_10m": 5.1518019361123635,
+          "projected_savings_100m": 51.518019361123635
         }
       }
     ]
@@ -490,9 +490,9 @@
         "baseline": {
           "n": 2,
           "model": "gemini-3.8-flash",
-          "mean_cost_usd": 0.0039823125,
-          "min_cost_usd": 0.003918375,
-          "max_cost_usd": 0.00404625,
+          "mean_cost_usd": 0.04111125,
+          "min_cost_usd": 0.0404325,
+          "max_cost_usd": 0.04179,
           "mean_input_tokens": 44400.0,
           "mean_cache_read_tokens": 2150.0,
           "mean_output_tokens": 2040.0,
@@ -515,7 +515,7 @@
               "total_tokens": 49300,
               "num_turns": 5,
               "duration_seconds": 25.4,
-              "cost_usd": 0.00404625
+              "cost_usd": 0.04179
             },
             {
               "id": 6,
@@ -531,16 +531,16 @@
               "total_tokens": 47880,
               "num_turns": 5,
               "duration_seconds": 24.1,
-              "cost_usd": 0.003918375
+              "cost_usd": 0.0404325
             }
           ]
         },
         "icm": {
           "n": 2,
           "model": "gemini-3.8-flash",
-          "mean_cost_usd": 0.0019366875,
-          "min_cost_usd": 0.0019215,
-          "max_cost_usd": 0.001951875,
+          "mean_cost_usd": 0.0162075,
+          "min_cost_usd": 0.01599,
+          "max_cost_usd": 0.016425,
           "mean_input_tokens": 9650.0,
           "mean_cache_read_tokens": 38850.0,
           "mean_output_tokens": 1615.0,
@@ -563,7 +563,7 @@
               "total_tokens": 49950,
               "num_turns": 3,
               "duration_seconds": 13.2,
-              "cost_usd": 0.001951875
+              "cost_usd": 0.016425
             },
             {
               "id": 8,
@@ -579,24 +579,24 @@
               "total_tokens": 50280,
               "num_turns": 3,
               "duration_seconds": 12.7,
-              "cost_usd": 0.0019215
+              "cost_usd": 0.01599
             }
           ]
         }
       },
       "savings": {
-        "mean_savings_usd": 0.0020456249999999997,
-        "mean_savings_percent": 51.36776684401336,
+        "mean_savings_usd": 0.024903750000000002,
+        "mean_savings_percent": 60.576484538903586,
         "mean_total_tokens_saved": -1525.0,
         "mean_turns_saved": 2.0,
         "mean_duration_seconds_saved": 11.8,
         "cache_hit_ratio_baseline": 0.04842342342342342,
         "cache_hit_ratio_icm": 4.025906735751295,
-        "cost_per_mtok_baseline": 0.08195745009261164,
-        "cost_per_mtok_icm": 0.03864486680634541,
-        "savings_usd_per_mtok": 0.043312583286266235,
-        "projected_savings_10m": 0.4331258328626624,
-        "projected_savings_100m": 4.331258328626624
+        "cost_per_mtok_baseline": 0.8460845853056185,
+        "cost_per_mtok_icm": 0.3234061658186172,
+        "savings_usd_per_mtok": 0.5226784194870013,
+        "projected_savings_10m": 5.226784194870014,
+        "projected_savings_100m": 52.26784194870013
       }
     },
     {
@@ -606,9 +606,9 @@
         "baseline": {
           "n": 2,
           "model": "gemini-3.8-flash",
-          "mean_cost_usd": 0.0046738125,
-          "min_cost_usd": 0.00464325,
-          "max_cost_usd": 0.004704375,
+          "mean_cost_usd": 0.04831125,
+          "min_cost_usd": 0.0479775,
+          "max_cost_usd": 0.048645,
           "mean_input_tokens": 52100.0,
           "mean_cache_read_tokens": 2150.0,
           "mean_output_tokens": 2420.0,
@@ -631,7 +631,7 @@
               "total_tokens": 56950,
               "num_turns": 6,
               "duration_seconds": 28.3,
-              "cost_usd": 0.004704375
+              "cost_usd": 0.048645
             },
             {
               "id": 10,
@@ -647,16 +647,16 @@
               "total_tokens": 56390,
               "num_turns": 6,
               "duration_seconds": 27.1,
-              "cost_usd": 0.00464325
+              "cost_usd": 0.0479775
             }
           ]
         },
         "icm": {
           "n": 2,
           "model": "gemini-3.8-flash",
-          "mean_cost_usd": 0.0021691875,
-          "min_cost_usd": 0.002154,
-          "max_cost_usd": 0.002184375,
+          "mean_cost_usd": 0.018277500000000002,
+          "min_cost_usd": 0.01806,
+          "max_cost_usd": 0.018495,
           "mean_input_tokens": 11050.0,
           "mean_cache_read_tokens": 42450.0,
           "mean_output_tokens": 1815.0,
@@ -679,7 +679,7 @@
               "total_tokens": 55150,
               "num_turns": 3,
               "duration_seconds": 14.5,
-              "cost_usd": 0.002184375
+              "cost_usd": 0.018495
             },
             {
               "id": 12,
@@ -695,24 +695,24 @@
               "total_tokens": 55480,
               "num_turns": 3,
               "duration_seconds": 13.9,
-              "cost_usd": 0.002154
+              "cost_usd": 0.01806
             }
           ]
         }
       },
       "savings": {
-        "mean_savings_usd": 0.002504625,
-        "mean_savings_percent": 53.58847835680186,
+        "mean_savings_usd": 0.030033749999999998,
+        "mean_savings_percent": 62.16719708142513,
         "mean_total_tokens_saved": 1355.0,
         "mean_turns_saved": 3.0,
         "mean_duration_seconds_saved": 13.500000000000004,
         "cache_hit_ratio_baseline": 0.04126679462571977,
         "cache_hit_ratio_icm": 3.841628959276018,
-        "cost_per_mtok_baseline": 0.08247419269454738,
-        "cost_per_mtok_icm": 0.03921517671517672,
-        "savings_usd_per_mtok": 0.04325901597937066,
-        "projected_savings_10m": 0.4325901597937066,
-        "projected_savings_100m": 4.325901597937066
+        "cost_per_mtok_baseline": 0.8525013234515616,
+        "cost_per_mtok_icm": 0.33042574346922177,
+        "savings_usd_per_mtok": 0.5220755799823398,
+        "projected_savings_10m": 5.220755799823397,
+        "projected_savings_100m": 52.20755799823398
       }
     },
     {
@@ -722,9 +722,9 @@
         "baseline": {
           "n": 2,
           "model": "gemini-3.8-flash",
-          "mean_cost_usd": 0.00542925,
-          "min_cost_usd": 0.005368125,
-          "max_cost_usd": 0.005490375,
+          "mean_cost_usd": 0.05604375,
+          "min_cost_usd": 0.055395,
+          "max_cost_usd": 0.0566925,
           "mean_input_tokens": 60500.0,
           "mean_cache_read_tokens": 3000.0,
           "mean_output_tokens": 2785.0,
@@ -747,7 +747,7 @@
               "total_tokens": 66920,
               "num_turns": 7,
               "duration_seconds": 32.6,
-              "cost_usd": 0.005490375
+              "cost_usd": 0.0566925
             },
             {
               "id": 14,
@@ -763,16 +763,16 @@
               "total_tokens": 65650,
               "num_turns": 7,
               "duration_seconds": 31.4,
-              "cost_usd": 0.005368125
+              "cost_usd": 0.055395
             }
           ]
         },
         "icm": {
           "n": 2,
           "model": "gemini-3.8-flash",
-          "mean_cost_usd": 0.002535,
-          "min_cost_usd": 0.002523375,
-          "max_cost_usd": 0.002546625,
+          "mean_cost_usd": 0.0213225,
+          "min_cost_usd": 0.0211575,
+          "max_cost_usd": 0.0214875,
           "mean_input_tokens": 12950.0,
           "mean_cache_read_tokens": 49800.0,
           "mean_output_tokens": 2100.0,
@@ -795,7 +795,7 @@
               "total_tokens": 64720,
               "num_turns": 4,
               "duration_seconds": 15.8,
-              "cost_usd": 0.002546625
+              "cost_usd": 0.0214875
             },
             {
               "id": 16,
@@ -811,24 +811,24 @@
               "total_tokens": 64980,
               "num_turns": 4,
               "duration_seconds": 15.2,
-              "cost_usd": 0.002523375
+              "cost_usd": 0.0211575
             }
           ]
         }
       },
       "savings": {
-        "mean_savings_usd": 0.00289425,
-        "mean_savings_percent": 53.30846802044481,
+        "mean_savings_usd": 0.03472125,
+        "mean_savings_percent": 61.95383071261291,
         "mean_total_tokens_saved": 1435.0,
         "mean_turns_saved": 3.0,
         "mean_duration_seconds_saved": 16.5,
         "cache_hit_ratio_baseline": 0.049586776859504134,
         "cache_hit_ratio_icm": 3.8455598455598454,
-        "cost_per_mtok_baseline": 0.08190767141887305,
-        "cost_per_mtok_icm": 0.03909020817270624,
-        "savings_usd_per_mtok": 0.04281746324616681,
-        "projected_savings_10m": 0.4281746324616681,
-        "projected_savings_100m": 4.281746324616681
+        "cost_per_mtok_baseline": 0.8454967187146414,
+        "cost_per_mtok_icm": 0.3287972243639168,
+        "savings_usd_per_mtok": 0.5166994943507246,
+        "projected_savings_10m": 5.166994943507246,
+        "projected_savings_100m": 51.66994943507246
       }
     },
     {
@@ -838,9 +838,9 @@
         "baseline": {
           "n": 2,
           "model": "gemini-3.8-flash",
-          "mean_cost_usd": 0.004268625,
-          "min_cost_usd": 0.00421575,
-          "max_cost_usd": 0.0043215,
+          "mean_cost_usd": 0.04408125,
+          "min_cost_usd": 0.0435075,
+          "max_cost_usd": 0.044655,
           "mean_input_tokens": 47350.0,
           "mean_cache_read_tokens": 2500.0,
           "mean_output_tokens": 2235.0,
@@ -863,7 +863,7 @@
               "total_tokens": 52580,
               "num_turns": 5,
               "duration_seconds": 26.8,
-              "cost_usd": 0.0043215
+              "cost_usd": 0.044655
             },
             {
               "id": 18,
@@ -879,16 +879,16 @@
               "total_tokens": 51590,
               "num_turns": 5,
               "duration_seconds": 25.5,
-              "cost_usd": 0.00421575
+              "cost_usd": 0.0435075
             }
           ]
         },
         "icm": {
           "n": 2,
           "model": "gemini-3.8-flash",
-          "mean_cost_usd": 0.0020184375000000003,
-          "min_cost_usd": 0.00200775,
-          "max_cost_usd": 0.002029125,
+          "mean_cost_usd": 0.01702125,
+          "min_cost_usd": 0.01686,
+          "max_cost_usd": 0.0171825,
           "mean_input_tokens": 10250.0,
           "mean_cache_read_tokens": 39450.0,
           "mean_output_tokens": 1700.0,
@@ -911,7 +911,7 @@
               "total_tokens": 51220,
               "num_turns": 3,
               "duration_seconds": 13.7,
-              "cost_usd": 0.002029125
+              "cost_usd": 0.0171825
             },
             {
               "id": 20,
@@ -927,24 +927,24 @@
               "total_tokens": 51580,
               "num_turns": 3,
               "duration_seconds": 13.1,
-              "cost_usd": 0.00200775
+              "cost_usd": 0.01686
             }
           ]
         }
       },
       "savings": {
-        "mean_savings_usd": 0.0022501874999999996,
-        "mean_savings_percent": 52.71457436528155,
+        "mean_savings_usd": 0.02706,
+        "mean_savings_percent": 61.386643981284564,
         "mean_total_tokens_saved": 685.0,
         "mean_turns_saved": 2.0,
         "mean_duration_seconds_saved": 12.75,
         "cache_hit_ratio_baseline": 0.05279831045406547,
         "cache_hit_ratio_icm": 3.848780487804878,
-        "cost_per_mtok_baseline": 0.08195497744072189,
-        "cost_per_mtok_icm": 0.039269212062256816,
-        "savings_usd_per_mtok": 0.04268576537846507,
-        "projected_savings_10m": 0.42685765378465074,
-        "projected_savings_100m": 4.268576537846507
+        "cost_per_mtok_baseline": 0.846332917346645,
+        "cost_per_mtok_icm": 0.3311527237354086,
+        "savings_usd_per_mtok": 0.5151801936112363,
+        "projected_savings_10m": 5.1518019361123635,
+        "projected_savings_100m": 51.518019361123635
       }
     }
   ],
@@ -963,7 +963,7 @@
       "total_tokens": 49300,
       "num_turns": 5,
       "duration_seconds": 25.4,
-      "cost_usd": 0.00404625
+      "cost_usd": 0.04179
     },
     {
       "id": 6,
@@ -979,7 +979,7 @@
       "total_tokens": 47880,
       "num_turns": 5,
       "duration_seconds": 24.1,
-      "cost_usd": 0.003918375
+      "cost_usd": 0.0404325
     },
     {
       "id": 7,
@@ -995,7 +995,7 @@
       "total_tokens": 49950,
       "num_turns": 3,
       "duration_seconds": 13.2,
-      "cost_usd": 0.001951875
+      "cost_usd": 0.016425
     },
     {
       "id": 8,
@@ -1011,7 +1011,7 @@
       "total_tokens": 50280,
       "num_turns": 3,
       "duration_seconds": 12.7,
-      "cost_usd": 0.0019215
+      "cost_usd": 0.01599
     },
     {
       "id": 9,
@@ -1027,7 +1027,7 @@
       "total_tokens": 56950,
       "num_turns": 6,
       "duration_seconds": 28.3,
-      "cost_usd": 0.004704375
+      "cost_usd": 0.048645
     },
     {
       "id": 10,
@@ -1043,7 +1043,7 @@
       "total_tokens": 56390,
       "num_turns": 6,
       "duration_seconds": 27.1,
-      "cost_usd": 0.00464325
+      "cost_usd": 0.0479775
     },
     {
       "id": 11,
@@ -1059,7 +1059,7 @@
       "total_tokens": 55150,
       "num_turns": 3,
       "duration_seconds": 14.5,
-      "cost_usd": 0.002184375
+      "cost_usd": 0.018495
     },
     {
       "id": 12,
@@ -1075,7 +1075,7 @@
       "total_tokens": 55480,
       "num_turns": 3,
       "duration_seconds": 13.9,
-      "cost_usd": 0.002154
+      "cost_usd": 0.01806
     },
     {
       "id": 13,
@@ -1091,7 +1091,7 @@
       "total_tokens": 66920,
       "num_turns": 7,
       "duration_seconds": 32.6,
-      "cost_usd": 0.005490375
+      "cost_usd": 0.0566925
     },
     {
       "id": 14,
@@ -1107,7 +1107,7 @@
       "total_tokens": 65650,
       "num_turns": 7,
       "duration_seconds": 31.4,
-      "cost_usd": 0.005368125
+      "cost_usd": 0.055395
     },
     {
       "id": 15,
@@ -1123,7 +1123,7 @@
       "total_tokens": 64720,
       "num_turns": 4,
       "duration_seconds": 15.8,
-      "cost_usd": 0.002546625
+      "cost_usd": 0.0214875
     },
     {
       "id": 16,
@@ -1139,7 +1139,7 @@
       "total_tokens": 64980,
       "num_turns": 4,
       "duration_seconds": 15.2,
-      "cost_usd": 0.002523375
+      "cost_usd": 0.0211575
     },
     {
       "id": 17,
@@ -1155,7 +1155,7 @@
       "total_tokens": 52580,
       "num_turns": 5,
       "duration_seconds": 26.8,
-      "cost_usd": 0.0043215
+      "cost_usd": 0.044655
     },
     {
       "id": 18,
@@ -1171,7 +1171,7 @@
       "total_tokens": 51590,
       "num_turns": 5,
       "duration_seconds": 25.5,
-      "cost_usd": 0.00421575
+      "cost_usd": 0.0435075
     },
     {
       "id": 19,
@@ -1187,7 +1187,7 @@
       "total_tokens": 51220,
       "num_turns": 3,
       "duration_seconds": 13.7,
-      "cost_usd": 0.002029125
+      "cost_usd": 0.0171825
     },
     {
       "id": 20,
@@ -1203,7 +1203,7 @@
       "total_tokens": 51580,
       "num_turns": 3,
       "duration_seconds": 13.1,
-      "cost_usd": 0.00200775
+      "cost_usd": 0.01686
     }
   ],
   "timeline": [
@@ -1213,10 +1213,10 @@
       "task_id": "EXP-001",
       "run_index": 1,
       "timestamp": "2026-09-09T17:11:13Z",
-      "baseline_cost_usd": 0.00404625,
-      "icm_cost_usd": 0.001951875,
-      "delta_saved_usd": 0.0020943750000000003,
-      "cumulative_savings_usd": 0.0020943750000000003
+      "baseline_cost_usd": 0.04179,
+      "icm_cost_usd": 0.016425,
+      "delta_saved_usd": 0.025365000000000002,
+      "cumulative_savings_usd": 0.025365000000000002
     },
     {
       "step": 2,
@@ -1224,10 +1224,10 @@
       "task_id": "EXP-001",
       "run_index": 2,
       "timestamp": "2026-09-09T17:11:32Z",
-      "baseline_cost_usd": 0.003918375,
-      "icm_cost_usd": 0.0019215,
-      "delta_saved_usd": 0.001996875,
-      "cumulative_savings_usd": 0.00409125
+      "baseline_cost_usd": 0.0404325,
+      "icm_cost_usd": 0.01599,
+      "delta_saved_usd": 0.024442500000000002,
+      "cumulative_savings_usd": 0.049807500000000005
     },
     {
       "step": 3,
@@ -1235,10 +1235,10 @@
       "task_id": "EXP-002",
       "run_index": 1,
       "timestamp": "2026-09-09T17:21:24Z",
-      "baseline_cost_usd": 0.004704375,
-      "icm_cost_usd": 0.002184375,
-      "delta_saved_usd": 0.00252,
-      "cumulative_savings_usd": 0.006611250000000001
+      "baseline_cost_usd": 0.048645,
+      "icm_cost_usd": 0.018495,
+      "delta_saved_usd": 0.03015,
+      "cumulative_savings_usd": 0.0799575
     },
     {
       "step": 4,
@@ -1246,10 +1246,10 @@
       "task_id": "EXP-002",
       "run_index": 2,
       "timestamp": "2026-09-09T17:21:44Z",
-      "baseline_cost_usd": 0.00464325,
-      "icm_cost_usd": 0.002154,
-      "delta_saved_usd": 0.0024892499999999997,
-      "cumulative_savings_usd": 0.009100500000000001
+      "baseline_cost_usd": 0.0479775,
+      "icm_cost_usd": 0.01806,
+      "delta_saved_usd": 0.0299175,
+      "cumulative_savings_usd": 0.109875
     },
     {
       "step": 5,
@@ -1257,10 +1257,10 @@
       "task_id": "EXP-003",
       "run_index": 1,
       "timestamp": "2026-09-09T17:23:36Z",
-      "baseline_cost_usd": 0.005490375,
-      "icm_cost_usd": 0.002546625,
-      "delta_saved_usd": 0.0029437499999999998,
-      "cumulative_savings_usd": 0.012044250000000001
+      "baseline_cost_usd": 0.0566925,
+      "icm_cost_usd": 0.0214875,
+      "delta_saved_usd": 0.035205,
+      "cumulative_savings_usd": 0.14508
     },
     {
       "step": 6,
@@ -1268,10 +1268,10 @@
       "task_id": "EXP-003",
       "run_index": 2,
       "timestamp": "2026-09-09T17:24:00Z",
-      "baseline_cost_usd": 0.005368125,
-      "icm_cost_usd": 0.002523375,
-      "delta_saved_usd": 0.0028447499999999996,
-      "cumulative_savings_usd": 0.014889000000000001
+      "baseline_cost_usd": 0.055395,
+      "icm_cost_usd": 0.0211575,
+      "delta_saved_usd": 0.034237500000000004,
+      "cumulative_savings_usd": 0.1793175
     },
     {
       "step": 7,
@@ -1279,10 +1279,10 @@
       "task_id": "EXP-004",
       "run_index": 1,
       "timestamp": "2026-09-09T17:25:34Z",
-      "baseline_cost_usd": 0.0043215,
-      "icm_cost_usd": 0.002029125,
-      "delta_saved_usd": 0.0022923749999999997,
-      "cumulative_savings_usd": 0.017181375000000002
+      "baseline_cost_usd": 0.044655,
+      "icm_cost_usd": 0.0171825,
+      "delta_saved_usd": 0.0274725,
+      "cumulative_savings_usd": 0.20679
     },
     {
       "step": 8,
@@ -1290,18 +1290,18 @@
       "task_id": "EXP-004",
       "run_index": 2,
       "timestamp": "2026-09-09T17:25:53Z",
-      "baseline_cost_usd": 0.00421575,
-      "icm_cost_usd": 0.00200775,
-      "delta_saved_usd": 0.002208,
-      "cumulative_savings_usd": 0.019389375
+      "baseline_cost_usd": 0.0435075,
+      "icm_cost_usd": 0.01686,
+      "delta_saved_usd": 0.026647499999999998,
+      "cumulative_savings_usd": 0.2334375
     }
   ],
   "pricing": [
     {
       "model": "gemini-2.5-pro",
       "input_usd_per_mtok": 1.25,
-      "cache_read_usd_per_mtok": 0.3125,
-      "output_usd_per_mtok": 5.0,
+      "cache_read_usd_per_mtok": 0.125,
+      "output_usd_per_mtok": 10.0,
       "source_url": "https://ai.google.dev/pricing",
       "fetched_at": "2026-09-09T00:00:00Z",
       "pricing_mode": null,
@@ -1309,9 +1309,9 @@
     },
     {
       "model": "gemini-2.5-flash",
-      "input_usd_per_mtok": 0.075,
-      "cache_read_usd_per_mtok": 0.01875,
-      "output_usd_per_mtok": 0.3,
+      "input_usd_per_mtok": 0.3,
+      "cache_read_usd_per_mtok": 0.03,
+      "output_usd_per_mtok": 2.5,
       "source_url": "https://ai.google.dev/pricing",
       "fetched_at": "2026-09-09T00:00:00Z",
       "pricing_mode": null,
@@ -1319,9 +1319,9 @@
     },
     {
       "model": "gemini-3.8-flash",
-      "input_usd_per_mtok": 0.075,
-      "cache_read_usd_per_mtok": 0.01875,
-      "output_usd_per_mtok": 0.3,
+      "input_usd_per_mtok": 0.75,
+      "cache_read_usd_per_mtok": 0.075,
+      "output_usd_per_mtok": 3.75,
       "source_url": "https://ai.google.dev/pricing",
       "fetched_at": "2026-09-09T00:00:00Z",
       "pricing_mode": null,
@@ -1382,58 +1382,58 @@
     {
       "model": "gemini-2.5-pro",
       "input_usd_per_mtok": 1.25,
-      "cache_read_usd_per_mtok": 0.3125,
-      "output_usd_per_mtok": 5.0,
+      "cache_read_usd_per_mtok": 0.125,
+      "output_usd_per_mtok": 10.0,
       "pricing_mode": null,
       "provider_note": null,
-      "total_baseline_cost_usd": 0.6118,
-      "total_icm_cost_usd": 0.28864375000000003,
-      "cumulative_savings_usd": 0.32315625,
-      "cumulative_savings_percent": 52.82057044785877,
-      "cost_per_mtok_baseline": 1.3678844519966016,
-      "cost_per_mtok_icm": 0.651036967701191,
-      "savings_usd_per_mtok": 0.7168474842954106,
-      "projected_savings_10m": 7.168474842954105,
-      "projected_savings_100m": 71.68474842954106,
-      "projected_savings_1b": 716.8474842954106,
+      "total_baseline_cost_usd": 0.7029250000000001,
+      "total_icm_cost_usd": 0.2969875,
+      "cumulative_savings_usd": 0.4059375000000001,
+      "cumulative_savings_percent": 57.74975993171392,
+      "cost_per_mtok_baseline": 1.5716250055895904,
+      "cost_per_mtok_icm": 0.6698563244316131,
+      "savings_usd_per_mtok": 0.9017686811579773,
+      "projected_savings_10m": 9.017686811579772,
+      "projected_savings_100m": 90.17686811579773,
+      "projected_savings_1b": 901.7686811579773,
       "source_url": "https://ai.google.dev/pricing"
     },
     {
       "model": "gemini-2.5-flash",
-      "input_usd_per_mtok": 0.075,
-      "cache_read_usd_per_mtok": 0.01875,
-      "output_usd_per_mtok": 0.3,
+      "input_usd_per_mtok": 0.3,
+      "cache_read_usd_per_mtok": 0.03,
+      "output_usd_per_mtok": 2.5,
       "pricing_mode": null,
       "provider_note": null,
-      "total_baseline_cost_usd": 0.036708,
-      "total_icm_cost_usd": 0.017318625,
-      "cumulative_savings_usd": 0.019389374999999997,
-      "cumulative_savings_percent": 52.82057044785877,
-      "cost_per_mtok_baseline": 0.08207306711979609,
-      "cost_per_mtok_icm": 0.039062218062071455,
-      "savings_usd_per_mtok": 0.043010849057724634,
-      "projected_savings_10m": 0.4301084905772463,
-      "projected_savings_100m": 4.301084905772464,
-      "projected_savings_1b": 43.010849057724634,
+      "total_baseline_cost_usd": 0.170598,
+      "total_icm_cost_usd": 0.07272300000000001,
+      "cumulative_savings_usd": 0.09787499999999999,
+      "cumulative_savings_percent": 57.37171596384483,
+      "cost_per_mtok_baseline": 0.3814291463578232,
+      "cost_per_mtok_icm": 0.16402697582100326,
+      "savings_usd_per_mtok": 0.21740217053681996,
+      "projected_savings_10m": 2.1740217053681996,
+      "projected_savings_100m": 21.740217053681995,
+      "projected_savings_1b": 217.40217053681997,
       "source_url": "https://ai.google.dev/pricing"
     },
     {
       "model": "gemini-3.8-flash",
-      "input_usd_per_mtok": 0.075,
-      "cache_read_usd_per_mtok": 0.01875,
-      "output_usd_per_mtok": 0.3,
+      "input_usd_per_mtok": 0.75,
+      "cache_read_usd_per_mtok": 0.075,
+      "output_usd_per_mtok": 3.75,
       "pricing_mode": null,
       "provider_note": null,
-      "total_baseline_cost_usd": 0.036708,
-      "total_icm_cost_usd": 0.017318625,
-      "cumulative_savings_usd": 0.019389374999999997,
-      "cumulative_savings_percent": 52.82057044785877,
-      "cost_per_mtok_baseline": 0.08207306711979609,
-      "cost_per_mtok_icm": 0.039062218062071455,
-      "savings_usd_per_mtok": 0.043010849057724634,
-      "projected_savings_10m": 0.4301084905772463,
-      "projected_savings_100m": 4.301084905772464,
-      "projected_savings_1b": 43.010849057724634,
+      "total_baseline_cost_usd": 0.379095,
+      "total_icm_cost_usd": 0.1456575,
+      "cumulative_savings_usd": 0.23343750000000002,
+      "cumulative_savings_percent": 61.57757290388953,
+      "cost_per_mtok_baseline": 0.847594240486518,
+      "cost_per_mtok_icm": 0.3285309906171057,
+      "savings_usd_per_mtok": 0.5190632498694123,
+      "projected_savings_10m": 5.190632498694123,
+      "projected_savings_100m": 51.90632498694123,
+      "projected_savings_1b": 519.0632498694123,
       "source_url": "https://ai.google.dev/pricing"
     },
     {

@@ -19,7 +19,7 @@
 
 > **Empirical Benchmark Status:** Pre-registered trials (`EXP-001` through `EXP-004`) evaluated against `gemini-3.8-flash` across 16 runs: 8 baseline and 8 ICM.
 >
-> **Measured Results:** The Interpretable Context Methodology (ICM) demonstrated a **52.82% cost reduction** ($0.03671 baseline vs. $0.01732 ICM). It increased the **cache-read-to-fresh-input ratio** from **4.8% to 390.5%** through byte-stable prompt prefixes.
+> **Measured Results:** The Interpretable Context Methodology (ICM) demonstrated a **61.58% cost reduction** ($0.37910 baseline vs. $0.14566 ICM). It increased the **cache-read-to-fresh-input ratio** from **4.8% to 390.5%** through byte-stable prompt prefixes.
 
 | Milestone | Status | Details |
 | :--- | :--- | :--- |
@@ -27,7 +27,7 @@
 | **Token Control Scripts** | Verified | AST symbol extraction (`repo_map.py`) and CLI log sanitization |
 | **Measurement Harness** | Verified | Headless A/B runner (`run_experiment.py`) and SQLite ledger |
 | **Local Dashboard** | Active | Vite, React, and Recharts app with Model Rate Card Simulator (`localhost:5173`) · [**Live on GitHub Pages →**](https://zenzerjs.github.io/Ai-Lab/) |
-| **Empirical Trials (`EXP-001–004`)** | Complete | 16 runs evaluated on `gemini-3.8-flash` with 52.82% measured savings |
+| **Empirical Trials (`EXP-001–004`)** | Complete | 16 runs evaluated on `gemini-3.8-flash` with 61.58% measured savings |
 | **Model Spend Cascade Engine** | Active | Dynamic re-pricing across Flash, Pro, GPT-4o, Claude 3.7 Sonnet, Claude Sonnet 4.6, Claude Sonnet 5, and GLM 5.3 Flash (provider-equivalent) |
 
 **The problem:** AI coding agents burn tokens re-reading whole repositories, hallucinate from stale context, and declare untested code "done."
@@ -249,10 +249,10 @@ The table below shows how the **same measured token workload** (447k baseline to
 
 | Model | Rate Card (In / Cache / Out) | Baseline Spend | ICM Spend | Net Savings ($) | Cost Reduction | Projected Savings @ 100M Tokens | Enterprise Savings @ 1B Tokens |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **`gemini-2.5-flash`** | $0.075 / $0.0187 / $0.30 | $0.0367 | $0.0173 | **+$0.0194** | 52.8% | +$4.30 | +$43.01 |
-| **`gemini-3.8-flash`** | $0.075 / $0.0187 / $0.30 | $0.0367 | $0.0173 | **+$0.0194** | 52.8% | +$4.30 | +$43.01 |
+| **`gemini-2.5-flash`** | $0.30 / $0.03 / $2.50 | $0.1706 | $0.0727 | **+$0.0979** | 57.4% | +$21.74 | +$217.40 |
+| **`gemini-3.8-flash`** | $0.75 / $0.075 / $3.75 | $0.3791 | $0.1457 | **+$0.2334** | 61.6% | +$51.91 | +$519.06 |
 | **`glm-5.3-flash`** † | $0.075 / $0.0150 / $0.25 | $0.0357 | $0.0153 | **+$0.0204** | 57.1% | +$4.52 | +$45.24 |
-| **`gemini-2.5-pro`** | $1.250 / $0.3125 / $5.00 | $0.6118 | $0.2886 | **+$0.3232** | 52.8% | +$71.68 | +$716.85 |
+| **`gemini-2.5-pro`** | $1.250 / $0.125 / $10.00 | $0.7029 | $0.2970 | **+$0.4059** | 57.7% | +$90.18 | +$901.77 |
 | **`gpt-4o`** | $2.500 / $1.2500 / $10.00 | $1.2359 | $0.7905 | **+$0.4454** | 36.0% | +$98.02 | +$980.24 |
 | **`claude-sonnet-5`** | $2.000 / $0.2000 / $10.00 | $1.0109 | $0.3884 | **+$0.6225** | 61.6% | +$138.42 | +$1,384.17 |
 | **`claude-3-7-sonnet`** | $3.000 / $0.3000 / $15.00 | $1.5164 | $0.5826 | **+$0.9338** | 61.6% | +$207.63 | **+$2,076.25** |
@@ -261,34 +261,35 @@ The table below shows how the **same measured token workload** (447k baseline to
 ```text
 Measured Benchmark Spend (Baseline vs. ICM Pipeline):
 
-gemini-2.5-flash  [$0.0367] ■■■■■
-                  [$0.0173] ■■ (-52.8%)
+gemini-2.5-flash  [$0.1706] ■■■■■■■■■
+                  [$0.0727] ■■■■ (-57.4%)
 
-gemini-3.8-flash  [$0.0367] ■■■■■
-                  [$0.0173] ■■ (-52.8%)
+gemini-3.8-flash  [$0.3791] ■■■■■■■■■■■■■■■■■■■
+                  [$0.1457] ■■■■■■■ (-61.6%)  ← live-measured model
 
-glm-5.3-flash†    [$0.0357] ■■■■■
-                  [$0.0153] ■■ (-57.1%)  † provider-equivalent simulation, $0 direct user cost
+glm-5.3-flash†    [$0.0357] ■■
+                  [$0.0153] ■ (-57.1%)  † provider-equivalent simulation, $0 direct user cost
 
-gemini-2.5-pro    [$0.6118] ■■■■■■■■■■■■■■■■■
-                  [$0.2886] ■■■■■■■■ (-52.8%)
+gemini-2.5-pro    [$0.7029] ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+                  [$0.2970] ■■■■■■■■■■■■■■■ (-57.7%)
 
-gpt-4o            [$1.2359] ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-                  [$0.7905] ■■■■■■■■■■■■■■■■■■■■■■■
+gpt-4o            [$1.2359] ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+                  [$0.7905] ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ (-36.0%)
 
-claude-sonnet-5   [$1.0109] ■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-                  [$0.3884] ■■■■■■■■■■■ (-61.6%)
+claude-sonnet-5   [$1.0109] ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+                  [$0.3884] ■■■■■■■■■■■■■■■■■■■ (-61.6%)
 
-claude-3-7-sonnet [$1.5164] ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-claude-sonnet-4-6 [$1.5164] ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
-                  [$0.5826] ■■■■■■■■■■■■■■■■ (-61.6%)  ← both models, same rate tier
+claude-3-7-sonnet [$1.5164] ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+
+claude-sonnet-4-6 [$1.5164] ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+                  [$0.5826] ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■ (-61.6%)  ← both models, same rate tier
 
 Legend: Top Bar = Baseline (Unconstrained) | Bottom Bar = ICM Pipeline (Governed)
 ```
 
 #### Focus: Claude Sonnet 4.6 & Claude Sonnet 5 Simulated Economics
 
-Anthropic's prompt caching structure provides a **90% discount** on cache-read tokens ($0.30/M vs. $3.00/M input for Sonnet 4.6 / Sonnet 3.7, and $0.20/M vs. $2.00/M input for Sonnet 5). Because ICM structures context into byte-stable prefixes (increasing cache-read ratios from 4.8% to 390.5%), the steeper cache discount produces an even higher percentage cost reduction (**61.6%**) than on Google Flash tiers (**52.8%**):
+Anthropic's prompt caching structure provides a **90% discount** on cache-read tokens ($0.30/M vs. $3.00/M input for Sonnet 4.6 / Sonnet 3.7, and $0.20/M vs. $2.00/M input for Sonnet 5). Because ICM structures context into byte-stable prefixes (increasing cache-read ratios from 4.8% to 390.5%), models with a steep cache discount (`gemini-3.8-flash`: $0.075/M vs. $0.75/M) reach the same **61.6%** reduction as the Claude tiers, while the broader Gemini 2.5 family lands between **57.4% and 57.7%**:
 
 * **`claude-sonnet-4-6` ($3.00 / $0.30 / $15.00 per M tokens):**
   - **Baseline Spend:** $1.5164 | **ICM Spend:** $0.5826
@@ -443,10 +444,10 @@ python dashboard/build_data.py
 | A/B dry run | `run_experiment.py --task MOCK-001 --dry-run` | `0` | 6 fixture runs recorded |
 | Invariant: n < 2 | `run_experiment.py --task MOCK-001 --dry-run --runs 1` | `1` | Correctly aborted |
 | Invariant: unknown model | `run_experiment.py --task MOCK-001 --dry-run --model unknown` | `1` | Correctly aborted |
-| Empirical Trial `EXP-001` | `run_experiment.py --task EXP-001` | `0` | 4 runs, 51.4% savings |
-| Empirical Trial `EXP-002` | `run_experiment.py --task EXP-002` | `0` | 4 runs, 53.6% savings |
-| Empirical Trial `EXP-003` | `run_experiment.py --task EXP-003` | `0` | 4 runs, 53.3% savings |
-| Empirical Trial `EXP-004` | `run_experiment.py --task EXP-004` | `0` | 4 runs, 52.7% savings |
+| Empirical Trial `EXP-001` | `run_experiment.py --task EXP-001` | `0` | 4 runs, 60.6% savings |
+| Empirical Trial `EXP-002` | `run_experiment.py --task EXP-002` | `0` | 4 runs, 62.2% savings |
+| Empirical Trial `EXP-003` | `run_experiment.py --task EXP-003` | `0` | 4 runs, 62.0% savings |
+| Empirical Trial `EXP-004` | `run_experiment.py --task EXP-004` | `0` | 4 runs, 61.4% savings |
 | Ledger summary | `ledger.py summary` | `0` | Cumulative metrics computed |
 | Model spend cascade CLI | `ledger.py cascade` | `0` | Multi-model economics computed |
 | Rate-card simulation Sonnet 4.6 | `ledger.py summary --model claude-sonnet-4-6` | `0` | 61.6% savings ($1.516 vs $0.583) |
@@ -486,7 +487,7 @@ Each reference states **what this project actually adopted** from it, not just a
 - [x] Post-review hardening: Windows batch resolution, BOM handling, case sensitivity, and permissions
 - [x] Execute `EXP-001` through `EXP-004` live empirical benchmarks on `gemini-3.8-flash`
 - [x] Model rate-card simulation and spend-cascade visualizer
-- [x] Publish first measured savings results: 52.82% cost reduction
+- [x] Publish first measured savings results: 61.58% cost reduction
 - [x] GitHub Actions CI: linter, smoke tests, and dashboard build
 - [x] GitHub Pages deployment of the live dashboard ([zenzerjs.github.io/Ai-Lab](https://zenzerjs.github.io/Ai-Lab/))
 - [ ] Execute `EXP-005` GLM 5.3 Flash benchmark group (FreeBuff, provider-equivalent pricing)
