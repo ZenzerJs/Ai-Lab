@@ -144,7 +144,7 @@ export const CacheHitRatio: React.FC<CacheHitRatioProps> = ({ tasks }) => {
   const iCachePercent = iTotalPrompt > 0 ? (iCache / iTotalPrompt) * 100 : 0;
 
   return (
-    <Card className="flex flex-col justify-between">
+    <Card>
       <div>
         <CardHeader className="flex flex-col gap-1 pb-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
@@ -174,9 +174,9 @@ export const CacheHitRatio: React.FC<CacheHitRatioProps> = ({ tasks }) => {
           </CardDescription>
         </CardHeader>
 
-        <CardContent className="pt-4 flex flex-col gap-4">
+        <CardContent className="pt-4">
           {/* Dual Donut Gauges (ported from code.html) */}
-          <div className="grid grid-cols-2 gap-4 my-2 text-center">
+          <div className="grid grid-cols-2 gap-4 text-center">
             <DonutGauge
               armLabel="Baseline Arm"
               labelColorClass="text-muted-foreground"

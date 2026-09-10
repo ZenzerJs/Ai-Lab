@@ -106,8 +106,8 @@ export const PerTaskComparison: React.FC<PerTaskComparisonProps> = ({ tasks, sca
       : `Per-Task Cost (${scaleMode.toUpperCase()} Tokens Projected)`;
 
   return (
-    <Card className="flex flex-col justify-between">
-      <div>
+    <Card className="h-full flex flex-col">
+      <div className="flex flex-col flex-1">
         <CardHeader className="flex flex-col gap-1 pb-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
@@ -193,7 +193,7 @@ export const PerTaskComparison: React.FC<PerTaskComparisonProps> = ({ tasks, sca
       </div>
 
       {/* Per-Task Run Summary Cards via CardFooter */}
-      <CardFooter className="flex-col items-stretch pt-0 pb-5">
+      <CardFooter className="flex-col items-stretch pt-0 pb-5 mt-auto">
         <Separator className="mb-4" />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs w-full">
           {chartData.map((d) => {
