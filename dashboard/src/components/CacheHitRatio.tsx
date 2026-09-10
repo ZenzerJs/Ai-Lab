@@ -67,17 +67,17 @@ export const CacheHitRatio: React.FC<CacheHitRatioProps> = ({ tasks }) => {
   // Pie chart datasets with fallback for 0 total tokens
   const baselinePieData = bTotalPrompt > 0
     ? [
-        { name: 'Fresh Input Tokens', value: Math.round(bInput), color: '#f85149' },
-        { name: 'Cache Read Tokens', value: Math.round(bCache), color: '#ffa198' },
+        { name: 'Fresh Input Tokens', value: Math.round(bInput), color: '#E06C54' },
+        { name: 'Cache Read Tokens', value: Math.round(bCache), color: '#F1A189' },
       ]
-    : [{ name: 'No Tokens Recorded', value: 1, color: '#30363d' }];
+    : [{ name: 'No Tokens Recorded', value: 1, color: '#232B3B' }];
 
   const icmPieData = iTotalPrompt > 0
     ? [
-        { name: 'Fresh Input Tokens', value: Math.round(iInput), color: '#3fb950' },
-        { name: 'Cache Read Tokens', value: Math.round(iCache), color: '#238636' },
+        { name: 'Fresh Input Tokens', value: Math.round(iInput), color: '#6366F1' },
+        { name: 'Cache Read Tokens', value: Math.round(iCache), color: '#818CF8' },
       ]
-    : [{ name: 'No Tokens Recorded', value: 1, color: '#30363d' }];
+    : [{ name: 'No Tokens Recorded', value: 1, color: '#232B3B' }];
 
   const CustomPieTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
@@ -86,7 +86,7 @@ export const CacheHitRatio: React.FC<CacheHitRatioProps> = ({ tasks }) => {
         <div className="bg-surface border border-surface-border p-2.5 rounded-md shadow-lg text-xs">
           <span className="font-semibold text-white">{data.name}:</span>{' '}
           <span className="font-mono text-gray-300">
-            {data.color === '#30363d' ? '0' : formatTokens(data.value)} tokens
+            {data.color === '#232B3B' ? '0' : formatTokens(data.value)} tokens
           </span>
         </div>
       );
@@ -131,7 +131,7 @@ export const CacheHitRatio: React.FC<CacheHitRatioProps> = ({ tasks }) => {
             {/* Baseline Donut */}
             <div className="flex flex-col items-center bg-background/40 border border-surface-border/80 rounded-lg p-3">
               <div className="text-xs font-semibold text-gray-300 flex items-center justify-between w-full pb-1 border-b border-surface-border/50">
-                <span className="text-red-400">Baseline Arm</span>
+                <span className="text-baseline">Baseline Arm</span>
                 <Badge variant="secondary" className="text-[10px] py-0 px-1 font-normal font-mono">n={bN}</Badge>
               </div>
 
@@ -153,7 +153,7 @@ export const CacheHitRatio: React.FC<CacheHitRatioProps> = ({ tasks }) => {
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <span className="text-xs font-bold text-red-300 font-mono">
+                  <span className="text-xs font-bold text-baseline font-mono">
                     {bCachePercent.toFixed(1)}%
                   </span>
                   <span className="text-[9px] text-gray-500 uppercase tracking-tight">Cached</span>
@@ -167,11 +167,11 @@ export const CacheHitRatio: React.FC<CacheHitRatioProps> = ({ tasks }) => {
                 </div>
                 <div className="flex justify-between">
                   <span>Cache Read:</span>
-                  <span className="text-red-300">{formatTokens(bCache)}</span>
+                  <span className="text-baseline">{formatTokens(bCache)}</span>
                 </div>
                 <div className="flex justify-between pt-1 border-t border-surface-border/40 text-gray-300">
                   <span>Cache/Input Ratio:</span>
-                  <span className="font-semibold text-red-300">{bRatio.toFixed(2)}x</span>
+                  <span className="font-semibold text-baseline">{bRatio.toFixed(2)}x</span>
                 </div>
               </div>
             </div>
@@ -179,7 +179,7 @@ export const CacheHitRatio: React.FC<CacheHitRatioProps> = ({ tasks }) => {
             {/* ICM Donut */}
             <div className="flex flex-col items-center bg-background/40 border border-surface-border/80 rounded-lg p-3">
               <div className="text-xs font-semibold text-gray-300 flex items-center justify-between w-full pb-1 border-b border-surface-border/50">
-                <span className="text-emerald-400">ICM Pipeline</span>
+                <span className="text-primary-light">ICM Pipeline</span>
                 <Badge variant="secondary" className="text-[10px] py-0 px-1 font-normal font-mono">n={iN}</Badge>
               </div>
 
@@ -201,7 +201,7 @@ export const CacheHitRatio: React.FC<CacheHitRatioProps> = ({ tasks }) => {
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <span className="text-xs font-bold text-emerald-400 font-mono">
+                  <span className="text-xs font-bold text-primary-light font-mono">
                     {iCachePercent.toFixed(1)}%
                   </span>
                   <span className="text-[9px] text-gray-500 uppercase tracking-tight">Cached</span>
@@ -215,11 +215,11 @@ export const CacheHitRatio: React.FC<CacheHitRatioProps> = ({ tasks }) => {
                 </div>
                 <div className="flex justify-between">
                   <span>Cache Read:</span>
-                  <span className="text-emerald-400">{formatTokens(iCache)}</span>
+                  <span className="text-primary-light">{formatTokens(iCache)}</span>
                 </div>
                 <div className="flex justify-between pt-1 border-t border-surface-border/40 text-gray-300">
                   <span>Cache/Input Ratio:</span>
-                  <span className="font-semibold text-emerald-300">{iRatio.toFixed(2)}x</span>
+                  <span className="font-semibold text-sage">{iRatio.toFixed(2)}x</span>
                 </div>
               </div>
             </div>
@@ -228,11 +228,11 @@ export const CacheHitRatio: React.FC<CacheHitRatioProps> = ({ tasks }) => {
       </div>
 
       <CardFooter className="pt-0 pb-5">
-        <div className="w-full text-xs bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3">
-          <span className="font-semibold text-emerald-400">ICM Context Isolation Advantage:</span>{' '}
-          <span className="text-gray-300">
-            ICM achieves <span className="font-mono font-bold text-emerald-300">{iRatio.toFixed(2)}x ({iCachePercent.toFixed(1)}% cached)</span> vs.{' '}
-            baseline's <span className="font-mono font-bold text-red-300">{bRatio.toFixed(2)}x ({bCachePercent.toFixed(1)}% cached)</span> by keeping system prompts and OKF slices deterministic across stage boundaries.
+        <div className="w-full text-xs bg-sage/10 border border-sage/20 rounded-lg p-3">
+          <span className="font-semibold text-sage">ICM Context Isolation Advantage:</span>{' '}
+          <span className="text-muted-foreground">
+            ICM achieves <span className="font-mono font-bold text-sage">{iRatio.toFixed(2)}x ({iCachePercent.toFixed(1)}% cached)</span> vs.{' '}
+            baseline's <span className="font-mono font-bold text-baseline">{bRatio.toFixed(2)}x ({bCachePercent.toFixed(1)}% cached)</span> by keeping system prompts and OKF slices deterministic across stage boundaries.
           </span>
         </div>
       </CardFooter>

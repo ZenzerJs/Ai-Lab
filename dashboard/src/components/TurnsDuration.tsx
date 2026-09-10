@@ -72,8 +72,8 @@ export const TurnsDuration: React.FC<TurnsDurationProps> = ({ tasks }) => {
       return (
         <div className="bg-surface border border-surface-border p-3 rounded-lg shadow-xl text-xs flex flex-col gap-1 min-w-[180px]">
           <div className="font-semibold text-white border-b border-surface-border pb-1">Task: {label}</div>
-          <div className="text-red-400">Baseline (n={d.baselineN}): {d.baselineTurns} turns</div>
-          <div className="text-blue-400">ICM (n={d.icmN}): {d.icmTurns} turns</div>
+          <div className="text-baseline">Baseline (n={d.baselineN}): {d.baselineTurns} turns</div>
+          <div className="text-primary-light">ICM (n={d.icmN}): {d.icmTurns} turns</div>
           <div className="pt-1 border-t border-surface-border font-medium flex justify-between">
             <span className="text-gray-300">Delta:</span>
             <span className={isSaved ? "text-emerald-300 font-mono" : isExtra ? "text-red-300 font-mono" : "text-gray-300 font-mono"}>
@@ -94,8 +94,8 @@ export const TurnsDuration: React.FC<TurnsDurationProps> = ({ tasks }) => {
       return (
         <div className="bg-surface border border-surface-border p-3 rounded-lg shadow-xl text-xs flex flex-col gap-1 min-w-[180px]">
           <div className="font-semibold text-white border-b border-surface-border pb-1">Task: {label}</div>
-          <div className="text-red-400">Baseline (n={d.baselineN}): {d.baselineDuration}s</div>
-          <div className="text-emerald-400">ICM (n={d.icmN}): {d.icmDuration}s</div>
+          <div className="text-baseline">Baseline (n={d.baselineN}): {d.baselineDuration}s</div>
+          <div className="text-primary-light">ICM (n={d.icmN}): {d.icmDuration}s</div>
           <div className="pt-1 border-t border-surface-border font-medium flex justify-between">
             <span className="text-gray-300">Delta:</span>
             <span className={isSaved ? "text-emerald-300 font-mono" : isExtra ? "text-red-300 font-mono" : "text-gray-300 font-mono"}>
@@ -132,12 +132,12 @@ export const TurnsDuration: React.FC<TurnsDurationProps> = ({ tasks }) => {
               <Badge variant="secondary" className="text-[10px] py-0 font-mono font-normal">Lower is better</Badge>
             </div>
 
-            <div className="h-52 w-full">
+            <div className="min-h-[220px] h-52 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={turnsData} margin={{ top: 15, right: 10, left: -15, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#21262d" vertical={false} />
-                  <XAxis dataKey="taskId" stroke="#8b949e" fontSize={11} tickLine={false} />
-                  <YAxis stroke="#8b949e" fontSize={11} tickLine={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1D2433" vertical={false} />
+                  <XAxis dataKey="taskId" stroke="#75859C" fontSize={11} tickLine={false} />
+                  <YAxis stroke="#75859C" fontSize={11} tickLine={false} />
                   <Tooltip content={<CustomTurnsTooltip />} />
                   <Legend
                     verticalAlign="top"
@@ -151,8 +151,8 @@ export const TurnsDuration: React.FC<TurnsDurationProps> = ({ tasks }) => {
                       return <span className="text-gray-300">{val} ({nLabel})</span>;
                     }}
                   />
-                  <Bar name="Baseline Turns" dataKey="baselineTurns" fill="#f85149" radius={[4, 4, 0, 0]} />
-                  <Bar name="ICM Turns" dataKey="icmTurns" fill="#388bfd" radius={[4, 4, 0, 0]} />
+                  <Bar name="Baseline Turns" dataKey="baselineTurns" fill="#E06C54" radius={[4, 4, 0, 0]} />
+                  <Bar name="ICM Turns" dataKey="icmTurns" fill="#6366F1" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -168,12 +168,12 @@ export const TurnsDuration: React.FC<TurnsDurationProps> = ({ tasks }) => {
               <Badge variant="secondary" className="text-[10px] py-0 font-mono font-normal">Lower is better</Badge>
             </div>
 
-            <div className="h-52 w-full">
+            <div className="min-h-[220px] h-52 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={durationData} margin={{ top: 15, right: 10, left: -15, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#21262d" vertical={false} />
-                  <XAxis dataKey="taskId" stroke="#8b949e" fontSize={11} tickLine={false} />
-                  <YAxis stroke="#8b949e" fontSize={11} tickLine={false} tickFormatter={(v) => `${v}s`} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1D2433" vertical={false} />
+                  <XAxis dataKey="taskId" stroke="#75859C" fontSize={11} tickLine={false} />
+                  <YAxis stroke="#75859C" fontSize={11} tickLine={false} tickFormatter={(v) => `${v}s`} />
                   <Tooltip content={<CustomDurationTooltip />} />
                   <Legend
                     verticalAlign="top"
@@ -187,8 +187,8 @@ export const TurnsDuration: React.FC<TurnsDurationProps> = ({ tasks }) => {
                       return <span className="text-gray-300">{val} ({nLabel})</span>;
                     }}
                   />
-                  <Bar name="Baseline Latency" dataKey="baselineDuration" fill="#f85149" radius={[4, 4, 0, 0]} />
-                  <Bar name="ICM Latency" dataKey="icmDuration" fill="#2ea043" radius={[4, 4, 0, 0]} />
+                  <Bar name="Baseline Latency" dataKey="baselineDuration" fill="#E06C54" radius={[4, 4, 0, 0]} />
+                  <Bar name="ICM Latency" dataKey="icmDuration" fill="#6366F1" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

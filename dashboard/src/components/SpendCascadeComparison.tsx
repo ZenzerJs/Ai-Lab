@@ -5,6 +5,7 @@ import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { ToggleGroup, ToggleGroupItem } from './ui/toggle-group';
 import { Layers, Check, Zap, Sparkles } from 'lucide-react';
+import { Info } from 'lucide-react';
 import { formatCurrency, formatSignedCurrency, formatSignedPercent } from '../lib/formatters';
 
 interface SpendCascadeComparisonProps {
@@ -131,10 +132,19 @@ export const SpendCascadeComparison: React.FC<SpendCascadeComparisonProps> = ({
                   >
                     <td className="py-3 px-3">
                       <div className="flex flex-col">
-                        <span className="font-semibold text-white flex items-center gap-1.5">
+                        <span className="font-semibold text-white flex items-center gap-1.5 flex-wrap">
                           {item.model}
+                          {item.pricing_mode === 'provider-equivalent' && (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] py-0 px-1.5 border-warning/40 text-warning bg-warning/10"
+                              title={item.provider_note ?? undefined}
+                            >
+                              Provider-equivalent · simulated
+                            </Badge>
+                          )}
                           {isSelected && (
-                            <Badge variant="secondary" className="text-[10px] py-0 px-1.5 bg-primary/20 text-primary border-primary/30">
+                            <Badge variant="secondary" className="text-[10px] py-0 px-1.5 bg-primary/20 text-primary-light border-primary/30">
                               Active
                             </Badge>
                           )}
@@ -214,6 +224,12 @@ export const SpendCascadeComparison: React.FC<SpendCascadeComparisonProps> = ({
             <p className="text-gray-400 text-[11px] leading-relaxed">
               Premium models (e.g., Claude Sonnet 4.6, Sonnet 5, and Claude 3.7 Sonnet) heavily penalize unconstrained agents that repeatedly dump whole repositories and multi-megabyte log files into context.
               By combining <strong className="text-emerald-300">AST symbol filtering</strong> with <strong className="text-primary">byte-stable prompt caching</strong> (90% cache read discount), ICM compounds monetary savings from cents on lightweight flash models to <strong className="text-white">thousands of dollars</strong> on enterprise-tier models.
+            </p>
+            <p className="text-gray-400 text-[11px] leading-relaxed flex items-start gap-1.5">
+              <Info className="size-3.5 text-amber-400 shrink-0 mt-0.5" />
+              <span>
+                <strong className="text-amber-300">Provider-equivalent models</strong> (e.g., glm-5.3-flash): benchmarked at <strong className="text-white">$0 direct user cost</strong> via FreeBuff; USD figures are simulated public API-equivalent pricing for workload comparability only — never actual charges, and excluded from measured savings totals.
+              </span>
             </p>
           </div>
         </div>

@@ -11,6 +11,7 @@ import {
 import { CumulativeSummary, TimelinePoint } from '../types';
 import { ScaleMode } from './ScaleSelector';
 import { ShieldAlert, Award, Layers } from 'lucide-react';
+import { RollingCounter } from './RollingCounter';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './ui/card';
 import { Badge } from './ui/badge';
 import { Empty, EmptyIcon, EmptyTitle, EmptyDescription } from './ui/empty';
@@ -133,11 +134,11 @@ export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({
         {/* Metric Cards Banner */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="bg-background/60 border border-surface-border rounded-lg p-3 flex flex-col justify-between">
-            <span className="text-[11px] uppercase tracking-wide text-gray-400 font-medium">Net USD Saved</span>
-            <div className="text-xl font-bold text-emerald-400 font-mono mt-1">
-              {formatCurrency(totalSaved)}
+            <span className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">Net USD Saved</span>
+            <div className="text-xl font-bold text-sage font-mono mt-1">
+              <RollingCounter target={totalSaved} decimals={totalSaved >= 1 ? 2 : 4} prefix="$" replayKey={totalSaved} />
             </div>
-            <span className="text-[10px] text-emerald-400/80 font-mono">
+            <span className="text-[10px] text-sage/80 font-mono">
               {pctSaved >= 0
                 ? `${pctSaved.toFixed(1)}% Cost Reduction`
                 : `${Math.abs(pctSaved).toFixed(1)}% Cost Increase`}
@@ -145,27 +146,27 @@ export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({
           </div>
 
           <div className="bg-background/60 border border-surface-border rounded-lg p-3 flex flex-col justify-between">
-            <span className="text-[11px] uppercase tracking-wide text-gray-400 font-medium">Baseline Cost</span>
-            <div className="text-xl font-bold text-red-400 font-mono mt-1">
-              {formatCurrency(baselineCost)}
+            <span className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">Baseline Cost</span>
+            <div className="text-xl font-bold text-baseline font-mono mt-1">
+              <RollingCounter target={baselineCost} decimals={baselineCost >= 1 ? 2 : 4} prefix="$" replayKey={baselineCost} />
             </div>
-            <span className="text-[10px] text-gray-400">Total expenditure</span>
+            <span className="text-[10px] text-muted-foreground">Total expenditure</span>
           </div>
 
           <div className="bg-background/60 border border-surface-border rounded-lg p-3 flex flex-col justify-between">
-            <span className="text-[11px] uppercase tracking-wide text-gray-400 font-medium">ICM Pipeline Cost</span>
-            <div className="text-xl font-bold text-blue-400 font-mono mt-1">
-              {formatCurrency(icmCost)}
+            <span className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">ICM Pipeline Cost</span>
+            <div className="text-xl font-bold text-primary-light font-mono mt-1">
+              <RollingCounter target={icmCost} decimals={icmCost >= 1 ? 2 : 4} prefix="$" replayKey={icmCost} />
             </div>
-            <span className="text-[10px] text-gray-400">Total expenditure</span>
+            <span className="text-[10px] text-muted-foreground">Total expenditure</span>
           </div>
 
           <div className="bg-background/60 border border-surface-border rounded-lg p-3 flex flex-col justify-between">
-            <span className="text-[11px] uppercase tracking-wide text-gray-400 font-medium">Calibrated Scope</span>
-            <div className="text-xl font-bold text-gray-200 font-mono mt-1">
-              n={totalRuns}
+            <span className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">Calibrated Scope</span>
+            <div className="text-xl font-bold text-foreground font-mono mt-1">
+              <RollingCounter target={totalRuns} decimals={0} prefix="n = " suffix=" Runs" replayKey={totalRuns} />
             </div>
-            <span className="text-[10px] text-gray-400">
+            <span className="text-[10px] text-muted-foreground">
               Across {cumulative.tasks_evaluated} Benchmark Tasks
             </span>
           </div>
@@ -183,7 +184,7 @@ export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({
             </EmptyDescription>
           </Empty>
         ) : (
-          <div className="h-60 w-full">
+          <div className="min-h-[220px] h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
                 data={scaledTimeline}
@@ -191,35 +192,37 @@ export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({
               >
                 <defs>
                   <linearGradient id="savingsGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#2ea043" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="#2ea043" stopOpacity={0.0} />
+                    <stop offset="5%" stopColor="#10B981" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#10B981" stopOpacity={0.0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#21262d" vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#1D2433" vertical={false} />
                 <XAxis
                   dataKey="label"
-                  stroke="#8b949e"
+                  stroke="#75859C"
                   fontSize={11}
                   tickLine={false}
-                  axisLine={{ stroke: '#30363d' }}
+                  axisLine={{ stroke: '#2D3748' }}
                 />
                 <YAxis
-                  stroke="#8b949e"
+                  stroke="#75859C"
                   fontSize={11}
                   tickLine={false}
-                  axisLine={{ stroke: '#30363d' }}
+                  axisLine={{ stroke: '#2D3748' }}
                   tickFormatter={(v) => formatCurrency(v)}
                 />
                 <Tooltip content={<CustomLineTooltip />} />
                 <Area
                   type="monotone"
                   dataKey="cumulative_savings_usd"
-                  stroke="#3fb950"
-                  strokeWidth={2}
+                  stroke="#10B981"
+                  strokeWidth={2.5}
+                  strokeLinecap="round"
                   fillOpacity={1}
                   fill="url(#savingsGradient)"
-                  dot={{ r: 4, fill: '#2ea043', stroke: '#7ee787' }}
-                  activeDot={{ r: 6, fill: '#56d364', stroke: '#ffffff' }}
+                  dot={{ r: 4, fill: '#34D399', stroke: '#0B0D11', strokeWidth: 2 }}
+                  activeDot={{ r: 6, fill: '#34D399', stroke: '#F1F5F9' }}
+                  className="chart-area-fade"
                 />
               </AreaChart>
             </ResponsiveContainer>
