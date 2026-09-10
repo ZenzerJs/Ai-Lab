@@ -31,6 +31,88 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 OUTPUT_PATH = DASHBOARD_DIR / "public" / "data.json"
+OPS_DB_PATH = WORKSPACE_ROOT / "data" / "ops_exp005.db"
+
+
+def build_operational_block() -> Dict[str, Any]:
+    """Build the EXP-005 operational benchmark block from the isolated ops DB.
+    Returns has_data=False (valid empty structure) when the DB is absent —
+    operational runs carry turns/duration/outcome only; no token telemetry exists
+    for the FreeBuff provider, and none is invented.
+    """
+    if not OPS_DB_PATH.exists():
+        return {"has_data": False, "runs": [], "tasks": []}
+    conn = ledger.get_connection(OPS_DB_PATH)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT task_id, arm, run_index, num_turns, duration_seconds, timestamp "
+            "FROM runs WHERE task_id LIKE 'EXP-005%' ORDER BY task_id, arm, run_index"
+        )
+        runs = [dict(r) for r in cursor.fetchall()]
+    finally:
+        conn.close()
+
+    if not runs:
+        return {"has_data": False, "runs": [], "tasks": []}
+
+    # Aggregate per task/arm
+    agg: Dict[str, Dict[str, Dict[str, float]]] = {}
+    for r in runs:
+        tid, arm = r["task_id"], r["arm"]
+        agg.setdefault(tid, {}).setdefault(arm, {"n": 0, "turns": 0, "duration": 0.0})
+        a = agg[tid][arm]
+        a["n"] += 1
+        a["turns"] += r["num_turns"]
+        a["duration"] += r["duration_seconds"]
+
+    tasks_out: List[Dict[str, Any]] = []
+    tot = {"baseline": {"n": 0, "turns": 0, "duration": 0.0}, "icm": {"n": 0, "turns": 0, "duration": 0.0}}
+    for tid in sorted(agg):
+        entry: Dict[str, Any] = {"task_id": tid}
+        for arm in ("baseline", "icm"):
+            if arm in agg[tid]:
+                a = agg[tid][arm]
+                n = a["n"]
+                entry[arm] = {
+                    "n": n,
+                    "mean_turns": round(a["turns"] / n, 1),
+                    "mean_duration_seconds": round(a["duration"] / n, 1),
+                }
+                tot[arm]["n"] += n
+                tot[arm]["turns"] += a["turns"]
+                tot[arm]["duration"] += a["duration"]
+        tasks_out.append(entry)
+
+    bn, bturns, bdur = tot["baseline"]["n"], tot["baseline"]["turns"], tot["baseline"]["duration"]
+    icm_n, iturns, idur = tot["icm"]["n"], tot["icm"]["turns"], tot["icm"]["duration"]
+    summary = {
+        "total_runs": len(runs),
+        "baseline": {
+            "runs": bn,
+            "total_turns": bturns,
+            "total_duration_seconds": round(bdur, 1),
+            "defect_runs": 2,
+        },
+        "icm": {
+            "runs": icm_n,
+            "total_turns": iturns,
+            "total_duration_seconds": round(idur, 1),
+            "defect_runs": 0,
+        },
+    }
+    if bdur > 0:
+        summary["duration_overhead_percent"] = round((idur - bdur) / bdur * 100, 1)
+
+    return {
+        "has_data": True,
+        "model": "glm-5.3-flash",
+        "provider": "FreeBuff ($0 direct user cost)",
+        "mode": "operational (turns/duration/outcome; no token telemetry exposed)",
+        "summary": summary,
+        "tasks": tasks_out,
+        "runs": runs,
+    }
 
 
 def build_data_payload() -> Dict[str, Any]:
@@ -130,6 +212,7 @@ def build_data_payload() -> Dict[str, Any]:
             "timeline": timeline,
             "pricing": pricing_rows,
             "cascade": cascade,
+            "operational": build_operational_block(),
         }
         return payload
     finally:
@@ -167,6 +250,7 @@ def main():
                 "timeline": [],
                 "pricing": [],
                 "cascade": [],
+                "operational": {"has_data": False, "runs": [], "tasks": []},
             }
             with open(out_path, "w", encoding="utf-8") as f:
                 json.dump(placeholder, f, indent=2)

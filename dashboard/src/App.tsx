@@ -9,6 +9,7 @@ import { CumulativeSavings } from './components/CumulativeSavings';
 import { TurnsDuration } from './components/TurnsDuration';
 import { RawLedgerTable } from './components/RawLedgerTable';
 import { ExperimentCards } from './components/ExperimentCards';
+import { OperationalBenchmarkCard } from './components/OperationalBenchmarkCard';
 import { DashboardPayload } from './types';
 import { deriveDataForModel } from './lib/recalculate';
 import { Info, AlertTriangle, RefreshCw, Terminal, PlayCircle } from 'lucide-react';
@@ -187,6 +188,7 @@ export const App: React.FC = () => {
   const renderExperiments = data?.has_data && activeData && (
     <div className="flex flex-col gap-5">
       <ExperimentCards tasks={activeData.tasks} />
+      {data.operational && <OperationalBenchmarkCard ops={data.operational} />}
     </div>
   );
 

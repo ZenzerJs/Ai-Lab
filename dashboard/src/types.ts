@@ -1,3 +1,46 @@
+export interface OperationalArmSummary {
+  runs: number;
+  total_turns: number;
+  total_duration_seconds: number;
+  defect_runs: number;
+}
+
+export interface OperationalTaskArm {
+  n: number;
+  mean_turns: number;
+  mean_duration_seconds: number;
+}
+
+export interface OperationalTask {
+  task_id: string;
+  baseline?: OperationalTaskArm;
+  icm?: OperationalTaskArm;
+}
+
+export interface OperationalSummary {
+  total_runs: number;
+  baseline: OperationalArmSummary;
+  icm: OperationalArmSummary;
+  duration_overhead_percent?: number;
+}
+
+export interface OperationalBenchmark {
+  has_data: boolean;
+  model?: string;
+  provider?: string;
+  mode?: string;
+  summary?: OperationalSummary;
+  tasks?: OperationalTask[];
+  runs?: {
+    task_id: string;
+    arm: string;
+    run_index: number;
+    num_turns: number;
+    duration_seconds: number;
+    timestamp: string;
+  }[];
+}
+
 export interface RunRecord {
   id: number;
   task_id: string;
@@ -118,6 +161,7 @@ export interface ModelCascadeItem {
 }
 
 export interface DashboardPayload {
+  operational?: OperationalBenchmark;
   generated_at: string;
   has_data: boolean;
   cumulative: CumulativeSummary;

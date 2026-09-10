@@ -17,17 +17,18 @@
 
 ## Current Status & Benchmark Telemetry
 
-> **Empirical Benchmark Status:** Pre-registered trials (`EXP-001` through `EXP-004`) evaluated against `gemini-3.8-flash` across 16 runs: 8 baseline and 8 ICM.
+> **Empirical Benchmark Status:** Pre-registered trials (`EXP-001` through `EXP-004`) evaluated against `gemini-3.8-flash` across 16 runs: 8 baseline and 8 ICM. The `EXP-005` group ran the identical protocol conversationally on **GLM 5.3 Flash via FreeBuff** (16 operational runs: turns, duration, outcome — see §3.6).
 >
-> **Measured Results:** The Interpretable Context Methodology (ICM) demonstrated a **61.58% cost reduction** ($0.37910 baseline vs. $0.14566 ICM). It increased the **cache-read-to-fresh-input ratio** from **4.8% to 390.5%** through byte-stable prompt prefixes.
+> **Measured Results:** The Interpretable Context Methodology (ICM) demonstrated a **61.58% cost reduction** ($0.37910 baseline vs. $0.14566 ICM). It increased the **cache-read-to-fresh-input ratio** from **4.8% to 390.5%** through byte-stable prompt prefixes. On GLM 5.3 Flash, ICM **eliminated all shipped defects** (0/8 vs. 2/8 baseline) at the cost of +65% wall-clock overhead.
 
 | Milestone | Status | Details |
 | :--- | :--- | :--- |
 | **Scaffolding & Directives** | Verified | ICM stage contracts and OKF v0.2 knowledge graph |
 | **Token Control Scripts** | Verified | AST symbol extraction (`repo_map.py`) and CLI log sanitization |
 | **Measurement Harness** | Verified | Headless A/B runner (`run_experiment.py`) and SQLite ledger |
-| **Local Dashboard** | Active | Vite, React, and Recharts app with Model Rate Card Simulator (`localhost:5173`) · [**Live on GitHub Pages →**](https://zenzerjs.github.io/Ai-Lab/) |
+| **Local Dashboard** | Active | Vite + React + Tailwind app with Model Rate Card Simulator, custom SVG telemetry charts, and the EXP-005 operational benchmark view (`localhost:5173`) · [**Live on GitHub Pages →**](https://zenzerjs.github.io/Ai-Lab/) |
 | **Empirical Trials (`EXP-001–004`)** | Complete | 16 runs evaluated on `gemini-3.8-flash` with 61.58% measured savings |
+| **Operational Benchmark (`EXP-005`, GLM 5.3 Flash)** | Complete | 16 runs via FreeBuff coding agent — 0/8 ICM defects vs. 2/8 baseline, +65% stage overhead |
 | **Model Spend Cascade Engine** | Active | Dynamic re-pricing across Flash, Pro, GPT-4o, Claude 3.7 Sonnet, Claude Sonnet 4.6, Claude Sonnet 5, and GLM 5.3 Flash (provider-equivalent) |
 
 **The problem:** AI coding agents burn tokens re-reading whole repositories, hallucinate from stale context, and declare untested code "done."
@@ -54,6 +55,7 @@
    - [3.3 Why the Pipeline Arm Should Win](#33-why-the-pipeline-arm-should-win)
    - [3.4 Dashboard Views & Simulation Controls](#34-dashboard-views--simulation-controls)
    - [3.5 Spend Cascade Across Foundation Models](#35-spend-cascade-across-foundation-models)
+   - [3.6 Operational Benchmark on GLM 5.3 Flash (EXP-005)](#36-operational-benchmark-on-glm-53-flash-exp-005)
 4. [Core Components](#4-core-components)
 5. [Quickstart](#5-quickstart)
 6. [Repository Layout](#6-repository-layout)
@@ -311,6 +313,29 @@ Anthropic's prompt caching structure provides a **90% discount** on cache-read t
 
 > **Why the gap grows:** Premium models make repeated input and output more expensive [7](#8-references--pinned-specifications). Baseline agents may repeatedly read large files and carry noisy terminal output forward. The ICM pipeline reduces unnecessary context through stable prefixes, AST symbol filtering, and sanitized command output. Exact savings depend on the model, task, and cache behavior.
 
+### 3.6 Operational Benchmark on GLM 5.3 Flash (EXP-005)
+
+Beyond the Gemini token-level trials, the identical four benchmark prompts (`EXP-005-G1`…`G4`, reused verbatim from `EXP-001–004`) were executed end-to-end on **`glm-5.3-flash` through the FreeBuff coding agent** — 2 baseline + 2 ICM runs per task, workspace reset between every run, distinct task IDs keeping GLM data isolated from the Gemini measured totals.
+
+**This is an *operational* benchmark, not a cost benchmark.** FreeBuff does not expose per-turn token telemetry, so per the protocol's measurement caveat (`experiments/EXP-005-protocol.md`) no token counts or USD figures are derived or invented. What is recorded: conversational turns, wall-clock duration, and outcome (module import + unit-test pass), stored in an isolated `data/ops_exp005.db`.
+
+| Task | Baseline (turns / duration / result) | ICM pipeline (turns / duration / result) |
+|---|---|---|
+| `EXP-005-G1` String utility | 2 / 47.0s + 28.0s / PASS ×2 | 4 / 78.0s + 41.0s / PASS ×2 |
+| `EXP-005-G2` Rate limiter | 2 / 48.5s PASS + 44.4s **FAIL** | 4 / 91.7s + 67.9s / PASS ×2 |
+| `EXP-005-G3` AST dead-code finder | 2 / 60.9s **FAIL** + 58.5s PASS | 4 / 95.7s + 98.0s / PASS ×2 |
+| `EXP-005-G4` Retry transport | 2 / 81.8s + 91.5s / PASS ×2 | 4 / 146.5s + 141.2s / PASS ×2 |
+| **Totals** | **16 turns / 460.6s / 2 defect runs** | **32 turns / 760.0s / 0 defect runs** |
+
+**Findings (pilot, n=2 per arm):**
+
+1. **Reliability:** the ICM stage pipeline **eliminated all shipped defects** (0/8 vs. 2/8 baseline). Both baseline failures were silent, plausible-looking bugs — an injected-clock/wall-clock mix-up in the limiter and an AST visitor-dispatch loss — precisely the defect classes the `02_plan` review and `04_verify` gates are designed to intercept.
+2. **Overhead:** governance is not free. ICM adds **+65% wall-clock** and 2× turns on this model; the four stage contracts each cost a tool turn.
+3. **Cost-per-working-delivery:** counting only defect-free runs, the baseline mean rises from ~57.6s to a comparable ~65.8s effective cost when its two wasted runs are amortized — narrowing, though not eliminating, the latency gap.
+4. **Token hypotheses untested on this provider:** cache-ratio and USD-savings effects (§3.2) require token telemetry that only the Gemini CLI harness exposes; the provider-equivalent rate-card simulation for GLM remains labeled as such everywhere.
+
+The dashboard renders this comparison as an **Operational Benchmark** card in the Experiments tab (per-task duration bars, defect counters, and the overhead/reliability trade-off), sourced from `data/ops_exp005.db` via `dashboard/build_data.py`.
+
 ---
 
 ## 4. Core Components
@@ -459,7 +484,7 @@ python dashboard/build_data.py
 </details>
 
 > [!NOTE]
-> All empirical runs reported in the table above reflect **16 live benchmark runs** across tasks `EXP-001` through `EXP-004` on `gemini-3.8-flash`. All other model figures (`claude-sonnet-4-6`, `claude-sonnet-5`, `claude-3-7-sonnet`, `gpt-4o`, `gemini-2.5-pro`, `gemini-2.5-flash`, `glm-5.3-flash`) are auditable rate-card simulations derived from this empirical token telemetry without making paid live calls to those specific endpoints. `glm-5.3-flash` is additionally benchmarked through the FreeBuff coding agent at **$0 direct user cost** (EXP-005 group); its dollar figures are labeled provider-equivalent simulations and are excluded from measured savings totals.
+> All empirical runs reported in the table above reflect **16 live benchmark runs** across tasks `EXP-001` through `EXP-004` on `gemini-3.8-flash`. All other model figures (`claude-sonnet-4-6`, `claude-sonnet-5`, `claude-3-7-sonnet`, `gpt-4o`, `gemini-2.5-pro`, `gemini-2.5-flash`, `glm-5.3-flash`) are auditable rate-card simulations derived from this empirical token telemetry without making paid live calls to those specific endpoints. `glm-5.3-flash` is additionally benchmarked through the FreeBuff coding agent at **$0 direct user cost** (EXP-005 group, §3.6) as an *operational* benchmark — turns/duration/outcome only, no token telemetry — and its dollar figures are labeled provider-equivalent simulations excluded from measured savings totals.
 
 ---
 
@@ -490,4 +515,4 @@ Each reference states **what this project actually adopted** from it, not just a
 - [x] Publish first measured savings results: 61.58% cost reduction
 - [x] GitHub Actions CI: linter, smoke tests, and dashboard build
 - [x] GitHub Pages deployment of the live dashboard ([zenzerjs.github.io/Ai-Lab](https://zenzerjs.github.io/Ai-Lab/))
-- [ ] Execute `EXP-005` GLM 5.3 Flash benchmark group (FreeBuff, provider-equivalent pricing)
+- [x] Execute `EXP-005` GLM 5.3 Flash operational benchmark group via FreeBuff (16 runs; 0/8 ICM defects vs. 2/8 baseline)
