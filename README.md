@@ -541,3 +541,4 @@ Each reference states **what this project actually adopted** from it, not just a
 - [x] GitHub Actions CI: linter, smoke tests, and dashboard build
 - [x] GitHub Pages deployment of the live dashboard ([zenzerjs.github.io/Ai-Lab](https://zenzerjs.github.io/Ai-Lab/))
 - [x] Execute `EXP-005` GLM 5.3 Flash operational benchmark group via FreeBuff (16 runs; 0/8 ICM defects vs. 2/8 baseline)
+- [x] v1.0.0 verified release: dual empirical/operational findings, rate-card auditability, and frontier simulation suite
