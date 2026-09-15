@@ -226,7 +226,7 @@ def record_task(
         conn.close()
 
 
-def clear_task_runs(task_id: str, conn: Optional[sqlite3.Connection] = None, db_path: Optional[Path] = None) -> int:
+def clear_task_runs(task_id: str, conn: Optional[sqlite3.Connection] = None, db_path: Optional[Path] = None, arm: Optional[str] = None) -> int:
     """Clear previous experimental runs for a task to allow clean idempotent re-runs."""
     should_close = False
     if conn is None:
@@ -234,13 +234,17 @@ def clear_task_runs(task_id: str, conn: Optional[sqlite3.Connection] = None, db_
         should_close = True
 
     with conn:
-        cursor = conn.execute("DELETE FROM runs WHERE task_id = ?", (task_id,))
+        if arm:
+            cursor = conn.execute("DELETE FROM runs WHERE task_id = ? AND arm = ?", (task_id, arm))
+        else:
+            cursor = conn.execute("DELETE FROM runs WHERE task_id = ?", (task_id,))
         count = cursor.rowcount
 
     if should_close:
         conn.close()
 
     return count
+
 
 
 def record_run(
@@ -323,7 +327,7 @@ def task_summary(
             conn.close()
         return {"task_id": task_id, "runs_count": 0, "arms": {}}
 
-    arms_data: Dict[str, List[Dict[str, Any]]] = {"baseline": [], "icm": []}
+    arms_data: Dict[str, List[Dict[str, Any]]] = {}
     for r in rows:
         arm = r["arm"].lower()
         if arm not in arms_data:
@@ -350,6 +354,7 @@ def task_summary(
         caches = [r["cache_read_tokens"] for r in runs_list]
         outputs = [r["output_tokens"] for r in runs_list]
         totals = [r["total_tokens"] for r in runs_list]
+        thinkings = [r["thinking_tokens"] for r in runs_list]
         turns = [r["num_turns"] for r in runs_list]
         durations = [r["duration_seconds"] for r in runs_list]
 
@@ -366,6 +371,7 @@ def task_summary(
             "mean_input_tokens": mean_input,
             "mean_cache_read_tokens": mean_cache,
             "mean_output_tokens": sum(outputs) / n,
+            "mean_thinking_tokens": sum(thinkings) / n,
             "mean_total_tokens": sum(totals) / n,
             "mean_num_turns": sum(turns) / n,
             "mean_duration_seconds": sum(durations) / n,
@@ -373,13 +379,25 @@ def task_summary(
             "runs": runs_list,
         }
 
-    # Compare baseline vs icm if both exist
-    if "baseline" in summary["arms"] and "icm" in summary["arms"]:
+    # Compare baseline vs governed arm (icm-subagents or icm or any non-baseline arm)
+    gov_arm = None
+    if "icm-subagents" in summary["arms"]:
+        gov_arm = "icm-subagents"
+    elif "icm" in summary["arms"]:
+        gov_arm = "icm"
+    else:
+        for k in summary["arms"]:
+            if k != "baseline":
+                gov_arm = k
+                break
+
+    if "baseline" in summary["arms"] and gov_arm:
         b = summary["arms"]["baseline"]
-        i = summary["arms"]["icm"]
+        i = summary["arms"][gov_arm]
         cost_diff = b["mean_cost_usd"] - i["mean_cost_usd"]
         cost_pct = (cost_diff / b["mean_cost_usd"] * 100.0) if b["mean_cost_usd"] > 0 else 0.0
         tokens_diff = b["mean_total_tokens"] - i["mean_total_tokens"]
+        thinking_diff = b["mean_thinking_tokens"] - i["mean_thinking_tokens"]
         turns_diff = b["mean_num_turns"] - i["mean_num_turns"]
         duration_diff = b["mean_duration_seconds"] - i["mean_duration_seconds"]
 
@@ -390,10 +408,12 @@ def task_summary(
         cost_per_mtok_icm = (i["mean_cost_usd"] / icm_tokens * 1_000_000) if icm_tokens > 0 else 0.0
         savings_per_mtok = cost_per_mtok_base - cost_per_mtok_icm
 
+        summary["governed_arm"] = gov_arm
         summary["savings"] = {
             "mean_savings_usd": cost_diff,
             "mean_savings_percent": cost_pct,
             "mean_total_tokens_saved": tokens_diff,
+            "mean_thinking_tokens_saved": thinking_diff,
             "mean_turns_saved": turns_diff,
             "mean_duration_seconds_saved": duration_diff,
             "cache_hit_ratio_baseline": b["cache_hit_ratio"],
@@ -573,32 +593,35 @@ def print_summary(
             print("=" * 72)
             print(f"  USAGE LEDGER SUMMARY: Task {task_id}")
             print("=" * 72)
-            for arm_name in ["baseline", "icm"]:
-                if arm_name in s.get("arms", {}):
-                    a = s["arms"][arm_name]
-                    print(f"\n[{arm_name.upper()} ARM] (n={a['n']}, Model: {a['model']})")
-                    print(f"  Mean Cost:           ${a['mean_cost_usd']:.5f} (min: ${a['min_cost_usd']:.5f}, max: ${a['max_cost_usd']:.5f})")
-                    print(f"  Mean Input Tokens:   {a['mean_input_tokens']:,.0f}")
-                    print(f"  Mean Cache Read:     {a['mean_cache_read_tokens']:,.0f}")
-                    print(f"  Mean Output Tokens:  {a['mean_output_tokens']:,.0f}")
-                    print(f"  Mean Total Tokens:   {a['mean_total_tokens']:,.0f}")
-                    print(f"  Cache Hit Ratio:     {a['cache_hit_ratio'] * 100:.2f}%")
-                    print(f"  Mean Turns:          {a['mean_num_turns']:.1f}")
-                    print(f"  Mean Duration:       {a['mean_duration_seconds']:.2f}s")
+            arm_names = sorted(s.get("arms", {}).keys(), key=lambda x: (0 if x == "baseline" else 1, x))
+            for arm_name in arm_names:
+                a = s["arms"][arm_name]
+                print(f"\n[{arm_name.upper()} ARM] (n={a['n']}, Model: {a['model']})")
+                print(f"  Mean Cost:           ${a['mean_cost_usd']:.5f} (min: ${a['min_cost_usd']:.5f}, max: ${a['max_cost_usd']:.5f})")
+                print(f"  Mean Input Tokens:   {a['mean_input_tokens']:,.0f}")
+                print(f"  Mean Cache Read:     {a['mean_cache_read_tokens']:,.0f}")
+                print(f"  Mean Output Tokens:  {a['mean_output_tokens']:,.0f}")
+                print(f"  Mean Thinking Tokens:{a.get('mean_thinking_tokens', 0):,.0f}")
+                print(f"  Mean Total Tokens:   {a['mean_total_tokens']:,.0f}")
+                print(f"  Cache Hit Ratio:     {a['cache_hit_ratio'] * 100:.2f}%")
+                print(f"  Mean Turns:          {a['mean_num_turns']:.1f}")
+                print(f"  Mean Duration:       {a['mean_duration_seconds']:.2f}s")
 
             if "savings" in s:
                 sv = s["savings"]
+                gov_label = s.get("governed_arm", "ICM").upper()
                 print("-" * 72)
-                print("[MEASURED SAVINGS: BASELINE vs. ICM]")
+                print(f"[MEASURED SAVINGS: BASELINE vs. {gov_label}]")
                 print(f"  Cost Reduction:      ${sv['mean_savings_usd']:.5f} ({sv['mean_savings_percent']:.2f}%)")
                 print(f"  Total Tokens Saved:  {sv['mean_total_tokens_saved']:,.0f}")
+                print(f"  Thinking Saved:      {sv.get('mean_thinking_tokens_saved', 0):,.0f} tokens")
                 print(f"  Turns Saved:         {sv['mean_turns_saved']:.1f}")
                 print(f"  Duration Saved:      {sv['mean_duration_seconds_saved']:.2f}s")
-                print(f"  Cache Hit Ratio:     Baseline {sv['cache_hit_ratio_baseline']*100:.1f}% -> ICM {sv['cache_hit_ratio_icm']*100:.1f}%")
+                print(f"  Cache Hit Ratio:     Baseline {sv['cache_hit_ratio_baseline']*100:.1f}% -> {gov_label} {sv['cache_hit_ratio_icm']*100:.1f}%")
                 print("-" * 72)
                 print("[1M TOKEN SCALE MULTIPLIER & PROJECTIONS]")
                 print(f"  Baseline / 1M Tokens:   ${sv['cost_per_mtok_baseline']:.4f}")
-                print(f"  ICM / 1M Tokens:        ${sv['cost_per_mtok_icm']:.4f}")
+                print(f"  {gov_label} / 1M Tokens:        ${sv['cost_per_mtok_icm']:.4f}")
                 print(f"  Net Savings / 1M Tokens: +${sv['savings_usd_per_mtok']:.4f} ({sv['mean_savings_percent']:.1f}%)")
                 print(f"  Projected Savings @ 10M:  +${sv['projected_savings_10m']:.3f}")
                 print(f"  Projected Savings @ 100M: +${sv['projected_savings_100m']:.2f}")
