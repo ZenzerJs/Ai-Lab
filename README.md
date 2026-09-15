@@ -17,7 +17,7 @@
 
 > **Empirical Benchmark Status:** 24 runs across 7 pre-registered tasks evaluated on `gemini-3.8-flash`. Spanning algorithmic core modules (`EXP-001–004`), full-stack landing pages (`EXP-005`), concurrency-safe financial ledgers (`EXP-006`), and dynamic API gateway topology sandboxes with Playwright assertions (`EXP-007`). Operational benchmarks (`EXP-005-G1`…`G4`) executed on GLM 5.3 Flash via FreeBuff.
 >
-> **Measured Results:** The Interpretable Context Methodology (ICM) and Hierarchical Multi-Agent Delegation demonstrated sustained **61.3% to 63.1% cost reductions** across complex tasks. In `EXP-007`, delegating to specialized subagents (`backend-core` [Max], `frontend-ui` [Medium], `qa-playwright` [Low]) achieved a **63.05% cost reduction**, preserved an **80.5% prompt cache retention rate** (413.9% cache-to-fresh ratio), cut thinking token burn by **-34.4% (740 tokens saved)**, and delivered **100% Playwright assertion pass rates** with zero regression.
+> **Measured Results:** The Interpretable Context Methodology (ICM) and Hierarchical Multi-Agent Delegation demonstrated sustained **61.3% to 64.5% cost reductions** across complex tasks. In `EXP-008` (ResumeForge Multi-Turn Interview Intelligence), hierarchical sub-agents (`backend-core` [Max], `frontend-ui` [Medium], `qa-playwright` [Low]) achieved a **64.54% cost reduction** ($0.10955 vs. $0.03884), 10.8x prompt cache reuse (88.4k cache tokens), cut wall-clock latency by **-59.8%**, and passed **100% of Playwright E2E assertions** without touching the production codebase during intake.
 
 ### Core Empirical Findings
 
@@ -27,6 +27,7 @@
 | **`gemini-3.8-flash` (`EXP-005`)** | Full-Stack Marketing UI | **57.96% Cost Reduction** ($0.0628 vs. $0.0264) | Head-to-Head Landing Page Sandboxes |
 | **`gemini-3.8-flash` (`EXP-006`)** | Varied-Effort Delegation | **61.32% Cost Reduction**, 500 Thinking Tokens Saved (-27%) | Multi-Agent Subagent Coordination |
 | **`gemini-3.8-flash` (`EXP-007`)** | Real-Time SVG Topology & Chaos Engine | **63.05% Cost Reduction**, 413.9% Cache Retention, 100% E2E Pass | Playwright Automated Test Assertions |
+| **`gemini-3.8-flash` (`EXP-008`)** | Evidence-Grounded Interview System | **64.54% Cost Reduction** ($0.10955 vs. $0.03884), 10.8x Cache Reuse | Multi-File Production Repository Benchmark |
 | **`glm-5.3-flash`** (FreeBuff) | Deterministic Stage Contracts | **0 Shipped Defects** vs. 2 Baseline Defects (+65% latency) | Operational Reliability Benchmark |
 | **Frontier Class** | Simulated Rate Cards | $0.50 → $2.20+ net saved per task on Opus 5, Astra GPT-6, and Fable 5 | Mathematical Simulation |
 
@@ -39,9 +40,9 @@
 | **Scaffolding & Directives** | Verified | ICM stage contracts and OKF v0.2 knowledge graph |
 | **Token Control Scripts** | Verified | AST symbol extraction (`repo_map.py`) and CLI log sanitization |
 | **Measurement Harness** | Verified | Headless A/B runner (`run_experiment.py`) and SQLite ledger |
-| **Local Dashboard & Portfolios** | Active | Vite + React + Tailwind app (`localhost:5173`) and 3-Arena Showcase (`visual_showcase_2.html`) · [**Live on GitHub Pages →**](https://zenzerjs.github.io/Ai-Lab/) |
-| **Empirical Trials (`EXP-001–007`)** | Complete | 24 runs evaluated on `gemini-3.8-flash` with 61.3%–63.1% measured savings |
-| **Automated Verification** | Complete | Playwright headless test assertion harness (`tests/exp007/test_telemetry.py`) passing 100% |
+| **Local Dashboard & Portfolios** | Active | Vite + React + Tailwind app (`localhost:5173`) and 3-Arena Showcase (`visual_showcase_3.html`) · [**Live on GitHub Pages →**](https://zenzerjs.github.io/Ai-Lab/) |
+| **Empirical Trials (`EXP-001–008`)** | Complete | 26 runs evaluated on `gemini-3.8-flash` with 61.3%–64.5% measured savings |
+| **Automated Verification** | Complete | Playwright test suites (`tests/exp007/` and `tests/exp008/`) passing 100% |
 | **Subagent Governance** | Active | Native subagents in `.antigravity/agents/`: `backend-core`, `frontend-ui`, `qa-playwright` |
 | **Model Spend Cascade Engine** | Active | Dynamic re-pricing across Flash, Pro, GPT-4o, Claude 3.7 Sonnet, Claude Sonnet 4.6, Claude Sonnet 5, and GLM 5.3 Flash |
 
@@ -399,11 +400,47 @@ To measure whether multi-agent delegation preserves token economy, **`EXP-006`**
 2. **The "Noise Wall" Defeats Cache Degradation:** Monolithic CLI test iteration floods the context with terminal traces and DOM snapshots, collapsing cache hit ratios to 5.9%. Subagent isolation confined test runs to child sandboxes, sustaining an **80.5% cache retention rate** across coordinator turns.
 3. **Craftsmanship Parity:** While both arms achieved a 100% Playwright assertion pass rate, the governed arm delivered animated traffic flow pulses (`stroke-dasharray`), custom JetBrains Mono telemetry readouts, dark glassmorphism card elevation, and an accessible threshold modal.
 
-#### Interactive 3-Arena Portfolio Showcase (`visual_showcase_2.html`)
+#### Interactive 3-Arena Portfolio Showcase (`visual_showcase_2.html` & `visual_showcase_3.html`)
 To explore the generated sandboxes and live telemetry interactively:
 1. **01. Live Topology Arena:** Visitors manipulate live SVG ingress traffic, throughput velocity sliders (10k–500k RPS), and chaos spikes in real time.
-2. **02. Split-Screen Visual Arena:** Side-by-side toggles between Vanilla (`sandbox/exp007_vanilla/`) and Governed (`sandbox/exp007_governed/`) sandboxes.
+2. **02. Split-Screen Visual Arena:** Side-by-side toggles between Vanilla (`sandbox/exp007_vanilla/`, `sandbox/exp008_vanilla/`) and Governed (`sandbox/exp007_governed/`, `sandbox/exp008_governed/`) sandboxes.
 3. **03. Telemetry Receipts Drawer:** Auditable run logs, thinking token breakdowns, and Playwright verification stamps.
+
+### 3.8 Full-Stack Production Repository Benchmarking (EXP-008: ResumeForge Interview Intelligence System)
+
+`EXP-008` evaluated the performance of a monolithic baseline agent against governed hierarchical subagents on an active, multi-file production repository ([ResumeForge](https://github.com/ZenzerJs/Resume-Forge)). The challenge required implementing a multi-turn, evidence-grounded interview system with STAR rubric scoring, split-console UI, and Playwright verification without causing schema drift or regressions.
+
+#### Non-Destructive Stage 01 Intake & Architectural Grounding
+Prior to code generation, an architectural audit established:
+- **STAR Synthesizer Reality:** `src/lib/prep/star-synthesizer.ts` was evaluated client-side inside `apply-prep-sheet-modal.tsx` via `useMemo`. A new server-side endpoint (`POST /api/interview/session`) was required.
+- **Dynamic Behavioral Synthesis:** `src/lib/interview/questionDatabase.ts` stores static problems exclusively for coding tracks (`algorithms`, `system_design`, `oa_screening`). Behavioral questions must be synthesized on the fly from verified candidate accomplishment bullets in `EvidenceItem` and `Bullet`.
+- **Prisma Schema Invariants:** Candidate-facing models strictly require `@id @default(uuid())` and bidirectional reciprocal relations on `User`, `Job`, and `ResumeVariant`.
+- **Zero-Modification Policy:** The entire discovery phase was executed non-destructively; zero files were altered in the target repository.
+
+#### Empirical Scorecard: Monolith vs. Hierarchical Delegation (`EXP-008`)
+
+```text
+================================================================================
+  EXP-008 TELEMETRY DELTA (gemini-3.8-flash)
+================================================================================
+  Metric                   Arm A (Monolith)    Arm B (Governed Sub-Agents)  Delta
+  ─────────────────────────────────────────────────────────────────────────────
+  Net Cost / Run           $0.10955            $0.03884                     -64.54%
+  Duration (Wall Clock)    64.20s              25.80s                       -59.81% (-38.4s)
+  Fresh Input Tokens       114,500             21,200                       -81.48% (-93.3k)
+  Prompt Cache Read        8,200 (7.16%)       88,400 (417.0%)              10.8x leverage
+  Thinking Budget Spent    2,850 tokens        1,820 tokens                 -36.14% (-1,030 tok)
+  Interaction Turns        10 turns            4 turns                      -60.0% (-6 turns)
+  Playwright Suite (2/2)   Pass (100%)         Pass (100%)                  Parity
+================================================================================
+```
+
+#### Portfolio Showcase v2.5 (`visual_showcase_3.html`)
+The updated showcase provides an interactive exhibition featuring:
+- **EXP-008:** Live split-console interview workspace (`sandbox/exp008_governed/index.html`) with dynamic question streams, verified claim cards, 4-axis rubric progress bars, and modal scorecards.
+- **EXP-007:** Live topology canvas with chaos injection.
+- **EXP-005:** Responsive marketing landing page.
+- **Full Telemetry Receipts:** Real-time metrics comparing token spend, thinking allocation, and cache utilization.
 
 ---
 

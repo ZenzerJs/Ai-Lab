@@ -1,8 +1,8 @@
 {
-  "generated_at": "2026-09-15T03:31:44.628355+00:00",
+  "generated_at": "2026-09-15T03:40:24.862834+00:00",
   "has_data": true,
   "cumulative": {
-    "tasks_evaluated": 7,
+    "tasks_evaluated": 8,
     "total_runs": 20,
     "total_baseline_cost_usd": 0.503745,
     "total_icm_cost_usd": 0.1983675,
@@ -791,6 +791,94 @@
           "projected_savings_10m": 5.0424961056950455,
           "projected_savings_100m": 50.42496105695046
         }
+      },
+      {
+        "task_id": "EXP-008",
+        "total_runs": 2,
+        "arms": {
+          "baseline": {
+            "n": 1,
+            "model": "gemini-3.8-flash",
+            "mean_cost_usd": 0.1095525,
+            "min_cost_usd": 0.1095525,
+            "max_cost_usd": 0.1095525,
+            "mean_input_tokens": 114500.0,
+            "mean_cache_read_tokens": 8200.0,
+            "mean_output_tokens": 6150.0,
+            "mean_thinking_tokens": 2850.0,
+            "mean_total_tokens": 131700.0,
+            "mean_num_turns": 10.0,
+            "mean_duration_seconds": 64.2,
+            "cache_hit_ratio": 0.07161572052401746,
+            "runs": [
+              {
+                "id": 71,
+                "task_id": "EXP-008",
+                "arm": "baseline",
+                "model": "gemini-3.8-flash",
+                "run_index": 1,
+                "timestamp": "2026-09-14T23:41:04Z",
+                "input_tokens": 114500,
+                "output_tokens": 6150,
+                "thinking_tokens": 2850,
+                "cache_read_tokens": 8200,
+                "total_tokens": 131700,
+                "num_turns": 10,
+                "duration_seconds": 64.2,
+                "cost_usd": 0.1095525
+              }
+            ]
+          },
+          "icm-subagents": {
+            "n": 1,
+            "model": "gemini-3.8-flash",
+            "mean_cost_usd": 0.0388425,
+            "min_cost_usd": 0.0388425,
+            "max_cost_usd": 0.0388425,
+            "mean_input_tokens": 21200.0,
+            "mean_cache_read_tokens": 88400.0,
+            "mean_output_tokens": 4350.0,
+            "mean_thinking_tokens": 1820.0,
+            "mean_total_tokens": 115770.0,
+            "mean_num_turns": 4.0,
+            "mean_duration_seconds": 25.8,
+            "cache_hit_ratio": 4.169811320754717,
+            "runs": [
+              {
+                "id": 72,
+                "task_id": "EXP-008",
+                "arm": "icm-subagents",
+                "model": "gemini-3.8-flash",
+                "run_index": 1,
+                "timestamp": "2026-09-14T23:41:40Z",
+                "input_tokens": 21200,
+                "output_tokens": 4350,
+                "thinking_tokens": 1820,
+                "cache_read_tokens": 88400,
+                "total_tokens": 115770,
+                "num_turns": 4,
+                "duration_seconds": 25.8,
+                "cost_usd": 0.0388425
+              }
+            ]
+          }
+        },
+        "governed_arm": "icm-subagents",
+        "savings": {
+          "mean_savings_usd": 0.07071,
+          "mean_savings_percent": 64.54439652221538,
+          "mean_total_tokens_saved": 15930.0,
+          "mean_thinking_tokens_saved": 1030.0,
+          "mean_turns_saved": 6.0,
+          "mean_duration_seconds_saved": 38.400000000000006,
+          "cache_hit_ratio_baseline": 0.07161572052401746,
+          "cache_hit_ratio_icm": 4.169811320754717,
+          "cost_per_mtok_baseline": 0.8318337129840546,
+          "cost_per_mtok_icm": 0.33551438196423944,
+          "savings_usd_per_mtok": 0.4963193310198152,
+          "projected_savings_10m": 4.963193310198152,
+          "projected_savings_100m": 49.63193310198152
+        }
       }
     ]
   },
@@ -1570,6 +1658,94 @@
         "projected_savings_10m": 5.0424961056950455,
         "projected_savings_100m": 50.42496105695046
       }
+    },
+    {
+      "task_id": "EXP-008",
+      "total_runs": 2,
+      "arms": {
+        "baseline": {
+          "n": 1,
+          "model": "gemini-3.8-flash",
+          "mean_cost_usd": 0.1095525,
+          "min_cost_usd": 0.1095525,
+          "max_cost_usd": 0.1095525,
+          "mean_input_tokens": 114500.0,
+          "mean_cache_read_tokens": 8200.0,
+          "mean_output_tokens": 6150.0,
+          "mean_thinking_tokens": 2850.0,
+          "mean_total_tokens": 131700.0,
+          "mean_num_turns": 10.0,
+          "mean_duration_seconds": 64.2,
+          "cache_hit_ratio": 0.07161572052401746,
+          "runs": [
+            {
+              "id": 71,
+              "task_id": "EXP-008",
+              "arm": "baseline",
+              "model": "gemini-3.8-flash",
+              "run_index": 1,
+              "timestamp": "2026-09-14T23:41:04Z",
+              "input_tokens": 114500,
+              "output_tokens": 6150,
+              "thinking_tokens": 2850,
+              "cache_read_tokens": 8200,
+              "total_tokens": 131700,
+              "num_turns": 10,
+              "duration_seconds": 64.2,
+              "cost_usd": 0.1095525
+            }
+          ]
+        },
+        "icm-subagents": {
+          "n": 1,
+          "model": "gemini-3.8-flash",
+          "mean_cost_usd": 0.0388425,
+          "min_cost_usd": 0.0388425,
+          "max_cost_usd": 0.0388425,
+          "mean_input_tokens": 21200.0,
+          "mean_cache_read_tokens": 88400.0,
+          "mean_output_tokens": 4350.0,
+          "mean_thinking_tokens": 1820.0,
+          "mean_total_tokens": 115770.0,
+          "mean_num_turns": 4.0,
+          "mean_duration_seconds": 25.8,
+          "cache_hit_ratio": 4.169811320754717,
+          "runs": [
+            {
+              "id": 72,
+              "task_id": "EXP-008",
+              "arm": "icm-subagents",
+              "model": "gemini-3.8-flash",
+              "run_index": 1,
+              "timestamp": "2026-09-14T23:41:40Z",
+              "input_tokens": 21200,
+              "output_tokens": 4350,
+              "thinking_tokens": 1820,
+              "cache_read_tokens": 88400,
+              "total_tokens": 115770,
+              "num_turns": 4,
+              "duration_seconds": 25.8,
+              "cost_usd": 0.0388425
+            }
+          ]
+        }
+      },
+      "governed_arm": "icm-subagents",
+      "savings": {
+        "mean_savings_usd": 0.07071,
+        "mean_savings_percent": 64.54439652221538,
+        "mean_total_tokens_saved": 15930.0,
+        "mean_thinking_tokens_saved": 1030.0,
+        "mean_turns_saved": 6.0,
+        "mean_duration_seconds_saved": 38.400000000000006,
+        "cache_hit_ratio_baseline": 0.07161572052401746,
+        "cache_hit_ratio_icm": 4.169811320754717,
+        "cost_per_mtok_baseline": 0.8318337129840546,
+        "cost_per_mtok_icm": 0.33551438196423944,
+        "savings_usd_per_mtok": 0.4963193310198152,
+        "projected_savings_10m": 4.963193310198152,
+        "projected_savings_100m": 49.63193310198152
+      }
     }
   ],
   "runs": [
@@ -1956,6 +2132,38 @@
       "num_turns": 4,
       "duration_seconds": 19.8,
       "cost_usd": 0.0308175
+    },
+    {
+      "id": 71,
+      "task_id": "EXP-008",
+      "arm": "baseline",
+      "model": "gemini-3.8-flash",
+      "run_index": 1,
+      "timestamp": "2026-09-14T23:41:04Z",
+      "input_tokens": 114500,
+      "output_tokens": 6150,
+      "thinking_tokens": 2850,
+      "cache_read_tokens": 8200,
+      "total_tokens": 131700,
+      "num_turns": 10,
+      "duration_seconds": 64.2,
+      "cost_usd": 0.1095525
+    },
+    {
+      "id": 72,
+      "task_id": "EXP-008",
+      "arm": "icm-subagents",
+      "model": "gemini-3.8-flash",
+      "run_index": 1,
+      "timestamp": "2026-09-14T23:41:40Z",
+      "input_tokens": 21200,
+      "output_tokens": 4350,
+      "thinking_tokens": 1820,
+      "cache_read_tokens": 88400,
+      "total_tokens": 115770,
+      "num_turns": 4,
+      "duration_seconds": 25.8,
+      "cost_usd": 0.0388425
     }
   ],
   "timeline": [

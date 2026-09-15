@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en" class="dark scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI-Lab: Multi-Agent Benchmark Exhibition | EXP-008, EXP-007, EXP-005</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              400: '#818cf8',
+              500: '#6366f1',
+              600: '#4f46e5',
+              900: '#1e1b4b',
+              950: '#0b0f19'
+            },
+            forgePrimary: '#ff8c00',
+            forgeSecondary: '#4edea3'
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .glass-card {
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased selection:bg-orange-500/30 selection:text-white">
+
+  <!-- Top Announcement Bar -->
+  <div class="bg-indigo-950/60 border-b border-indigo-900/50 py-2 px-4 text-center text-xs text-indigo-300 flex items-center justify-center space-x-2">
+    <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+    <span><strong>AI-Lab v2.5 Active</strong>: Head-to-Head Multi-File Production Benchmarking & Telemetry Receipts</span>
+  </div>
+
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-12">
+
+    <!-- Hero Header -->
+    <header class="text-center max-w-4xl mx-auto space-y-4">
+      <div class="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-orange-500/10 border border-orange-500/20 text-xs text-orange-400 font-semibold">
+        <span>Portfolio Exhibition • Multi-Stage Telemetry</span>
+        <span>•</span>
+        <span>26 Recorded Runs Across 8 Tasks</span>
+      </div>
+      <h1 class="text-3xl sm:text-5xl font-extrabold tracking-tight text-white leading-tight">
+        Monolith vs. Governed Delegation
+      </h1>
+      <p class="text-base sm:text-lg text-slate-400">
+        Empirical comparison of unconstrained single-thread agents against governed hierarchical sub-agents (<code class="text-orange-400 font-mono">@backend-core</code> [Max], <code class="text-indigo-400 font-mono">@frontend-ui</code> [Medium], <code class="text-emerald-400 font-mono">@qa-playwright</code> [Low]).
+      </p>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <div class="flex items-center justify-center space-x-3 border-b border-white/10 pb-4">
+      <button onclick="switchTab('exp008')" id="tab-exp008" class="px-5 py-2.5 rounded-xl text-xs font-bold font-mono transition-all bg-orange-500/20 text-orange-300 border border-orange-500/30 shadow-lg shadow-orange-500/10">
+        EXP-008: ResumeForge Interview System
+      </button>
+      <button onclick="switchTab('exp007')" id="tab-exp007" class="px-5 py-2.5 rounded-xl text-xs font-bold font-mono transition-all bg-slate-900 text-slate-400 hover:text-white border border-white/5">
+        EXP-007: Gateway Telemetry Simulator
+      </button>
+      <button onclick="switchTab('exp005')" id="tab-exp005" class="px-5 py-2.5 rounded-xl text-xs font-bold font-mono transition-all bg-slate-900 text-slate-400 hover:text-white border border-white/5">
+        EXP-005: SaaS Marketing Page
+      </button>
+    </div>
+
+    <!-- Arena 1: EXP-008 -->
+    <section id="view-exp008" class="space-y-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <span class="text-xs font-mono uppercase tracking-wider text-orange-400 font-bold">Featured Benchmark</span>
+          <h2 class="text-2xl font-bold text-white tracking-tight">EXP-008: ResumeForge Interview Intelligence System</h2>
+          <p class="text-sm text-slate-400">Multi-turn STAR question synthesis, 4-axis rubric evaluation, and evidence claim grounding.</p>
+        </div>
+        <div class="text-right font-mono text-xs text-slate-400">
+          <span class="px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">PLAYWRIGHT 100% PASS</span>
+          <div class="mt-1">Cost Reduction: <strong class="text-orange-400">-64.54%</strong></div>
+        </div>
+      </div>
+
+      <!-- Live Split Preview -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Arm A Baseline -->
+        <div class="glass-card rounded-2xl overflow-hidden border border-white/10 flex flex-col shadow-2xl">
+          <div class="bg-slate-900/90 px-4 py-3 border-b border-white/5 flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
+              <span class="text-xs font-mono font-bold text-slate-300">ARM A: Vanilla Monolith</span>
+            </div>
+            <span class="text-[11px] font-mono text-slate-400">$0.10955 • 10 turns • 64.2s</span>
+          </div>
+          <div class="relative w-full h-[520px] bg-white">
+            <iframe src="sandbox/exp008_vanilla/index.html" class="w-full h-full border-0"></iframe>
+          </div>
+        </div>
+
+        <!-- Arm B Governed -->
+        <div class="glass-card rounded-2xl overflow-hidden border border-orange-500/30 flex flex-col shadow-2xl ring-1 ring-orange-500/20">
+          <div class="bg-slate-900/90 px-4 py-3 border-b border-orange-500/20 flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-orange-400 animate-pulse"></span>
+              <span class="text-xs font-mono font-bold text-orange-300">ARM B: Governed Sub-Agents (ICM)</span>
+            </div>
+            <span class="text-[11px] font-mono text-emerald-400 font-bold">$0.03884 (-64.5%) • 4 turns • 25.8s</span>
+          </div>
+          <div class="relative w-full h-[520px] bg-[#0b1326]">
+            <iframe src="sandbox/exp008_governed/index.html" class="w-full h-full border-0"></iframe>
+          </div>
+        </div>
+      </div>
+
+      <!-- Telemetry Receipts Grid for EXP-008 -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div class="glass-card p-4 rounded-xl border border-white/5">
+          <span class="text-[10px] font-mono uppercase text-slate-400 block">Cost / Run</span>
+          <div class="text-xl font-bold font-mono text-white mt-1">$0.03884</div>
+          <span class="text-[11px] text-emerald-400 font-mono">-64.54% vs Monolith</span>
+        </div>
+        <div class="glass-card p-4 rounded-xl border border-white/5">
+          <span class="text-[10px] font-mono uppercase text-slate-400 block">Duration</span>
+          <div class="text-xl font-bold font-mono text-white mt-1">25.80s</div>
+          <span class="text-[11px] text-emerald-400 font-mono">-59.81% latency</span>
+        </div>
+        <div class="glass-card p-4 rounded-xl border border-white/5">
+          <span class="text-[10px] font-mono uppercase text-slate-400 block">Prompt Cache Read</span>
+          <div class="text-xl font-bold font-mono text-white mt-1">88,400 tokens</div>
+          <span class="text-[11px] text-emerald-400 font-mono">10.8x higher reuse</span>
+        </div>
+        <div class="glass-card p-4 rounded-xl border border-white/5">
+          <span class="text-[10px] font-mono uppercase text-slate-400 block">Thinking Rationing</span>
+          <div class="text-xl font-bold font-mono text-white mt-1">1,820 tokens</div>
+          <span class="text-[11px] text-emerald-400 font-mono">-1,030 tokens saved</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Arena 2: EXP-007 (Initially Hidden) -->
+    <section id="view-exp007" class="space-y-6 hidden">
+      <div class="flex items-center justify-between">
+        <div>
+          <span class="text-xs font-mono uppercase tracking-wider text-indigo-400 font-bold">Chaos & Telemetry</span>
+          <h2 class="text-2xl font-bold text-white tracking-tight">EXP-007: Dynamic API Gateway Telemetry Simulator</h2>
+        </div>
+        <span class="text-xs font-mono text-emerald-400 font-bold">-63.05% Cost Reduction</span>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="glass-card rounded-2xl overflow-hidden border border-white/10 h-[500px]">
+          <iframe src="sandbox/exp007_vanilla/index.html" class="w-full h-full border-0"></iframe>
+        </div>
+        <div class="glass-card rounded-2xl overflow-hidden border border-indigo-500/30 h-[500px]">
+          <iframe src="sandbox/exp007_governed/index.html" class="w-full h-full border-0"></iframe>
+        </div>
+      </div>
+    </section>
+
+    <!-- Arena 3: EXP-005 (Initially Hidden) -->
+    <section id="view-exp005" class="space-y-6 hidden">
+      <div class="flex items-center justify-between">
+        <div>
+          <span class="text-xs font-mono uppercase tracking-wider text-indigo-400 font-bold">Landing Page</span>
+          <h2 class="text-2xl font-bold text-white tracking-tight">EXP-005: SaaS Marketing Landing Page</h2>
+        </div>
+        <span class="text-xs font-mono text-emerald-400 font-bold">-77.9% Cost Reduction</span>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="glass-card rounded-2xl overflow-hidden border border-white/10 h-[500px]">
+          <iframe src="sandbox/vanilla/index.html" class="w-full h-full border-0"></iframe>
+        </div>
+        <div class="glass-card rounded-2xl overflow-hidden border border-indigo-500/30 h-[500px]">
+          <iframe src="sandbox/governed/index.html" class="w-full h-full border-0"></iframe>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    function switchTab(tabId) {
+      ['exp008', 'exp007', 'exp005'].forEach(id => {
+        document.getElementById('view-' + id).classList.add('hidden');
+        document.getElementById('tab-' + id).className = 'px-5 py-2.5 rounded-xl text-xs font-bold font-mono transition-all bg-slate-900 text-slate-400 hover:text-white border border-white/5';
+      });
+      document.getElementById('view-' + tabId).classList.remove('hidden');
+      if (tabId === 'exp008') {
+        document.getElementById('tab-exp008').className = 'px-5 py-2.5 rounded-xl text-xs font-bold font-mono transition-all bg-orange-500/20 text-orange-300 border border-orange-500/30 shadow-lg shadow-orange-500/10';
+      } else {
+        document.getElementById('tab-' + tabId).className = 'px-5 py-2.5 rounded-xl text-xs font-bold font-mono transition-all bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 shadow-lg shadow-indigo-500/10';
+      }
+    }
+  </script>
+</body>
+</html>

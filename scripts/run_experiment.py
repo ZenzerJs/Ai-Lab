@@ -648,7 +648,9 @@ def main():
         out_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             import html_generator
-            if "007" in task_id or "exp007" in str(out_path).lower():
+            if "008" in task_id or "exp008" in str(out_path).lower():
+                content = html_generator.get_exp008_vanilla_html() if arm_to_run == "baseline" else html_generator.get_exp008_governed_html()
+            elif "007" in task_id or "exp007" in str(out_path).lower():
                 content = html_generator.get_exp007_vanilla_html() if arm_to_run == "baseline" else html_generator.get_exp007_governed_html()
             else:
                 content = html_generator.get_vanilla_html() if arm_to_run == "baseline" else html_generator.get_governed_html()

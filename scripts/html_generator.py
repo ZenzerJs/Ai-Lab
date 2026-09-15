@@ -4,6 +4,7 @@ HTML artifact generators for EXP-005 and EXP-007 benchmarks.
 """
 
 from exp007_templates import get_exp007_vanilla_html, get_exp007_governed_html
+from exp008_templates import get_exp008_vanilla_html, get_exp008_governed_html
 
 def get_vanilla_html() -> str:
     return """<!DOCTYPE html>
