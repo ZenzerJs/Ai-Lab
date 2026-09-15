@@ -10,6 +10,8 @@ import { TurnsDuration } from './components/TurnsDuration';
 import { RawLedgerTable } from './components/RawLedgerTable';
 import { ExperimentCards } from './components/ExperimentCards';
 import { OperationalBenchmarkCard } from './components/OperationalBenchmarkCard';
+import { ExecutiveShowcase } from './components/ExecutiveShowcase';
+import { SandboxViewer } from './components/SandboxViewer';
 import { DashboardPayload } from './types';
 import { deriveDataForModel } from './lib/recalculate';
 import { Info, AlertTriangle, RefreshCw, Terminal, PlayCircle } from 'lucide-react';
@@ -26,7 +28,7 @@ export const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [scaleMode, setScaleMode] = useState<ScaleMode>('1x');
   const [selectedModel, setSelectedModel] = useState<string>('recorded');
-  const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
+  const [activeTab, setActiveTab] = useState<DashboardTab>('showcase');
 
   const activeData = useMemo(() => {
     return deriveDataForModel(data, selectedModel);
@@ -138,8 +140,15 @@ export const App: React.FC = () => {
     </Card>
   );
 
-  const renderOverview = activeData && data?.has_data && (
+  const renderTelemetry = activeData && data?.has_data && (
     <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-2 border-b border-surface-border pb-4">
+        <h2 className="text-xl font-bold text-white font-mono">Telemetry & Cost Economics</h2>
+        <p className="text-xs text-muted-foreground font-mono">
+          Empirical token ledger curves, task-level comparisons, cache retention ratios, and execution latency.
+        </p>
+      </div>
+
       <CumulativeSavings
         cumulative={activeData.cumulative}
         timeline={activeData.timeline}
@@ -160,7 +169,26 @@ export const App: React.FC = () => {
   );
 
   const renderSimulator = data?.has_data && (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-2 border-b border-surface-border pb-4">
+        <h2 className="text-xl font-bold text-white font-mono">Multi-Model Rate-Card Simulator</h2>
+        <p className="text-xs text-muted-foreground font-mono">
+          Simulate measured token workloads against published API rate cards across major frontier models.
+        </p>
+      </div>
+
+      <Alert variant="info">
+        <Info className="size-5 text-primary-light shrink-0 mt-0.5" />
+        <div className="flex flex-col gap-1">
+          <AlertTitle className="text-white font-semibold">
+            Empirical Telemetry vs. Rate-Card Simulations:
+          </AlertTitle>
+          <AlertDescription className="text-muted-foreground text-xs leading-relaxed font-mono">
+            Empirical benchmark runs are executed on <code className="text-primary-light">gemini-3.8-flash</code> via live CLI event streams. Other model figures (<code className="text-slate-200">claude-sonnet-4-6/5</code>, <code className="text-slate-200">gpt-4o</code>, <code className="text-slate-200">glm-5.3-flash</code>) re-price identical measured workloads against published pricing cards without paid live calls.
+          </AlertDescription>
+        </div>
+      </Alert>
+
       <div className="flex flex-col gap-3">
         <ModelSelector
           selectedModel={selectedModel}
@@ -185,20 +213,19 @@ export const App: React.FC = () => {
     </div>
   );
 
-  const renderExperiments = data?.has_data && activeData && (
-    <div className="flex flex-col gap-5">
+  const renderEvidence = data?.has_data && activeData && (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2 border-b border-surface-border pb-4">
+        <h2 className="text-xl font-bold text-white font-mono">Audit Ledger & Provenance</h2>
+        <p className="text-xs text-muted-foreground font-mono">
+          Task verification cards, operational reliability trials, and full SQLite run-by-run audit trail.
+        </p>
+      </div>
       <ExperimentCards tasks={activeData.tasks} />
       {data.operational && <OperationalBenchmarkCard ops={data.operational} />}
-    </div>
-  );
-
-  const renderEvidence = data?.has_data && activeData && (
-    <div className="flex flex-col gap-5">
       <RawLedgerTable runs={activeData.runs} />
     </div>
   );
-
-
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
@@ -211,32 +238,6 @@ export const App: React.FC = () => {
       />
 
       <main className="max-w-[1600px] mx-auto w-full px-5 lg:px-8 py-6 flex-1 space-y-5">
-        {/* Telemetry protocol banner: measured vs simulated separation */}
-        <Alert variant="info">
-          <Info className="size-5 text-primary-light shrink-0 mt-0.5" />
-          <div className="flex flex-col gap-1">
-            <AlertTitle className="text-white font-semibold">
-              Empirical Benchmark Telemetry vs. Rate-Card Simulations:
-            </AlertTitle>
-            <AlertDescription className="text-muted-foreground text-xs leading-relaxed font-mono">
-              <strong className="text-white">Empirical Benchmark:</strong>{' '}
-              <span className="bg-card text-primary-light border border-surface-border px-1.5 py-0.5 rounded font-medium">
-                gemini-3.8-flash
-              </span>{' '}
-              16 paired runs via Antigravity CLI event streams (61.6% cost reduction, cache-read-to-input ratio 4.8% → 390.5%).
-              <br />
-              <strong className="text-white ml-2">Rate-Card Simulations:</strong>{' '}
-              <code className="text-slate-200 font-mono">claude-sonnet-4-6</code>,{' '}
-              <code className="text-slate-200 font-mono">claude-sonnet-5</code>,{' '}
-              <code className="text-slate-200 font-mono">claude-3-7-sonnet</code>,{' '}
-              <code className="text-slate-200 font-mono">gpt-4o</code>,{' '}
-              <code className="text-slate-200 font-mono">gemini-2.5-pro/flash</code>, and{' '}
-              <code className="text-slate-200 font-mono">glm-5.3-flash</code>{' '}
-              re-price the identical measured token workload against published rate cards without paid live API calls. Provider-equivalent models (e.g. FreeBuff GLM) carry $0 direct user cost — USD figures are simulated for workload comparability only.
-            </AlertDescription>
-          </div>
-        </Alert>
-
         {renderError}
         {renderLoading}
         {renderEmpty}
@@ -248,9 +249,12 @@ export const App: React.FC = () => {
             aria-labelledby={`tab-${activeTab}`}
             className="flex flex-col gap-5"
           >
-            {activeTab === 'overview' && renderOverview}
+            {activeTab === 'showcase' && (
+              <ExecutiveShowcase data={data} onNavigateTab={setActiveTab} />
+            )}
+            {activeTab === 'sandboxes' && <SandboxViewer />}
+            {activeTab === 'telemetry' && renderTelemetry}
             {activeTab === 'simulator' && renderSimulator}
-            {activeTab === 'experiments' && renderExperiments}
             {activeTab === 'evidence' && renderEvidence}
           </section>
         )}

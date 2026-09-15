@@ -12,13 +12,14 @@ interface HeaderProps {
   onTabChange: (tab: DashboardTab) => void;
 }
 
-export type DashboardTab = 'overview' | 'simulator' | 'experiments' | 'evidence';
+export type DashboardTab = 'showcase' | 'sandboxes' | 'telemetry' | 'simulator' | 'evidence';
 
 export const TAB_ITEMS: { id: DashboardTab; label: string }[] = [
-  { id: 'overview', label: 'Overview (Executive)' },
-  { id: 'simulator', label: 'Compare Models (Simulator)' },
-  { id: 'experiments', label: 'Experiments (Audit Trail)' },
-  { id: 'evidence', label: 'Raw Evidence (Provenance)' },
+  { id: 'showcase', label: 'Visual Showcase' },
+  { id: 'sandboxes', label: 'Live Sandboxes & Demos' },
+  { id: 'telemetry', label: 'Telemetry & Statistics' },
+  { id: 'simulator', label: 'Model Simulator' },
+  { id: 'evidence', label: 'Audit Ledger & Provenance' },
 ];
 
 export const Header: React.FC<HeaderProps> = ({
