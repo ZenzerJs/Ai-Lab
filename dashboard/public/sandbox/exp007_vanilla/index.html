@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PulseEngine Sandbox - Dynamic API Gateway Simulator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 text-gray-900 font-sans min-h-screen p-4 md:p-8">
+  <div class="max-w-6xl mx-auto space-y-6">
+    <!-- Header -->
+    <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 rounded-lg border border-gray-300 shadow-sm gap-4">
+      <div>
+        <h1 class="text-xl font-bold">PulseEngine Sandbox (Vanilla Baseline)</h1>
+        <p class="text-xs text-gray-500">Dynamic API Gateway Topology & Real-Time Telemetry Simulator</p>
+      </div>
+      <div class="flex items-center space-x-3">
+        <button id="open-settings-btn" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 border border-gray-300 text-xs font-semibold rounded">
+          Threshold Settings
+        </button>
+        <button id="toggle-chaos" class="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded shadow-sm">
+          Toggle Chaos Mode
+        </button>
+      </div>
+    </header>
+
+    <!-- Alert Banner -->
+    <div id="alert-banner" class="hidden bg-red-100 border border-red-400 text-red-800 px-4 py-3 rounded-lg text-sm flex items-center justify-between">
+      <div class="flex items-center space-x-2">
+        <span class="font-bold text-xs uppercase px-2 py-0.5 bg-red-200 rounded text-red-900">Alert</span>
+        <span>Anomaly detected: p99 threshold breached (142ms latency spike in Billing service)</span>
+      </div>
+      <span class="text-xs text-red-600 font-mono">ERR_LATENCY_P99</span>
+    </div>
+
+    <!-- Controls Bar -->
+    <div class="bg-white p-4 rounded-lg border border-gray-300 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4 text-xs">
+      <div class="flex items-center space-x-3 w-full md:w-1/2">
+        <label class="font-semibold whitespace-nowrap">Throughput (RPS):</label>
+        <input type="range" id="rps-slider" min="10000" max="500000" step="5000" value="125000" class="w-full">
+        <span id="rps-value" class="font-mono font-bold w-16 text-right">125k</span>
+      </div>
+      <div class="flex space-x-4 text-gray-600">
+        <span>Status: <strong id="gateway-status" class="text-green-600">NORMAL</strong></span>
+        <span>Ingestion: <strong>Active</strong></span>
+      </div>
+    </div>
+
+    <!-- Interactive Topology Canvas -->
+    <div id="topology-canvas" class="bg-white p-6 rounded-lg border border-gray-300 shadow-sm relative overflow-hidden">
+      <h2 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Service Topology Canvas</h2>
+      <svg class="w-full h-64" viewBox="0 0 800 240">
+        <!-- Connecting lines -->
+        <line x1="130" y1="120" x2="320" y2="60" stroke="#cbd5e1" stroke-width="2" />
+        <line x1="130" y1="120" x2="320" y2="120" stroke="#cbd5e1" stroke-width="2" />
+        <line x1="130" y1="120" x2="320" y2="180" stroke="#cbd5e1" stroke-width="2" />
+        <line x1="440" y1="60" x2="640" y2="120" stroke="#cbd5e1" stroke-width="2" />
+        <line x1="440" y1="120" x2="640" y2="120" stroke="#cbd5e1" stroke-width="2" />
+        <line x1="440" y1="180" x2="640" y2="120" stroke="#cbd5e1" stroke-width="2" />
+
+        <!-- Nodes -->
+        <g data-node="ingress" transform="translate(40, 85)">
+          <rect width="90" height="70" rx="6" fill="#f8fafc" stroke="#64748b" stroke-width="2" />
+          <text x="45" y="32" text-anchor="middle" font-size="11" font-weight="bold" fill="#1e293b">Ingress</text>
+          <text x="45" y="50" text-anchor="middle" font-size="10" fill="#64748b">Gateway</text>
+        </g>
+
+        <g data-node="auth" transform="translate(320, 25)">
+          <rect width="120" height="65" rx="6" fill="#f8fafc" stroke="#64748b" stroke-width="1.5" />
+          <text x="60" y="30" text-anchor="middle" font-size="11" font-weight="bold" fill="#1e293b">Auth Service</text>
+          <text x="60" y="48" text-anchor="middle" font-size="10" fill="#16a34a">Healthy</text>
+        </g>
+
+        <g data-node="billing" id="node-billing" transform="translate(320, 90)">
+          <rect id="billing-rect" width="120" height="65" rx="6" fill="#f8fafc" stroke="#64748b" stroke-width="1.5" />
+          <text x="60" y="30" text-anchor="middle" font-size="11" font-weight="bold" fill="#1e293b">Billing Service</text>
+          <text id="billing-status" x="60" y="48" text-anchor="middle" font-size="10" fill="#16a34a">Healthy</text>
+        </g>
+
+        <g data-node="search" transform="translate(320, 155)">
+          <rect width="120" height="65" rx="6" fill="#f8fafc" stroke="#64748b" stroke-width="1.5" />
+          <text x="60" y="30" text-anchor="middle" font-size="11" font-weight="bold" fill="#1e293b">Search Engine</text>
+          <text x="60" y="48" text-anchor="middle" font-size="10" fill="#16a34a">Healthy</text>
+        </g>
+
+        <g data-node="sink" transform="translate(640, 85)">
+          <rect width="100" height="70" rx="6" fill="#f8fafc" stroke="#64748b" stroke-width="2" />
+          <text x="50" y="32" text-anchor="middle" font-size="11" font-weight="bold" fill="#1e293b">Influx Sink</text>
+          <text x="50" y="50" text-anchor="middle" font-size="10" fill="#64748b">Telemetry DB</text>
+        </g>
+      </svg>
+    </div>
+
+    <!-- Real-Time Metrics Sparklines -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div class="bg-white p-4 rounded-lg border border-gray-300 shadow-sm">
+        <div class="flex justify-between text-xs text-gray-500 font-semibold mb-1">
+          <span>p50 Latency</span>
+          <span id="val-p50" class="font-mono text-gray-900 font-bold">4.2ms</span>
+        </div>
+        <svg class="w-full h-12" viewBox="0 0 100 30">
+          <polyline id="poly-p50" fill="none" stroke="#3b82f6" stroke-width="2" points="0,25 20,22 40,24 60,20 80,21 100,23" />
+        </svg>
+      </div>
+
+      <div class="bg-white p-4 rounded-lg border border-gray-300 shadow-sm">
+        <div class="flex justify-between text-xs text-gray-500 font-semibold mb-1">
+          <span>p95 Latency</span>
+          <span id="val-p95" class="font-mono text-gray-900 font-bold">12.8ms</span>
+        </div>
+        <svg class="w-full h-12" viewBox="0 0 100 30">
+          <polyline id="poly-p95" fill="none" stroke="#f59e0b" stroke-width="2" points="0,20 20,18 40,22 60,15 80,17 100,19" />
+        </svg>
+      </div>
+
+      <div class="bg-white p-4 rounded-lg border border-gray-300 shadow-sm">
+        <div class="flex justify-between text-xs text-gray-500 font-semibold mb-1">
+          <span>p99 Latency</span>
+          <span id="val-p99" class="font-mono text-gray-900 font-bold">18.4ms</span>
+        </div>
+        <svg class="w-full h-12" viewBox="0 0 100 30">
+          <polyline id="poly-p99" fill="none" stroke="#ef4444" stroke-width="2" points="0,16 20,14 40,19 60,12 80,15 100,14" />
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Dialog (Modal) -->
+  <div id="settings-dialog" class="hidden fixed inset-0 z-50 bg-black bg-opacity-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-lg border border-gray-300 shadow-xl max-w-md w-full p-6 space-y-4">
+      <div class="flex justify-between items-center border-b pb-3">
+        <h3 class="text-sm font-bold">Threshold Configuration</h3>
+        <button id="close-settings-btn" class="text-gray-400 hover:text-gray-600 text-sm font-bold">&times;</button>
+      </div>
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block text-gray-600 mb-1">p99 Latency Alert Threshold (ms):</label>
+          <input type="number" value="25" class="w-full p-2 border rounded font-mono">
+        </div>
+        <div>
+          <label class="block text-gray-600 mb-1">5xx Error Spike Threshold (%):</label>
+          <input type="number" value="2.0" step="0.1" class="w-full p-2 border rounded font-mono">
+        </div>
+      </div>
+      <div class="flex justify-end space-x-2 pt-2 border-t">
+        <button id="save-settings-btn" class="px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let chaos = false;
+    const alertBanner = document.getElementById('alert-banner');
+    const toggleChaosBtn = document.getElementById('toggle-chaos');
+    const settingsDialog = document.getElementById('settings-dialog');
+    const openSettingsBtn = document.getElementById('open-settings-btn');
+    const closeSettingsBtn = document.getElementById('close-settings-btn');
+    const saveSettingsBtn = document.getElementById('save-settings-btn');
+    const billingRect = document.getElementById('billing-rect');
+    const billingStatus = document.getElementById('billing-status');
+    const rpsSlider = document.getElementById('rps-slider');
+    const rpsVal = document.getElementById('rps-value');
+
+    rpsSlider.addEventListener('input', (e) => {
+      const val = parseInt(e.target.value, 10);
+      rpsVal.textContent = Math.round(val / 1000) + 'k';
+    });
+
+    toggleChaosBtn.addEventListener('click', () => {
+      chaos = !chaos;
+      if (chaos) {
+        alertBanner.classList.remove('hidden');
+        billingRect.setAttribute('stroke', '#ef4444');
+        billingRect.setAttribute('fill', '#fef2f2');
+        billingStatus.textContent = 'Degraded (p99 > 25ms)';
+        billingStatus.setAttribute('fill', '#ef4444');
+      } else {
+        alertBanner.classList.add('hidden');
+        billingRect.setAttribute('stroke', '#64748b');
+        billingRect.setAttribute('fill', '#f8fafc');
+        billingStatus.textContent = 'Healthy';
+        billingStatus.setAttribute('fill', '#16a34a');
+      }
+    });
+
+    openSettingsBtn.addEventListener('click', () => settingsDialog.classList.remove('hidden'));
+    const hideDialog = () => settingsDialog.classList.add('hidden');
+    closeSettingsBtn.addEventListener('click', hideDialog);
+    saveSettingsBtn.addEventListener('click', hideDialog);
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') hideDialog();
+    });
+
+    // 800ms metrics ticker
+    setInterval(() => {
+      const p50 = chaos ? (18 + Math.random() * 8).toFixed(1) : (4 + Math.random() * 2).toFixed(1);
+      const p95 = chaos ? (85 + Math.random() * 20).toFixed(1) : (11 + Math.random() * 3).toFixed(1);
+      const p99 = chaos ? (142 + Math.random() * 35).toFixed(1) : (17 + Math.random() * 4).toFixed(1);
+
+      document.getElementById('val-p50').textContent = p50 + 'ms';
+      document.getElementById('val-p95').textContent = p95 + 'ms';
+      document.getElementById('val-p99').textContent = p99 + 'ms';
+    }, 800);
+  </script>
+</body>
+</html>

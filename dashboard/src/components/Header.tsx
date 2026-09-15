@@ -109,6 +109,20 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
           <a
+            href={getPublicUrl('visual_showcase_2.html')}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Open 3-Arena Interactive Showcase"
+            className={buttonVariants({
+              variant: 'outline',
+              size: 'sm',
+              className: 'gap-1.5 text-xs text-indigo-300 border-indigo-500/30 hover:bg-indigo-950/40 hover:text-white',
+            })}
+          >
+            <Sparkles className="size-3.5 text-indigo-400" />
+            <span>3-Arena Showcase ↗</span>
+          </a>
+          <a
             href={getPublicUrl('data.json')}
             download="antigravity_usage_data.json"
             aria-label="Download usage ledger as JSON"
