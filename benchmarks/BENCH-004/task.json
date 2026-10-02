@@ -1,0 +1,7 @@
+{
+  "task_id": "BENCH-004",
+  "name": "Frontend Filter Table Stateful Regression",
+  "category": "stateful_ui_logic",
+  "description": "Fix stateful filter controller in table dashboard: synchronize matching counts, restore full dataset on clear, handle Escape reset, and prevent stale async sequence races.",
+  "expected_broken_reason": "stale_filter_state_or_count"
+}

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -218,6 +219,10 @@ def test_acc_06_simulation_tagged_separately_empirical_unchanged(tmp_path: Path)
     ledger.seed_pricing(conn=conn)
 
     # Record an empirical run with gemini-2.5-pro for baseline and icm
+    evidence_file = tmp_path / "sim_ev.ndjson"
+    evidence_file.write_text('{"event": "start"}\n{"event": "complete"}\n', encoding="utf-8")
+    ev_hash = hashlib.sha256(evidence_file.read_bytes()).hexdigest()
+
     run_id = ledger.record_run(
         task_id="EXP-SIM",
         arm="baseline",
@@ -231,6 +236,9 @@ def test_acc_06_simulation_tagged_separately_empirical_unchanged(tmp_path: Path)
         duration_seconds=15.0,
         source_kind="live",
         evidence_status="verified",
+        evidence_ref=str(evidence_file),
+        evidence_hash=ev_hash,
+        verification_status="passed",
         conn=conn,
     )
     ledger.record_run(
@@ -246,6 +254,9 @@ def test_acc_06_simulation_tagged_separately_empirical_unchanged(tmp_path: Path)
         duration_seconds=10.0,
         source_kind="live",
         evidence_status="verified",
+        evidence_ref=str(evidence_file),
+        evidence_hash=ev_hash,
+        verification_status="passed",
         conn=conn,
     )
 

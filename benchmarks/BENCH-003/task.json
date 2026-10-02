@@ -1,0 +1,7 @@
+{
+  "task_id": "BENCH-003",
+  "name": "Behaviour-Preserving Event Parser Refactor",
+  "category": "refactoring",
+  "description": "Split monolithic event parser into maintainable modular package while preserving exact golden outputs, exception types, Unicode handling, and public entry points.",
+  "expected_broken_reason": "structural_refactor_incomplete"
+}

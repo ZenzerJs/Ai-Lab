@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -16,6 +17,10 @@ def test_exp_01_ledger_and_export_agreement(tmp_path: Path):
     conn = ledger.get_connection(db_file)
     ledger.seed_pricing(conn=conn)
 
+    ev_file = tmp_path / "exp01_ev.ndjson"
+    ev_file.write_text('{"event": "start"}\n{"event": "complete"}\n', encoding="utf-8")
+    ev_hash = hashlib.sha256(ev_file.read_bytes()).hexdigest()
+
     # 1. Eligible measured baseline & icm pair
     ledger.record_run(
         task_id="EXP-MEASURED",
@@ -30,6 +35,9 @@ def test_exp_01_ledger_and_export_agreement(tmp_path: Path):
         duration_seconds=15.0,
         source_kind="live",
         evidence_status="verified",
+        evidence_ref=str(ev_file),
+        evidence_hash=ev_hash,
+        verification_status="passed",
         conn=conn,
     )
     ledger.record_run(
@@ -45,6 +53,9 @@ def test_exp_01_ledger_and_export_agreement(tmp_path: Path):
         duration_seconds=9.0,
         source_kind="live",
         evidence_status="verified",
+        evidence_ref=str(ev_file),
+        evidence_hash=ev_hash,
+        verification_status="passed",
         conn=conn,
     )
 
@@ -158,10 +169,9 @@ def test_exp_02_export_redacts_private_paths_and_secrets(tmp_path: Path):
     )
 
     payload = build_data.build_data_payload(db_path=db_file)
-    exported_run = payload["runs"][0]
 
-    # Convert entire export run to string to scan for leaked strings
-    dumped = json.dumps(exported_run)
+    # Convert entire export payload to string to scan for leaked strings across all nested structures (Finding 3)
+    dumped = json.dumps(payload)
 
     # 1. Private username paths must NOT be present
     assert "AliceSmith" not in dumped
@@ -232,6 +242,10 @@ def test_exp_icm_subagents_governed_arm_in_timeline_and_cumulative(tmp_path: Pat
     db_file = tmp_path / "exp_subagents.db"
     conn = ledger.get_connection(db_file)
     ledger.seed_pricing(conn=conn)
+    ev_file = tmp_path / "sub_ev.ndjson"
+    ev_file.write_text('{"event": "start"}\n{"event": "complete"}\n', encoding="utf-8")
+    ev_hash = hashlib.sha256(ev_file.read_bytes()).hexdigest()
+
     ledger.record_run(
         task_id="EXP-006",
         arm="baseline",
@@ -245,6 +259,9 @@ def test_exp_icm_subagents_governed_arm_in_timeline_and_cumulative(tmp_path: Pat
         duration_seconds=15.0,
         source_kind="live",
         evidence_status="verified",
+        evidence_ref=str(ev_file),
+        evidence_hash=ev_hash,
+        verification_status="passed",
         conn=conn,
     )
     ledger.record_run(
@@ -260,6 +277,9 @@ def test_exp_icm_subagents_governed_arm_in_timeline_and_cumulative(tmp_path: Pat
         duration_seconds=8.0,
         source_kind="live",
         evidence_status="verified",
+        evidence_ref=str(ev_file),
+        evidence_hash=ev_hash,
+        verification_status="passed",
         conn=conn,
     )
 

@@ -1,0 +1,6 @@
+{
+  "task_id": "BENCH-006",
+  "runtime": "python",
+  "python_version": ">=3.10",
+  "dependencies": ["pytest"]
+}

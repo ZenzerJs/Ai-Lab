@@ -1,0 +1,7 @@
+{
+  "task_id": "BENCH-005",
+  "name": "Distractor Resistance and Scope Control: Config Precedence",
+  "category": "scope_control",
+  "description": "Fix configuration precedence hierarchy (Runtime > Env > Config File > Defaults) in the presence of distractor files and outdated stale design notes. Enforce strict edit scope restricting changes only to config_loader.py.",
+  "expected_broken_reason": "incorrect_precedence_env_overridden_by_file"
+}

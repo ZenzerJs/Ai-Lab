@@ -62,6 +62,17 @@ def sanitize_export_text(text: Optional[str]) -> Optional[str]:
     return cleaned
 
 
+def sanitize_export_payload(obj: Any) -> Any:
+    """Recursively sanitize string values across nested dictionary and list structures."""
+    if isinstance(obj, str):
+        return sanitize_export_text(obj)
+    elif isinstance(obj, dict):
+        return {k: sanitize_export_payload(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [sanitize_export_payload(item) for item in obj]
+    return obj
+
+
 def build_operational_block() -> Dict[str, Any]:
     """Build the EXP-005 operational benchmark block from the isolated ops DB.
     Returns has_data=False (valid empty structure) when the DB is absent —
@@ -144,7 +155,10 @@ def build_operational_block() -> Dict[str, Any]:
     }
 
 
-def build_data_payload(db_path: Optional[Path] = None) -> Dict[str, Any]:
+def build_data_payload(
+    db_path: Optional[Path] = None,
+    capture_policy: str = "approved",
+) -> Dict[str, Any]:
     """Extract and structure data for the local dashboard using shared ledger helpers."""
     conn = ledger.get_connection(db_path)
     try:
@@ -154,7 +168,7 @@ def build_data_payload(db_path: Optional[Path] = None) -> Dict[str, Any]:
         pricing_rows = [dict(r) for r in cursor.fetchall()]
 
         # Fetch cumulative metrics via shared helper
-        cum = ledger.cumulative_savings(conn=conn, db_path=db_path)
+        cum = ledger.cumulative_savings(conn=conn, db_path=db_path, capture_policy=capture_policy)
 
         # Fetch all runs without task-prefix bias
         cursor.execute("SELECT * FROM runs ORDER BY id ASC")
@@ -187,23 +201,17 @@ def build_data_payload(db_path: Optional[Path] = None) -> Dict[str, Any]:
             if r.get("cost_usd") is None:
                 r["cost_usd"] = cost_info["cost_usd"]
 
-            elig = ledger.evaluate_run_eligibility(r)
+            elig = ledger.evaluate_run_eligibility(r, capture_policy=capture_policy)
             r["is_eligible"] = elig["is_eligible"]
+            r["is_comparison_eligible"] = elig["is_comparison_eligible"]
             r["reporting_category"] = elig["category"]
             r["exclusion_reasons"] = elig["exclusion_reasons"]
 
-            # Public export sanitization (EXP-02)
-            if r.get("evidence_ref"):
-                ref_str = str(r["evidence_ref"])
-                filename = re.split(r"[\\/]", ref_str)[-1]
-                r["evidence_ref"] = sanitize_export_text(filename)
-            if r.get("notes"):
-                r["notes"] = sanitize_export_text(str(r["notes"]))
+            public_r = ledger.to_public_run(r)
+            processed_runs.append(public_r)
 
-            processed_runs.append(r)
-
-            # Only pair eligible measured runs for timeline
-            if r["is_eligible"] and not r.get("is_simulation") and r["cost_usd"] is not None:
+            # Only pair eligible measured runs for timeline (requires comparison eligibility)
+            if r.get("is_comparison_eligible") and not r.get("is_simulation") and r["cost_usd"] is not None:
                 tid = r["task_id"]
                 ridx = r["run_index"]
                 arm = r["arm"].lower()
@@ -246,7 +254,7 @@ def build_data_payload(db_path: Optional[Path] = None) -> Dict[str, Any]:
         cascade: List[Dict[str, Any]] = []
         for p in pricing_rows:
             m = p["model"]
-            m_cum = ledger.cumulative_savings(conn=conn, db_path=db_path, model_override=m)
+            m_cum = ledger.cumulative_savings(conn=conn, db_path=db_path, model_override=m, capture_policy=capture_policy)
             cascade.append({
                 "model": m,
                 "input_usd_per_mtok": p["input_usd_per_mtok"],
@@ -280,17 +288,23 @@ def build_data_payload(db_path: Optional[Path] = None) -> Dict[str, Any]:
             "cascade": cascade,
             "operational": build_operational_block(),
         }
-        return payload
+        return sanitize_export_payload(payload)
     finally:
         conn.close()
 
 
-def export_data(output_file: Path = OUTPUT_PATH, db_path: Optional[Path] = None) -> Path:
+def export_data(
+    output_file: Path = OUTPUT_PATH,
+    db_path: Optional[Path] = None,
+    capture_policy: str = "approved",
+) -> Path:
     """Export the payload to static data.json."""
     output_file.parent.mkdir(parents=True, exist_ok=True)
-    data = build_data_payload(db_path=db_path)
+    data = build_data_payload(db_path=db_path, capture_policy=capture_policy)
+    raw_json = json.dumps(data, indent=2)
+    sanitized_json = sanitize_export_text(raw_json) or raw_json
     with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+        f.write(sanitized_json)
     print(f"✓ Dashboard data exported to: {output_file} ({len(data['runs'])} runs, {len(data['tasks'])} tasks)")
     return output_file
 
