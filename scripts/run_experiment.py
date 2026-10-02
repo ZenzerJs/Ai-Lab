@@ -24,7 +24,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import yaml
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 # Add scripts directory to path to import ledger
 SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -122,121 +125,53 @@ def verify_fairness_invariants(
 
 
 def reset_workspace_state(target_repo_path: Path) -> None:
-    """Reset target git worktree via git checkout and git clean -fd."""
-    if not (target_repo_path / ".git").exists() and not (target_repo_path / ".." / ".git").exists():
-        # Not a git repo root, check if inside git repo
-        pass
+    """
+    Safely handle workspace state before a run (RUN-03).
+    Never executes destructive git reset or git clean against the user's source checkout.
+    """
+    resolved_target = target_repo_path.resolve()
+    resolved_root = WORKSPACE_ROOT.resolve()
 
     try:
-        # Checkout modified tracked files
-        res_checkout = subprocess.run(
-            ["git", "checkout", "--", "."],
-            cwd=str(target_repo_path),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
-        if res_checkout.returncode != 0:
-            raise RuntimeError(f"git checkout failed: {res_checkout.stderr.strip()}")
+        resolved_target.relative_to(resolved_root)
+        is_in_host = True
+    except ValueError:
+        is_in_host = False
 
-        # Clean untracked files while preserving sandbox and experiments directories
-        res_clean = subprocess.run(
-            ["git", "clean", "-fd", "-e", "sandbox/", "-e", "experiments/"],
-            cwd=str(target_repo_path),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
-        )
-        if res_clean.returncode != 0:
-            raise RuntimeError(f"git clean failed: {res_clean.stderr.strip()}")
+    if resolved_target == resolved_root or str(resolved_target) == str(resolved_root) or is_in_host:
+        # RUN-03: Never run destructive git reset on host checkout or inside host repository
+        print(f"[*] Preserving host checkout in '{target_repo_path}'; destructive git reset barred (RUN-03).")
+        return
 
-    except Exception as exc:
-        sys.stderr.write(f"✗ Workspace Reset Invariant Failed in '{target_repo_path}': {exc}\n")
-        sys.exit(1)
+    # Only run git cleanup if explicitly a separate non-host directory
+    if (target_repo_path / ".git").exists():
+        try:
+            subprocess.run(
+                ["git", "checkout", "--", "."],
+                cwd=str(target_repo_path),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+            subprocess.run(
+                ["git", "clean", "-fd", "-e", "sandbox/", "-e", "experiments/"],
+                cwd=str(target_repo_path),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+        except Exception as exc:
+            sys.stderr.write(f"✗ Non-host worktree reset error in '{target_repo_path}': {exc}\n")
 
 
 def parse_ndjson_stream(stream_lines: List[str]) -> Dict[str, Any]:
     """
     Parse NDJSON event stream and extract final cumulative usage,
-    num_turns, and duration_seconds.
+    num_turns, and duration_seconds via ledger.validate_and_parse_telemetry.
     """
-    usage = {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "thinking_tokens": 0,
-        "cache_read_tokens": 0,
-        "total_tokens": 0,
-    }
-    num_turns = 0
-    duration_seconds = 0.0
-
-    found_final_usage = False
-
-    for line in stream_lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        # Look for turn count
-        if event.get("type") == "turn" or event.get("event") == "turn":
-            t = event.get("turn", 0)
-            if t > num_turns:
-                num_turns = t
-
-        # Check for final run_complete or summary event
-        if event.get("type") in ("run_complete", "session_end", "summary") or event.get("event") in ("run_complete", "session_end", "summary"):
-            ev_usage = event.get("usage", {})
-            if ev_usage:
-                usage["input_tokens"] = ev_usage.get("input_tokens", usage["input_tokens"])
-                usage["output_tokens"] = ev_usage.get("output_tokens", usage["output_tokens"])
-                usage["thinking_tokens"] = ev_usage.get("thinking_tokens", usage["thinking_tokens"])
-                usage["cache_read_tokens"] = ev_usage.get("cache_read_tokens", usage["cache_read_tokens"])
-                usage["total_tokens"] = ev_usage.get("total_tokens", usage["total_tokens"])
-                found_final_usage = True
-
-            if "num_turns" in event:
-                num_turns = event["num_turns"]
-            if "duration_seconds" in event:
-                duration_seconds = float(event["duration_seconds"])
-
-    if not found_final_usage:
-        # Fallback: scan for any event containing usage
-        for line in reversed(stream_lines):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-                if "usage" in event and isinstance(event["usage"], dict):
-                    ev_usage = event["usage"]
-                    usage["input_tokens"] = ev_usage.get("input_tokens", 0)
-                    usage["output_tokens"] = ev_usage.get("output_tokens", 0)
-                    usage["thinking_tokens"] = ev_usage.get("thinking_tokens", 0)
-                    usage["cache_read_tokens"] = ev_usage.get("cache_read_tokens", 0)
-                    usage["total_tokens"] = ev_usage.get("total_tokens", 0)
-                    break
-            except json.JSONDecodeError:
-                continue
-
-    if usage["total_tokens"] == 0:
-        usage["total_tokens"] = (
-            usage["input_tokens"]
-            + usage["output_tokens"]
-            + usage["thinking_tokens"]
-            + usage["cache_read_tokens"]
-        )
-
-    return {
-        "usage": usage,
-        "num_turns": num_turns if num_turns > 0 else 1,
-        "duration_seconds": duration_seconds,
-    }
+    return ledger.validate_and_parse_telemetry(stream_lines)
 
 
 def execute_dry_run(
@@ -367,6 +302,10 @@ def execute_dry_run(
             total_tokens=u["total_tokens"],
             num_turns=parsed["num_turns"],
             duration_seconds=parsed["duration_seconds"],
+            source_kind="fixture",
+            evidence_status="unverified",
+            exclusion_reasons=["fixture_replay"],
+            evidence_ref=str(fixtures_path.name),
             db_path=db_path,
         )
         recorded_run_ids.append(run_id)
@@ -616,6 +555,8 @@ def main():
                     total_tokens=u["total_tokens"],
                     num_turns=res["parsed"]["num_turns"],
                     duration_seconds=res["parsed"]["duration_seconds"],
+                    source_kind="live",
+                    evidence_status="verified",
                     db_path=db_path,
                 )
 
@@ -640,6 +581,8 @@ def main():
                     total_tokens=u["total_tokens"],
                     num_turns=res["parsed"]["num_turns"],
                     duration_seconds=res["parsed"]["duration_seconds"],
+                    source_kind="live",
+                    evidence_status="verified",
                     db_path=db_path,
                 )
 
