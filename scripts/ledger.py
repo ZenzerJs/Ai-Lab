@@ -7,6 +7,7 @@ Enforces auditable rate seeding from config/PRICING.json.
 Provides analytical functions for per-task comparison and cumulative savings.
 """
 
+import hashlib
 import json
 import os
 import sqlite3
@@ -26,6 +27,450 @@ DEFAULT_DB_PATH = DEFAULT_ROOT / "data" / "usage.db"
 DEFAULT_PRICING_PATH = DEFAULT_ROOT / "config" / "PRICING.json"
 
 
+class TelemetryValidationError(ValueError):
+    """Raised when telemetry NDJSON syntax or fields are invalid."""
+    def __init__(self, message: str, line_number: Optional[int] = None, event_data: Optional[Dict[str, Any]] = None):
+        super().__init__(message)
+        self.line_number = line_number
+        self.event_data = event_data
+
+
+class DuplicateConflictError(ValueError):
+    """Raised when an import arrives with an existing import_id but conflicting data."""
+    pass
+
+
+def validate_and_parse_telemetry(
+    stream: Any,
+    adapter_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Parse and validate NDJSON telemetry event stream.
+    Enforces:
+    - TEL-01: Malformed JSON or invalid event objects raise TelemetryValidationError with line number.
+    - TEL-02: Missing usage counters remain None (unknown), not 0.
+    - TEL-03: Negative or non-numeric counters/durations rejected.
+    - TEL-04: Replayed identical events deduplicated without double counting.
+    - TEL-05: Final cumulative usage from run_complete is not double-summed with per-turn events.
+    """
+    if isinstance(stream, str):
+        lines = stream.splitlines()
+    elif isinstance(stream, list):
+        lines = stream
+    else:
+        raise TelemetryValidationError("Telemetry stream must be a list of strings or a single string")
+
+    seen_event_ids: Dict[str, Dict[str, Any]] = {}
+    seen_event_lines: set = set()
+    seen_turns: Dict[int, Dict[str, Any]] = {}
+
+    task_id = None
+    arm = None
+    model = None
+    run_index = None
+    timestamp = None
+    num_turns = 0
+    duration_seconds = 0.0
+
+    cumulative_usage: Optional[Dict[str, Any]] = None
+    turn_usages: List[Dict[str, Any]] = []
+    has_run_complete = False
+
+    for idx, raw_line in enumerate(lines, start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise TelemetryValidationError(
+                f"Line {idx}: Malformed NDJSON syntax: {exc}", line_number=idx
+            ) from exc
+
+        if not isinstance(event, dict):
+            raise TelemetryValidationError(
+                f"Line {idx}: Event must be a JSON object, got {type(event).__name__}",
+                line_number=idx,
+            )
+
+        if "task_id" in event and event["task_id"]:
+            task_id = str(event["task_id"])
+        if "arm" in event and event["arm"]:
+            arm = str(event["arm"])
+        if "model" in event and event["model"]:
+            model = str(event["model"])
+        if "timestamp" in event and event["timestamp"]:
+            timestamp = str(event["timestamp"])
+
+        if "run_index" in event and event["run_index"] is not None:
+            try:
+                ridx = int(event["run_index"])
+                if ridx < 0:
+                    raise TelemetryValidationError(
+                        f"Line {idx}: 'run_index' cannot be negative ({ridx})", line_number=idx
+                    )
+                run_index = ridx
+            except (ValueError, TypeError):
+                raise TelemetryValidationError(
+                    f"Line {idx}: Invalid 'run_index': {event['run_index']}", line_number=idx
+                )
+
+        def _check_int(val: Any, field_name: str) -> Optional[int]:
+            if val is None:
+                return None
+            if isinstance(val, bool):
+                raise TelemetryValidationError(
+                    f"Line {idx}: Counter '{field_name}' must be an integer, got boolean: {val}",
+                    line_number=idx,
+                    event_data=event,
+                )
+            if isinstance(val, float):
+                if not val.is_integer():
+                    raise TelemetryValidationError(
+                        f"Line {idx}: Counter '{field_name}' cannot be a non-integer float: {val}",
+                        line_number=idx,
+                        event_data=event,
+                    )
+                val = int(val)
+            try:
+                ival = int(val)
+            except (ValueError, TypeError):
+                raise TelemetryValidationError(
+                    f"Line {idx}: Counter '{field_name}' must be an integer, got: {val}",
+                    line_number=idx,
+                    event_data=event,
+                )
+            if ival < 0:
+                raise TelemetryValidationError(
+                    f"Line {idx}: Counter '{field_name}' cannot be negative ({val})",
+                    line_number=idx,
+                    event_data=event,
+                )
+            return ival
+
+        def _check_float(val: Any, field_name: str) -> Optional[float]:
+            if val is None:
+                return None
+            try:
+                fval = float(val)
+            except (ValueError, TypeError):
+                raise TelemetryValidationError(
+                    f"Line {idx}: Field '{field_name}' must be a float, got: {val}",
+                    line_number=idx,
+                    event_data=event,
+                )
+            if fval < 0.0:
+                raise TelemetryValidationError(
+                    f"Line {idx}: Field '{field_name}' cannot be negative ({val})",
+                    line_number=idx,
+                    event_data=event,
+                )
+            return fval
+
+        if "duration_seconds" in event and event["duration_seconds"] is not None:
+            dur = _check_float(event["duration_seconds"], "duration_seconds")
+            if dur is not None:
+                duration_seconds = dur
+
+        # Deduplication (TEL-04)
+        ev_id = event.get("event_id") or event.get("id")
+        if ev_id is not None:
+            ev_id_str = str(ev_id)
+            if ev_id_str in seen_event_ids:
+                if seen_event_ids[ev_id_str] == event:
+                    continue  # Exact duplicate event replayed
+                else:
+                    raise TelemetryValidationError(
+                        f"Line {idx}: Duplicate event_id '{ev_id_str}' with conflicting content",
+                        line_number=idx,
+                        event_data=event,
+                    )
+            seen_event_ids[ev_id_str] = event
+        else:
+            event_hash = json.dumps(event, sort_keys=True)
+            if event_hash in seen_event_lines:
+                continue  # Exact line duplication replayed
+            seen_event_lines.add(event_hash)
+
+        ev_type = str(event.get("type") or event.get("event") or "").lower()
+
+        # Turn event
+        if ev_type == "turn" or "turn" in event:
+            t = _check_int(event.get("turn", 0), "turn")
+            if t and t > num_turns:
+                num_turns = t
+
+            u_obj = event.get("usage") if isinstance(event.get("usage"), dict) else event
+            has_turn_usage = any(
+                k in u_obj
+                for k in ("input_tokens", "output_tokens", "thinking_tokens", "cache_read_tokens", "total_tokens")
+            )
+            if has_turn_usage:
+                turn_u = {
+                    "input_tokens": _check_int(u_obj.get("input_tokens"), "input_tokens"),
+                    "output_tokens": _check_int(u_obj.get("output_tokens"), "output_tokens"),
+                    "thinking_tokens": _check_int(u_obj.get("thinking_tokens"), "thinking_tokens") or 0,
+                    "cache_read_tokens": _check_int(u_obj.get("cache_read_tokens"), "cache_read_tokens") or 0,
+                    "total_tokens": _check_int(u_obj.get("total_tokens"), "total_tokens"),
+                }
+                if t is not None:
+                    if t in seen_turns:
+                        if seen_turns[t] != turn_u:
+                            raise TelemetryValidationError(
+                                f"Line {idx}: Conflicting turn usage for turn {t}",
+                                line_number=idx,
+                                event_data=event,
+                            )
+                    else:
+                        seen_turns[t] = turn_u
+                        turn_usages.append(turn_u)
+                else:
+                    turn_usages.append(turn_u)
+
+        # Run complete / summary event
+        if ev_type in ("run_complete", "session_end", "summary"):
+            if "num_turns" in event and event["num_turns"] is not None:
+                nt = _check_int(event["num_turns"], "num_turns")
+                if nt:
+                    num_turns = nt
+            if "duration_seconds" in event and event["duration_seconds"] is not None:
+                dur = _check_float(event["duration_seconds"], "duration_seconds")
+                if dur is not None:
+                    duration_seconds = dur
+
+            if "usage" in event and isinstance(event["usage"], dict):
+                ev_u = event["usage"]
+                new_cumulative = {
+                    "input_tokens": _check_int(ev_u.get("input_tokens"), "input_tokens"),
+                    "output_tokens": _check_int(ev_u.get("output_tokens"), "output_tokens"),
+                    "thinking_tokens": _check_int(ev_u.get("thinking_tokens"), "thinking_tokens") or 0,
+                    "cache_read_tokens": _check_int(ev_u.get("cache_read_tokens"), "cache_read_tokens") or 0,
+                    "total_tokens": _check_int(ev_u.get("total_tokens"), "total_tokens"),
+                }
+                if (
+                    new_cumulative["total_tokens"] is None
+                    and new_cumulative["input_tokens"] is not None
+                ):
+                    new_cumulative["total_tokens"] = (
+                        new_cumulative["input_tokens"]
+                        + (new_cumulative["output_tokens"] or 0)
+                        + new_cumulative["thinking_tokens"]
+                        + new_cumulative["cache_read_tokens"]
+                    )
+                if has_run_complete and cumulative_usage is not None and cumulative_usage != new_cumulative:
+                    raise TelemetryValidationError(
+                        f"Line {idx}: Multiple conflicting run_complete events in stream",
+                        line_number=idx,
+                        event_data=event,
+                    )
+                cumulative_usage = new_cumulative
+            has_run_complete = True
+
+    # Resolve usage counters
+    if cumulative_usage is not None:
+        # TEL-05: Final cumulative usage chosen; per-turn usage not double-counted
+        final_usage = cumulative_usage
+    elif turn_usages:
+        has_in = any(u["input_tokens"] is not None for u in turn_usages)
+        has_out = any(u["output_tokens"] is not None for u in turn_usages)
+        has_think = any(u["thinking_tokens"] is not None for u in turn_usages)
+        has_cache = any(u["cache_read_tokens"] is not None for u in turn_usages)
+        has_total = any(u["total_tokens"] is not None for u in turn_usages)
+
+        sum_in = sum(u["input_tokens"] for u in turn_usages if u["input_tokens"] is not None) if has_in else None
+        sum_out = sum(u["output_tokens"] for u in turn_usages if u["output_tokens"] is not None) if has_out else None
+        sum_think = sum(u["thinking_tokens"] for u in turn_usages if u["thinking_tokens"] is not None) if has_think else 0
+        sum_cache = sum(u["cache_read_tokens"] for u in turn_usages if u["cache_read_tokens"] is not None) if has_cache else 0
+        sum_total = sum(u["total_tokens"] for u in turn_usages if u["total_tokens"] is not None) if has_total else None
+
+        if sum_total is None and (sum_in is not None or sum_out is not None or sum_cache > 0 or sum_think > 0):
+            sum_total = (sum_in or 0) + (sum_out or 0) + sum_think + sum_cache
+
+        final_usage = {
+            "input_tokens": sum_in,
+            "output_tokens": sum_out,
+            "thinking_tokens": sum_think,
+            "cache_read_tokens": sum_cache,
+            "total_tokens": sum_total,
+        }
+    else:
+        # TEL-02: Omit usage counters from a completed run -> unknown (None), NOT zero
+        final_usage = {
+            "input_tokens": None,
+            "output_tokens": None,
+            "thinking_tokens": None,
+            "cache_read_tokens": None,
+            "total_tokens": None,
+        }
+
+    return {
+        "task_id": task_id,
+        "arm": arm,
+        "model": model,
+        "run_index": run_index,
+        "timestamp": timestamp,
+        "usage": final_usage,
+        "num_turns": num_turns if num_turns > 0 else 1,
+        "duration_seconds": duration_seconds,
+        "has_usage": final_usage["input_tokens"] is not None,
+        "has_run_complete": has_run_complete,
+    }
+
+
+def validate_evidence_file(
+    file_path: Any,
+    expected_hash: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Validate a referenced evidence artifact.
+    Returns validation status, integrity boolean, exclusion reason, and actual SHA-256.
+    """
+    if not file_path:
+        return {
+            "status": "missing",
+            "is_valid": False,
+            "exclusion_reason": "evidence_file_missing",
+            "actual_hash": None,
+            "expected_hash": expected_hash,
+        }
+    path = Path(file_path)
+    if not path.is_file():
+        return {
+            "status": "missing",
+            "is_valid": False,
+            "exclusion_reason": "evidence_file_missing",
+            "actual_hash": None,
+            "expected_hash": expected_hash,
+        }
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            while chunk := f.read(65536):
+                h.update(chunk)
+        actual_hash = h.hexdigest()
+    except (OSError, PermissionError) as exc:
+        return {
+            "status": "unreadable",
+            "is_valid": False,
+            "exclusion_reason": f"evidence_file_unreadable: {exc}",
+            "actual_hash": None,
+            "expected_hash": expected_hash,
+        }
+
+    if expected_hash:
+        if actual_hash.lower() != expected_hash.lower():
+            return {
+                "status": "invalid",
+                "is_valid": False,
+                "exclusion_reason": "evidence_hash_mismatch",
+                "actual_hash": actual_hash,
+                "expected_hash": expected_hash,
+            }
+
+    return {
+        "status": "verified",
+        "is_valid": True,
+        "exclusion_reason": None,
+        "actual_hash": actual_hash,
+        "expected_hash": expected_hash or actual_hash,
+    }
+
+
+def evaluate_run_eligibility(run: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Shared eligibility and reporting category rules across ledger and dashboard.
+    Returns:
+      is_eligible: bool (True only if qualifying empirical live evidence)
+      category: 'measured' | 'fixture' | 'historical' | 'imported' | 'simulation'
+      exclusion_reasons: List[str]
+      is_cost_complete: bool
+    """
+    reasons: List[str] = []
+    source_kind = str(run.get("source_kind", "unknown")).lower()
+    evidence_status = str(run.get("evidence_status", "unverified")).lower()
+    is_simulation = bool(run.get("is_simulation", 0))
+    cost_status = str(run.get("cost_status", "unknown")).lower()
+
+    category = "measured"
+    if source_kind == "fixture":
+        reasons.append("fixture_replay")
+        category = "fixture"
+    elif source_kind == "unknown":
+        reasons.append("legacy_unknown_provenance")
+        category = "historical"
+    elif source_kind == "imported":
+        category = "imported"
+        if evidence_status != "verified":
+            reasons.append("unverified_import")
+        else:
+            reasons.append("imported_record")
+    elif source_kind == "live":
+        if evidence_status != "verified":
+            category = "historical"
+            if evidence_status == "invalid":
+                reasons.append("evidence_hash_mismatch")
+            elif evidence_status == "missing":
+                reasons.append("evidence_missing")
+            else:
+                reasons.append("unverified_evidence")
+    else:
+        category = "historical"
+        reasons.append(f"unrecognized_source_{source_kind}")
+
+    if is_simulation:
+        reasons.append("simulation")
+        if category == "measured":
+            category = "simulation"
+
+    input_tokens = run.get("input_tokens")
+    output_tokens = run.get("output_tokens")
+    is_cost_complete = True
+
+    if input_tokens is None or output_tokens is None:
+        reasons.append("missing_usage_telemetry")
+        is_cost_complete = False
+
+    if cost_status in ("unavailable", "incomplete", "unknown"):
+        reasons.append(f"cost_{cost_status}")
+        is_cost_complete = False
+
+    exec_status = str(run.get("execution_status", "completed") or "completed").lower()
+    if exec_status not in ("completed", ""):
+        reasons.append(f"execution_{exec_status}")
+
+    verif_status = str(run.get("verification_status", "not_run") or "not_run").lower()
+    if verif_status == "evaluator_error":
+        reasons.append("evaluator_error")
+
+    stored_reasons = run.get("exclusion_reasons")
+    if stored_reasons:
+        if isinstance(stored_reasons, str):
+            try:
+                parsed_r = json.loads(stored_reasons)
+                if isinstance(parsed_r, list):
+                    for r in parsed_r:
+                        if r not in reasons:
+                            reasons.append(r)
+            except Exception:
+                pass
+        elif isinstance(stored_reasons, list):
+            for r in stored_reasons:
+                if r not in reasons:
+                    reasons.append(r)
+
+    is_eligible = (len(reasons) == 0)
+    if not is_eligible and category == "measured":
+        category = "historical"
+
+    return {
+        "is_eligible": is_eligible,
+        "category": category,
+        "exclusion_reasons": reasons,
+        "is_cost_complete": is_cost_complete,
+    }
+
+
 def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
     """Connect to SQLite database and ensure schema exists."""
     path = Path(db_path) if db_path else DEFAULT_DB_PATH
@@ -37,50 +482,209 @@ def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
-    """Create schema tables if they do not already exist."""
-    with conn:
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS runs (
+    """Create schema tables if they do not already exist without altering existing tables."""
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='runs'")
+    runs_table_exists = bool(cursor.fetchone())
+
+    if not runs_table_exists:
+        with conn:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT NOT NULL,
+                    arm TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    run_index INTEGER NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    input_tokens INTEGER,
+                    output_tokens INTEGER,
+                    thinking_tokens INTEGER,
+                    cache_read_tokens INTEGER,
+                    total_tokens INTEGER,
+                    num_turns INTEGER NOT NULL,
+                    duration_seconds REAL NOT NULL,
+                    source_kind TEXT NOT NULL DEFAULT 'unknown',
+                    evidence_status TEXT NOT NULL DEFAULT 'unverified',
+                    exclusion_reasons TEXT,
+                    evidence_ref TEXT,
+                    evidence_hash TEXT,
+                    import_id TEXT,
+                    cost_status TEXT NOT NULL DEFAULT 'unknown',
+                    cost_usd REAL,
+                    is_simulation INTEGER NOT NULL DEFAULT 0,
+                    notes TEXT,
+                    execution_status TEXT NOT NULL DEFAULT 'completed',
+                    verification_status TEXT NOT NULL DEFAULT 'not_run',
+                    manifest_id TEXT,
+                    evaluator_hash TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id TEXT PRIMARY KEY,
+                    prompt_path TEXT,
+                    notes TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS pricing (
+                    model TEXT PRIMARY KEY,
+                    input_usd_per_mtok REAL NOT NULL,
+                    cache_read_usd_per_mtok REAL NOT NULL,
+                    output_usd_per_mtok REAL NOT NULL,
+                    source_url TEXT NOT NULL,
+                    fetched_at TEXT NOT NULL,
+                    pricing_mode TEXT,
+                    provider_note TEXT,
+                    cache_accounting TEXT DEFAULT 'separate',
+                    thinking_usd_per_mtok REAL,
+                    thinking_billed_as TEXT
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_runs_task_arm ON runs(task_id, arm);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_import_id ON runs(import_id) WHERE import_id IS NOT NULL;
+            """)
+    else:
+        # Check if table already has provenance columns; if so, ensure Phase 2 runner columns exist
+        cursor.execute("PRAGMA table_info(runs)")
+        cols = {row[1] for row in cursor.fetchall()}
+        if "source_kind" in cols:
+            with conn:
+                if "execution_status" not in cols:
+                    conn.execute("ALTER TABLE runs ADD COLUMN execution_status TEXT NOT NULL DEFAULT 'completed'")
+                if "verification_status" not in cols:
+                    conn.execute("ALTER TABLE runs ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'not_run'")
+                if "manifest_id" not in cols:
+                    conn.execute("ALTER TABLE runs ADD COLUMN manifest_id TEXT")
+                if "evaluator_hash" not in cols:
+                    conn.execute("ALTER TABLE runs ADD COLUMN evaluator_hash TEXT")
+
+
+def migrate_db(conn: sqlite3.Connection) -> bool:
+    """
+    Migrate a legacy database to the Phase 1 provenance schema transactionally.
+    Safe to re-run (idempotent).
+    Preserves all existing rows and values.
+    Assigns legacy records:
+      source_kind = 'unknown'
+      evidence_status = 'unverified'
+      exclusion_reasons = '["legacy_record_unknown_provenance"]'
+      cost_status = 'unavailable'
+      is_simulation = 0
+    Returns True if migration was applied, False if already migrated.
+    """
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(runs)")
+    cols = {row[1]: row for row in cursor.fetchall()}
+
+    if not cols:
+        init_db(conn)
+        return True
+
+    # MIG-02: Idempotent check & Phase 2 column upgrade
+    if "source_kind" in cols:
+        applied_phase2 = False
+        with conn:
+            if "execution_status" not in cols:
+                conn.execute("ALTER TABLE runs ADD COLUMN execution_status TEXT NOT NULL DEFAULT 'completed'")
+                applied_phase2 = True
+            if "verification_status" not in cols:
+                conn.execute("ALTER TABLE runs ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'not_run'")
+                applied_phase2 = True
+            if "manifest_id" not in cols:
+                conn.execute("ALTER TABLE runs ADD COLUMN manifest_id TEXT")
+                applied_phase2 = True
+            if "evaluator_hash" not in cols:
+                conn.execute("ALTER TABLE runs ADD COLUMN evaluator_hash TEXT")
+                applied_phase2 = True
+        return applied_phase2
+
+    # MIG-03: Transactional migration with rollback safety
+    if conn.in_transaction:
+        conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute("""
+            CREATE TABLE runs__migrating (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 task_id TEXT NOT NULL,
                 arm TEXT NOT NULL,
                 model TEXT NOT NULL,
                 run_index INTEGER NOT NULL,
                 timestamp TEXT NOT NULL,
-                input_tokens INTEGER NOT NULL,
-                output_tokens INTEGER NOT NULL,
-                thinking_tokens INTEGER NOT NULL,
-                cache_read_tokens INTEGER NOT NULL,
-                total_tokens INTEGER NOT NULL,
+                input_tokens INTEGER,
+                output_tokens INTEGER,
+                thinking_tokens INTEGER,
+                cache_read_tokens INTEGER,
+                total_tokens INTEGER,
                 num_turns INTEGER NOT NULL,
-                duration_seconds REAL NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS tasks (
-                id TEXT PRIMARY KEY,
-                prompt_path TEXT,
+                duration_seconds REAL NOT NULL,
+                source_kind TEXT NOT NULL DEFAULT 'unknown',
+                evidence_status TEXT NOT NULL DEFAULT 'unverified',
+                exclusion_reasons TEXT,
+                evidence_ref TEXT,
+                evidence_hash TEXT,
+                import_id TEXT,
+                cost_status TEXT NOT NULL DEFAULT 'unknown',
+                cost_usd REAL,
+                is_simulation INTEGER NOT NULL DEFAULT 0,
                 notes TEXT,
-                created_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS pricing (
-                model TEXT PRIMARY KEY,
-                input_usd_per_mtok REAL NOT NULL,
-                cache_read_usd_per_mtok REAL NOT NULL,
-                output_usd_per_mtok REAL NOT NULL,
-                source_url TEXT NOT NULL,
-                fetched_at TEXT NOT NULL,
-                pricing_mode TEXT,
-                provider_note TEXT
-            );
+                execution_status TEXT NOT NULL DEFAULT 'completed',
+                verification_status TEXT NOT NULL DEFAULT 'not_run',
+                manifest_id TEXT,
+                evaluator_hash TEXT
+            )
         """)
 
-        # Migrate pricing table for provider-equivalent metadata (pre-existing DBs)
+        legacy_exclusion = json.dumps(["legacy_record_unknown_provenance"])
+        conn.execute("""
+            INSERT INTO runs__migrating (
+                id, task_id, arm, model, run_index, timestamp,
+                input_tokens, output_tokens, thinking_tokens, cache_read_tokens,
+                total_tokens, num_turns, duration_seconds,
+                source_kind, evidence_status, exclusion_reasons,
+                cost_status, is_simulation
+            )
+            SELECT
+                id, task_id, arm, model, run_index, timestamp,
+                input_tokens, output_tokens, thinking_tokens, cache_read_tokens,
+                total_tokens, num_turns, duration_seconds,
+                'unknown', 'unverified', ?,
+                'unavailable', 0
+            FROM runs
+        """, (legacy_exclusion,))
+
+        # Verify row counts match before dropping
+        cursor.execute("SELECT COUNT(*) FROM runs")
+        orig_count = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM runs__migrating")
+        new_count = cursor.fetchone()[0]
+        if orig_count != new_count:
+            raise RuntimeError(f"Row count mismatch during migration: {orig_count} vs {new_count}")
+
+        conn.execute("DROP TABLE runs")
+        conn.execute("ALTER TABLE runs__migrating RENAME TO runs")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_import_id ON runs(import_id) WHERE import_id IS NOT NULL")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_task_arm ON runs(task_id, arm)")
+
+        # Ensure pricing columns exist
         pricing_columns = {row[1] for row in conn.execute("PRAGMA table_info(pricing)").fetchall()}
         if "pricing_mode" not in pricing_columns:
             conn.execute("ALTER TABLE pricing ADD COLUMN pricing_mode TEXT")
         if "provider_note" not in pricing_columns:
             conn.execute("ALTER TABLE pricing ADD COLUMN provider_note TEXT")
+        if "cache_accounting" not in pricing_columns:
+            conn.execute("ALTER TABLE pricing ADD COLUMN cache_accounting TEXT DEFAULT 'separate'")
+        if "thinking_usd_per_mtok" not in pricing_columns:
+            conn.execute("ALTER TABLE pricing ADD COLUMN thinking_usd_per_mtok REAL")
+        if "thinking_billed_as" not in pricing_columns:
+            conn.execute("ALTER TABLE pricing ADD COLUMN thinking_billed_as TEXT")
+
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def seed_pricing(
@@ -112,8 +716,9 @@ def seed_pricing(
                 """
                 INSERT INTO pricing (
                     model, input_usd_per_mtok, cache_read_usd_per_mtok,
-                    output_usd_per_mtok, source_url, fetched_at, pricing_mode, provider_note
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    output_usd_per_mtok, source_url, fetched_at, pricing_mode, provider_note,
+                    cache_accounting, thinking_usd_per_mtok, thinking_billed_as
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(model) DO UPDATE SET
                     input_usd_per_mtok = excluded.input_usd_per_mtok,
                     cache_read_usd_per_mtok = excluded.cache_read_usd_per_mtok,
@@ -121,7 +726,10 @@ def seed_pricing(
                     source_url = excluded.source_url,
                     fetched_at = excluded.fetched_at,
                     pricing_mode = excluded.pricing_mode,
-                    provider_note = excluded.provider_note
+                    provider_note = excluded.provider_note,
+                    cache_accounting = excluded.cache_accounting,
+                    thinking_usd_per_mtok = excluded.thinking_usd_per_mtok,
+                    thinking_billed_as = excluded.thinking_billed_as
                 """,
                 (
                     model_id,
@@ -132,6 +740,9 @@ def seed_pricing(
                     str(rates.get("fetched_at", datetime.now(timezone.utc).isoformat())),
                     rates.get("pricing_mode"),
                     rates.get("provider_note"),
+                    rates.get("cache_accounting", "separate"),
+                    float(rates["thinking_usd_per_mtok"]) if "thinking_usd_per_mtok" in rates else None,
+                    rates.get("thinking_billed_as"),
                 ),
             )
             count += 1
@@ -155,9 +766,12 @@ def get_pricing(model: str, conn: Optional[sqlite3.Connection] = None, db_path: 
 
     if not row:
         # Attempt auto-seed from config/PRICING.json
-        seed_pricing(conn=conn)
-        cursor.execute("SELECT * FROM pricing WHERE model = ?", (model,))
-        row = cursor.fetchone()
+        try:
+            seed_pricing(conn=conn)
+            cursor.execute("SELECT * FROM pricing WHERE model = ?", (model,))
+            row = cursor.fetchone()
+        except Exception:
+            pass
 
     if not row:
         if should_close:
@@ -173,26 +787,122 @@ def get_pricing(model: str, conn: Optional[sqlite3.Connection] = None, db_path: 
     return result
 
 
+def calculate_cost_detailed(
+    input_tokens: Optional[int],
+    cache_read_tokens: Optional[int],
+    output_tokens: Optional[int],
+    model: str,
+    thinking_tokens: Optional[int] = None,
+    conn: Optional[sqlite3.Connection] = None,
+    db_path: Optional[Path] = None,
+    is_simulation: bool = False,
+    is_partial: bool = False,
+) -> Dict[str, Any]:
+    """
+    Compute cache-aware USD cost for token profile with provider semantics.
+    Enforces ACC-01 to ACC-07 and TEL-02.
+    """
+    if input_tokens is None or output_tokens is None:
+        return {
+            "cost_usd": None,
+            "cost_status": "unavailable",
+            "reasons": ["missing_usage_telemetry"],
+            "rates": None,
+        }
+
+    try:
+        rates = get_pricing(model, conn=conn, db_path=db_path)
+    except ValueError:
+        return {
+            "cost_usd": None,
+            "cost_status": "unavailable",
+            "reasons": ["model_rate_absent"],
+            "rates": None,
+        }
+
+    thinking = thinking_tokens or 0
+    thinking_cost = 0.0
+    if thinking > 0:
+        thinking_billed_as = rates.get("thinking_billed_as")
+        thinking_rate = rates.get("thinking_usd_per_mtok")
+        if thinking_billed_as == "output":
+            thinking_cost = thinking * rates["output_usd_per_mtok"]
+        elif thinking_rate is not None:
+            thinking_cost = thinking * float(thinking_rate)
+        else:
+            return {
+                "cost_usd": None,
+                "cost_status": "unavailable",
+                "reasons": ["thinking_token_pricing_unspecified"],
+                "rates": rates,
+            }
+
+    cache_read = cache_read_tokens or 0
+    inp = input_tokens or 0
+    cache_mode = rates.get("cache_accounting", "separate")
+
+    if cache_mode == "subset":
+        uncached_input = max(0, inp - cache_read)
+        input_cost = uncached_input * rates["input_usd_per_mtok"]
+        cache_cost = cache_read * rates["cache_read_usd_per_mtok"]
+    elif cache_mode == "separate":
+        input_cost = inp * rates["input_usd_per_mtok"]
+        cache_cost = cache_read * rates["cache_read_usd_per_mtok"]
+    else:
+        return {
+            "cost_usd": None,
+            "cost_status": "unavailable",
+            "reasons": [f"unknown_cache_accounting_{cache_mode}"],
+            "rates": rates,
+        }
+
+    out = output_tokens or 0
+    output_cost = out * rates["output_usd_per_mtok"]
+
+    total_micro_usd = input_cost + cache_cost + output_cost + thinking_cost
+    cost_usd = round(total_micro_usd / 1_000_000.0, 6)
+
+    reasons: List[str] = []
+    if is_simulation:
+        cost_status = "simulation"
+        reasons.append("simulation")
+    elif is_partial:
+        cost_status = "incomplete"
+        reasons.append("partial_telemetry")
+    else:
+        cost_status = "usage_estimate"
+
+    return {
+        "cost_usd": cost_usd,
+        "cost_status": cost_status,
+        "reasons": reasons,
+        "rates": rates,
+    }
+
+
 def calculate_cost(
-    input_tokens: int,
-    cache_read_tokens: int,
-    output_tokens: int,
+    input_tokens: Optional[int],
+    cache_read_tokens: Optional[int],
+    output_tokens: Optional[int],
     model: str,
     conn: Optional[sqlite3.Connection] = None,
     db_path: Optional[Path] = None,
-) -> float:
-    """
-    Compute cache-aware USD cost for a token count profile.
-    Formula: ((input_tokens * input_rate) + (cache_read_tokens * cache_read_rate) + (output_tokens * output_rate)) / 1_000_000
-    Rates are in USD per million tokens.
-    """
-    rates = get_pricing(model, conn=conn, db_path=db_path)
-    cost = (
-        (input_tokens * rates["input_usd_per_mtok"])
-        + (cache_read_tokens * rates["cache_read_usd_per_mtok"])
-        + (output_tokens * rates["output_usd_per_mtok"])
-    ) / 1_000_000.0
-    return cost
+    thinking_tokens: Optional[int] = None,
+    is_simulation: bool = False,
+    is_partial: bool = False,
+) -> Optional[float]:
+    res = calculate_cost_detailed(
+        input_tokens=input_tokens,
+        cache_read_tokens=cache_read_tokens,
+        output_tokens=output_tokens,
+        model=model,
+        thinking_tokens=thinking_tokens,
+        conn=conn,
+        db_path=db_path,
+        is_simulation=is_simulation,
+        is_partial=is_partial,
+    )
+    return res["cost_usd"]
 
 
 def record_task(
@@ -246,27 +956,37 @@ def clear_task_runs(task_id: str, conn: Optional[sqlite3.Connection] = None, db_
     return count
 
 
-
 def record_run(
     task_id: str,
     arm: str,
     model: str,
     run_index: int,
     timestamp: str,
-    input_tokens: int,
-    output_tokens: int,
-    thinking_tokens: int,
-    cache_read_tokens: int,
-    total_tokens: int,
-    num_turns: int,
-    duration_seconds: float,
+    input_tokens: Optional[int],
+    output_tokens: Optional[int],
+    thinking_tokens: Optional[int] = 0,
+    cache_read_tokens: Optional[int] = 0,
+    total_tokens: Optional[int] = None,
+    num_turns: int = 1,
+    duration_seconds: float = 0.0,
+    source_kind: str = "unknown",
+    evidence_status: str = "unverified",
+    exclusion_reasons: Optional[List[str]] = None,
+    evidence_ref: Optional[str] = None,
+    evidence_hash: Optional[str] = None,
+    import_id: Optional[str] = None,
+    cost_status: Optional[str] = None,
+    cost_usd: Optional[float] = None,
+    is_simulation: bool = False,
+    notes: Optional[str] = None,
+    execution_status: str = "completed",
+    verification_status: str = "not_run",
+    manifest_id: Optional[str] = None,
+    evaluator_hash: Optional[str] = None,
     conn: Optional[sqlite3.Connection] = None,
     db_path: Optional[Path] = None,
 ) -> int:
-    """Record an experimental run into the SQLite ledger."""
-    # Ensure pricing is seeded
-    get_pricing(model, conn=conn, db_path=db_path)
-
+    """Record a run into the SQLite ledger with full provenance and accounting metadata."""
     should_close = False
     if conn is None:
         conn = get_connection(db_path)
@@ -274,30 +994,189 @@ def record_run(
 
     record_task(task_id, conn=conn)
 
-    with conn:
-        cursor = conn.execute(
-            """
-            INSERT INTO runs (
-                task_id, arm, model, run_index, timestamp,
-                input_tokens, output_tokens, thinking_tokens, cache_read_tokens,
-                total_tokens, num_turns, duration_seconds
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                task_id,
-                arm,
-                model,
-                run_index,
-                timestamp,
-                int(input_tokens),
-                int(output_tokens),
-                int(thinking_tokens),
-                int(cache_read_tokens),
-                int(total_tokens),
-                int(num_turns),
-                float(duration_seconds),
-            ),
+    # Compute total_tokens if not provided but input/output provided
+    if total_tokens is None and input_tokens is not None:
+        total_tokens = (
+            input_tokens
+            + (output_tokens or 0)
+            + (thinking_tokens or 0)
+            + (cache_read_tokens or 0)
         )
+
+    # Ensure non-null execution and verification statuses
+    if not execution_status:
+        execution_status = "completed"
+    if not verification_status:
+        verification_status = "not_run"
+
+    # Lifecycle status implications
+    if execution_status == "timed_out":
+        if exclusion_reasons is None:
+            exclusion_reasons = []
+        if "timeout" not in exclusion_reasons:
+            exclusion_reasons.append("timeout")
+    elif execution_status == "interrupted":
+        if exclusion_reasons is None:
+            exclusion_reasons = []
+        if "interrupted_attempt" not in exclusion_reasons:
+            exclusion_reasons.append("interrupted_attempt")
+    elif execution_status == "failed":
+        if exclusion_reasons is None:
+            exclusion_reasons = []
+        if "execution_failed" not in exclusion_reasons:
+            exclusion_reasons.append("execution_failed")
+
+    if verification_status == "evaluator_error":
+        if exclusion_reasons is None:
+            exclusion_reasons = []
+        if "evaluator_error" not in exclusion_reasons:
+            exclusion_reasons.append("evaluator_error")
+
+    # Calculate cost if not provided
+    is_part = (cost_status == "incomplete") or (exclusion_reasons is not None and "partial_telemetry" in exclusion_reasons)
+    if cost_usd is None and input_tokens is not None:
+        cost_calc = calculate_cost_detailed(
+            input_tokens=input_tokens,
+            cache_read_tokens=cache_read_tokens,
+            output_tokens=output_tokens,
+            model=model,
+            thinking_tokens=thinking_tokens,
+            conn=conn,
+            db_path=db_path,
+            is_simulation=is_simulation,
+            is_partial=is_part,
+        )
+        cost_usd = cost_calc["cost_usd"]
+        if not cost_status:
+            cost_status = cost_calc["cost_status"]
+        if cost_calc["reasons"]:
+            if exclusion_reasons is None:
+                exclusion_reasons = []
+            for r in cost_calc["reasons"]:
+                if r not in exclusion_reasons:
+                    exclusion_reasons.append(r)
+    elif cost_status is None:
+        cost_status = "unavailable" if input_tokens is None else "usage_estimate"
+
+    if input_tokens is None:
+        if exclusion_reasons is None:
+            exclusion_reasons = []
+        if "missing_usage_telemetry" not in exclusion_reasons:
+            exclusion_reasons.append("missing_usage_telemetry")
+
+    reasons_json = json.dumps(exclusion_reasons) if exclusion_reasons else None
+
+    # Determine if table has phase 1 or phase 2 columns
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(runs)")
+    cols = {row[1] for row in cursor.fetchall()}
+
+    with conn:
+        if "source_kind" in cols:
+            if "execution_status" in cols:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO runs (
+                        task_id, arm, model, run_index, timestamp,
+                        input_tokens, output_tokens, thinking_tokens, cache_read_tokens,
+                        total_tokens, num_turns, duration_seconds,
+                        source_kind, evidence_status, exclusion_reasons,
+                        evidence_ref, evidence_hash, import_id,
+                        cost_status, cost_usd, is_simulation, notes,
+                        execution_status, verification_status, manifest_id, evaluator_hash
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        task_id,
+                        arm,
+                        model,
+                        run_index,
+                        timestamp,
+                        input_tokens,
+                        output_tokens,
+                        thinking_tokens,
+                        cache_read_tokens,
+                        total_tokens,
+                        int(num_turns),
+                        float(duration_seconds),
+                        source_kind,
+                        evidence_status,
+                        reasons_json,
+                        evidence_ref,
+                        evidence_hash,
+                        import_id,
+                        cost_status,
+                        cost_usd,
+                        1 if is_simulation else 0,
+                        notes,
+                        execution_status,
+                        verification_status,
+                        manifest_id,
+                        evaluator_hash,
+                    ),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO runs (
+                        task_id, arm, model, run_index, timestamp,
+                        input_tokens, output_tokens, thinking_tokens, cache_read_tokens,
+                        total_tokens, num_turns, duration_seconds,
+                        source_kind, evidence_status, exclusion_reasons,
+                        evidence_ref, evidence_hash, import_id,
+                        cost_status, cost_usd, is_simulation, notes
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        task_id,
+                        arm,
+                        model,
+                        run_index,
+                        timestamp,
+                        input_tokens,
+                        output_tokens,
+                        thinking_tokens,
+                        cache_read_tokens,
+                        total_tokens,
+                        int(num_turns),
+                        float(duration_seconds),
+                        source_kind,
+                        evidence_status,
+                        reasons_json,
+                        evidence_ref,
+                        evidence_hash,
+                        import_id,
+                        cost_status,
+                        cost_usd,
+                        1 if is_simulation else 0,
+                        notes,
+                    ),
+                )
+        else:
+            # Legacy table fallback: insert into legacy schema
+            cursor = conn.execute(
+                """
+                INSERT INTO runs (
+                    task_id, arm, model, run_index, timestamp,
+                    input_tokens, output_tokens, thinking_tokens, cache_read_tokens,
+                    total_tokens, num_turns, duration_seconds
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    task_id,
+                    arm,
+                    model,
+                    run_index,
+                    timestamp,
+                    int(input_tokens or 0),
+                    int(output_tokens or 0),
+                    int(thinking_tokens or 0),
+                    int(cache_read_tokens or 0),
+                    int(total_tokens or 0),
+                    int(num_turns),
+                    float(duration_seconds),
+                ),
+            )
         run_id = cursor.lastrowid
 
     if should_close:
@@ -306,11 +1185,150 @@ def record_run(
     return run_id
 
 
+def import_run(
+    conn: sqlite3.Connection,
+    run_dict: Dict[str, Any],
+    db_path: Optional[Path] = None,
+) -> int:
+    """
+    Import a run record with provenance and duplicate conflict handling.
+    - IMP-01: Idempotent duplicate ingestion returns existing run ID without duplicating.
+    - IMP-02: Same import_id with conflicting content raises DuplicateConflictError.
+    - PROV-03: Telemetry without verified source evidence classified as unverified import.
+    """
+    task_id = run_dict["task_id"]
+    arm = run_dict["arm"]
+    model = run_dict["model"]
+    run_index = int(run_dict["run_index"])
+    timestamp = run_dict.get("timestamp") or datetime.now(timezone.utc).isoformat()
+
+    import_id = run_dict.get("import_id")
+    if not import_id:
+        ts = run_dict.get("timestamp")
+        if ts:
+            import_id = f"{task_id}:{arm}:{run_index}:{ts}"
+        else:
+            import_id = f"{task_id}:{arm}:{run_index}"
+
+    # Check for existing run by import_id
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM runs WHERE import_id = ?", (import_id,))
+    existing = cursor.fetchone()
+
+    if existing:
+        ex = dict(existing)
+        diffs = []
+        for fld in ("task_id", "arm", "model"):
+            if run_dict.get(fld) != ex.get(fld):
+                diffs.append(f"{fld} (existing: {ex.get(fld)} vs new: {run_dict.get(fld)})")
+        if int(run_dict.get("run_index", 0)) != int(ex.get("run_index", 0)):
+            diffs.append(f"run_index (existing: {ex.get('run_index')} vs new: {run_dict.get('run_index')})")
+        for fld in ("input_tokens", "output_tokens"):
+            if run_dict.get(fld) != ex.get(fld):
+                diffs.append(f"{fld} (existing: {ex.get(fld)} vs new: {run_dict.get(fld)})")
+        for fld in ("cache_read_tokens", "thinking_tokens"):
+            v_new = run_dict.get(fld)
+            v_ex = ex.get(fld)
+            if (v_new or 0) != (v_ex or 0):
+                diffs.append(f"{fld} (existing: {v_ex} vs new: {v_new})")
+        if "num_turns" in run_dict and int(run_dict["num_turns"]) != int(ex.get("num_turns", 1)):
+            diffs.append(f"num_turns (existing: {ex.get('num_turns')} vs new: {run_dict['num_turns']})")
+        if "duration_seconds" in run_dict and abs(float(run_dict["duration_seconds"]) - float(ex.get("duration_seconds", 0.0))) > 1e-4:
+            diffs.append(f"duration_seconds (existing: {ex.get('duration_seconds')} vs new: {run_dict['duration_seconds']})")
+        if diffs:
+            raise DuplicateConflictError(
+                f"Conflicting import for import_id '{import_id}': {', '.join(diffs)}"
+            )
+        # Idempotent match (IMP-01)
+        return ex["id"]
+
+    source_kind = run_dict.get("source_kind", "imported")
+    evidence_ref = run_dict.get("evidence_ref")
+    evidence_hash = run_dict.get("evidence_hash")
+    exclusion_reasons = list(run_dict.get("exclusion_reasons") or [])
+
+    # An imported record cannot claim live origin; imports are classified as imported (or fixture/unknown if so declared).
+    if source_kind not in ("fixture", "unknown", "imported"):
+        source_kind = "imported"
+
+    if evidence_ref:
+        val = validate_evidence_file(evidence_ref, evidence_hash)
+        evidence_status = val["status"]
+        if not val["is_valid"]:
+            exclusion_reasons.append(val["exclusion_reason"])
+    else:
+        # PROV-03: Without evidence file, cannot be verified
+        evidence_status = "unverified"
+        if "unverified_import" not in exclusion_reasons and source_kind == "imported":
+            exclusion_reasons.append("unverified_import")
+
+    # Cost calculation
+    cost_info = calculate_cost_detailed(
+        input_tokens=run_dict.get("input_tokens"),
+        cache_read_tokens=run_dict.get("cache_read_tokens"),
+        output_tokens=run_dict.get("output_tokens"),
+        model=model,
+        thinking_tokens=run_dict.get("thinking_tokens"),
+        conn=conn,
+        db_path=db_path,
+        is_simulation=bool(run_dict.get("is_simulation", 0)),
+        is_partial=bool(run_dict.get("is_partial", False)),
+    )
+    cost_usd = run_dict.get("cost_usd") if run_dict.get("cost_usd") is not None else cost_info["cost_usd"]
+    cost_status = run_dict.get("cost_status") or cost_info["cost_status"]
+    if cost_info["reasons"]:
+        for r in cost_info["reasons"]:
+            if r not in exclusion_reasons:
+                exclusion_reasons.append(r)
+
+    total_tokens = run_dict.get("total_tokens")
+    if total_tokens is None and run_dict.get("input_tokens") is not None:
+        total_tokens = (
+            run_dict["input_tokens"]
+            + (run_dict.get("output_tokens") or 0)
+            + (run_dict.get("thinking_tokens") or 0)
+            + (run_dict.get("cache_read_tokens") or 0)
+        )
+
+    run_id = record_run(
+        task_id=task_id,
+        arm=arm,
+        model=model,
+        run_index=run_index,
+        timestamp=timestamp,
+        input_tokens=run_dict.get("input_tokens"),
+        output_tokens=run_dict.get("output_tokens"),
+        thinking_tokens=run_dict.get("thinking_tokens") or 0,
+        cache_read_tokens=run_dict.get("cache_read_tokens") or 0,
+        total_tokens=total_tokens,
+        num_turns=run_dict.get("num_turns", 1),
+        duration_seconds=run_dict.get("duration_seconds", 0.0),
+        source_kind=source_kind,
+        evidence_status=evidence_status,
+        exclusion_reasons=exclusion_reasons,
+        evidence_ref=evidence_ref,
+        evidence_hash=evidence_hash,
+        import_id=import_id,
+        cost_status=cost_status,
+        cost_usd=cost_usd,
+        is_simulation=bool(run_dict.get("is_simulation", 0)),
+        notes=run_dict.get("notes"),
+        execution_status=run_dict.get("execution_status") or "completed",
+        verification_status=run_dict.get("verification_status") or "not_run",
+        manifest_id=run_dict.get("manifest_id"),
+        evaluator_hash=run_dict.get("evaluator_hash"),
+        conn=conn,
+        db_path=db_path,
+    )
+    return run_id
+
+
 def task_summary(
     task_id: str,
     conn: Optional[sqlite3.Connection] = None,
     db_path: Optional[Path] = None,
     model_override: Optional[str] = None,
+    include_all: bool = False,
 ) -> Dict[str, Any]:
     """Calculate per-arm means, error bands, and savings metrics for a task."""
     should_close = False
@@ -325,61 +1343,154 @@ def task_summary(
     if not rows:
         if should_close:
             conn.close()
-        return {"task_id": task_id, "runs_count": 0, "arms": {}}
+        return {
+            "task_id": task_id,
+            "has_measured_data": False,
+            "status": "empty",
+            "total_runs": 0,
+            "measured_runs_count": 0,
+            "arms": {},
+            "savings": None,
+        }
 
-    arms_data: Dict[str, List[Dict[str, Any]]] = {}
+    is_sim = (model_override is not None)
+
     for r in rows:
-        arm = r["arm"].lower()
-        if arm not in arms_data:
-            arms_data[arm] = []
         model_to_use = model_override or r["model"]
-        cost = calculate_cost(
+        is_row_partial = (r.get("cost_status") == "incomplete") or (
+            isinstance(r.get("exclusion_reasons"), str) and "partial_telemetry" in r["exclusion_reasons"]
+        )
+        cost_info = calculate_cost_detailed(
             r["input_tokens"],
             r["cache_read_tokens"],
             r["output_tokens"],
             model_to_use,
+            thinking_tokens=r.get("thinking_tokens"),
             conn=conn,
+            is_simulation=is_sim or bool(r.get("is_simulation", 0)),
+            is_partial=is_row_partial,
         )
-        r["cost_usd"] = cost
+        if not is_sim and r.get("cost_status") in ("unavailable", "incomplete"):
+            pass
+        else:
+            r["cost_status"] = cost_info["cost_status"]
+
+        if r.get("cost_usd") is None or is_sim:
+            r["cost_usd"] = cost_info["cost_usd"]
+
+        if is_sim:
+            r["is_simulation"] = 1
+
+        elig = evaluate_run_eligibility(r)
+        r["is_eligible"] = elig["is_eligible"]
+        r["reporting_category"] = elig["category"]
+        r["exclusion_reasons"] = elig["exclusion_reasons"]
+
+    # Partition runs
+    measured_runs = [r for r in rows if r["is_eligible"] and not r.get("is_simulation")]
+    sim_measured_runs = [
+        r for r in rows
+        if r.get("source_kind") == "live"
+        and r.get("evidence_status") == "verified"
+        and "fixture_replay" not in r["exclusion_reasons"]
+        and "unverified_import" not in r["exclusion_reasons"]
+        and "legacy_record_unknown_provenance" not in r["exclusion_reasons"]
+        and r.get("input_tokens") is not None
+        and r.get("cost_status") not in ("unavailable", "incomplete")
+    ]
+    fixture_runs = [r for r in rows if r["reporting_category"] == "fixture"]
+    historical_runs = [r for r in rows if r["reporting_category"] == "historical"]
+    imported_runs = [r for r in rows if r["reporting_category"] == "imported"]
+    simulated_runs = [r for r in rows if r.get("is_simulation") or r["reporting_category"] == "simulation"]
+
+    if is_sim:
+        active_runs = sim_measured_runs
+    else:
+        active_runs = measured_runs if not include_all else rows
+
+    has_measured = len(measured_runs) > 0 if not is_sim else len(sim_measured_runs) > 0
+
+    arms_data: Dict[str, List[Dict[str, Any]]] = {}
+    for r in active_runs:
+        arm = r["arm"].lower()
+        if arm not in arms_data:
+            arms_data[arm] = []
         arms_data[arm].append(r)
 
-    summary: Dict[str, Any] = {"task_id": task_id, "total_runs": len(rows), "arms": {}}
+    summary: Dict[str, Any] = {
+        "task_id": task_id,
+        "has_measured_data": has_measured,
+        "is_simulation": is_sim,
+        "total_runs": len(rows),
+        "measured_runs_count": len(measured_runs) if not is_sim else len(sim_measured_runs),
+        "fixture_runs_count": len(fixture_runs),
+        "historical_runs_count": len(historical_runs),
+        "imported_runs_count": len(imported_runs),
+        "simulated_runs_count": len(simulated_runs),
+        "arms": {},
+        "savings": None,
+        "excluded_runs": [
+            {
+                "id": r.get("id"),
+                "arm": r["arm"],
+                "run_index": r["run_index"],
+                "source_kind": r.get("source_kind", "unknown"),
+                "evidence_status": r.get("evidence_status", "unverified"),
+                "exclusion_reasons": r.get("exclusion_reasons", []),
+                "cost_status": r.get("cost_status"),
+                "execution_status": r.get("execution_status", "completed"),
+                "verification_status": r.get("verification_status", "not_run"),
+            }
+            for r in rows if not r.get("is_eligible") or r.get("is_simulation")
+        ],
+    }
+
+    if not active_runs or len(arms_data) == 0:
+        summary["status"] = "no_eligible_measured_runs"
+        if should_close:
+            conn.close()
+        return summary
 
     for arm_name, runs_list in arms_data.items():
         n = len(runs_list)
         if n == 0:
             continue
-        costs = [r["cost_usd"] for r in runs_list]
-        inputs = [r["input_tokens"] for r in runs_list]
-        caches = [r["cache_read_tokens"] for r in runs_list]
-        outputs = [r["output_tokens"] for r in runs_list]
-        totals = [r["total_tokens"] for r in runs_list]
-        thinkings = [r["thinking_tokens"] for r in runs_list]
+        valid_costs = [r["cost_usd"] for r in runs_list if r["cost_usd"] is not None]
+        inputs = [r["input_tokens"] for r in runs_list if r["input_tokens"] is not None]
+        caches = [r["cache_read_tokens"] for r in runs_list if r["cache_read_tokens"] is not None]
+        outputs = [r["output_tokens"] for r in runs_list if r["output_tokens"] is not None]
+        totals = [r["total_tokens"] for r in runs_list if r["total_tokens"] is not None]
+        thinkings = [r["thinking_tokens"] for r in runs_list if r.get("thinking_tokens") is not None]
         turns = [r["num_turns"] for r in runs_list]
         durations = [r["duration_seconds"] for r in runs_list]
 
-        mean_input = sum(inputs) / n
-        mean_cache = sum(caches) / n
-        cache_hit_ratio = (mean_cache / mean_input) if mean_input > 0 else 0.0
+        mean_cost = sum(valid_costs) / len(valid_costs) if valid_costs else None
+        min_cost = min(valid_costs) if valid_costs else None
+        max_cost = max(valid_costs) if valid_costs else None
+
+        mean_input = (sum(inputs) / len(inputs)) if inputs else None
+        mean_cache = (sum(caches) / len(caches)) if caches else None
+        cache_hit_ratio = ((mean_cache / mean_input) if (mean_input and mean_input > 0 and mean_cache is not None) else 0.0)
 
         summary["arms"][arm_name] = {
             "n": n,
+            "cost_complete_n": len(valid_costs),
             "model": model_override or runs_list[0]["model"],
-            "mean_cost_usd": sum(costs) / n,
-            "min_cost_usd": min(costs),
-            "max_cost_usd": max(costs),
+            "mean_cost_usd": mean_cost,
+            "min_cost_usd": min_cost,
+            "max_cost_usd": max_cost,
             "mean_input_tokens": mean_input,
             "mean_cache_read_tokens": mean_cache,
-            "mean_output_tokens": sum(outputs) / n,
-            "mean_thinking_tokens": sum(thinkings) / n,
-            "mean_total_tokens": sum(totals) / n,
+            "mean_output_tokens": (sum(outputs) / len(outputs)) if outputs else None,
+            "mean_thinking_tokens": (sum(thinkings) / len(thinkings)) if thinkings else None,
+            "mean_total_tokens": (sum(totals) / len(totals)) if totals else None,
             "mean_num_turns": sum(turns) / n,
             "mean_duration_seconds": sum(durations) / n,
             "cache_hit_ratio": cache_hit_ratio,
             "runs": runs_list,
         }
 
-    # Compare baseline vs governed arm (icm-subagents or icm or any non-baseline arm)
+    # Compare baseline vs governed arm
     gov_arm = None
     if "icm-subagents" in summary["arms"]:
         gov_arm = "icm-subagents"
@@ -394,36 +1505,37 @@ def task_summary(
     if "baseline" in summary["arms"] and gov_arm:
         b = summary["arms"]["baseline"]
         i = summary["arms"][gov_arm]
-        cost_diff = b["mean_cost_usd"] - i["mean_cost_usd"]
-        cost_pct = (cost_diff / b["mean_cost_usd"] * 100.0) if b["mean_cost_usd"] > 0 else 0.0
-        tokens_diff = b["mean_total_tokens"] - i["mean_total_tokens"]
-        thinking_diff = b["mean_thinking_tokens"] - i["mean_thinking_tokens"]
-        turns_diff = b["mean_num_turns"] - i["mean_num_turns"]
-        duration_diff = b["mean_duration_seconds"] - i["mean_duration_seconds"]
 
-        # Calculate 1M token normalized metrics
-        base_tokens = b["mean_total_tokens"]
-        icm_tokens = i["mean_total_tokens"]
-        cost_per_mtok_base = (b["mean_cost_usd"] / base_tokens * 1_000_000) if base_tokens > 0 else 0.0
-        cost_per_mtok_icm = (i["mean_cost_usd"] / icm_tokens * 1_000_000) if icm_tokens > 0 else 0.0
-        savings_per_mtok = cost_per_mtok_base - cost_per_mtok_icm
+        if b["mean_cost_usd"] is not None and i["mean_cost_usd"] is not None:
+            cost_diff = b["mean_cost_usd"] - i["mean_cost_usd"]
+            cost_pct = (cost_diff / b["mean_cost_usd"] * 100.0) if b["mean_cost_usd"] > 0 else None
+            tokens_diff = (b["mean_total_tokens"] - i["mean_total_tokens"]) if (b["mean_total_tokens"] is not None and i["mean_total_tokens"] is not None) else None
+            thinking_diff = ((b["mean_thinking_tokens"] or 0) - (i["mean_thinking_tokens"] or 0))
+            turns_diff = b["mean_num_turns"] - i["mean_num_turns"]
+            duration_diff = b["mean_duration_seconds"] - i["mean_duration_seconds"]
 
-        summary["governed_arm"] = gov_arm
-        summary["savings"] = {
-            "mean_savings_usd": cost_diff,
-            "mean_savings_percent": cost_pct,
-            "mean_total_tokens_saved": tokens_diff,
-            "mean_thinking_tokens_saved": thinking_diff,
-            "mean_turns_saved": turns_diff,
-            "mean_duration_seconds_saved": duration_diff,
-            "cache_hit_ratio_baseline": b["cache_hit_ratio"],
-            "cache_hit_ratio_icm": i["cache_hit_ratio"],
-            "cost_per_mtok_baseline": cost_per_mtok_base,
-            "cost_per_mtok_icm": cost_per_mtok_icm,
-            "savings_usd_per_mtok": savings_per_mtok,
-            "projected_savings_10m": savings_per_mtok * 10,
-            "projected_savings_100m": savings_per_mtok * 100,
-        }
+            base_tokens = b["mean_total_tokens"] or 0
+            icm_tokens = i["mean_total_tokens"] or 0
+            cost_per_mtok_base = (b["mean_cost_usd"] / base_tokens * 1_000_000) if base_tokens > 0 else None
+            cost_per_mtok_icm = (i["mean_cost_usd"] / icm_tokens * 1_000_000) if icm_tokens > 0 else None
+            savings_per_mtok = (cost_per_mtok_base - cost_per_mtok_icm) if (cost_per_mtok_base is not None and cost_per_mtok_icm is not None) else None
+
+            summary["governed_arm"] = gov_arm
+            summary["savings"] = {
+                "mean_savings_usd": cost_diff,
+                "mean_savings_percent": cost_pct,
+                "mean_total_tokens_saved": tokens_diff,
+                "mean_thinking_tokens_saved": thinking_diff,
+                "mean_turns_saved": turns_diff,
+                "mean_duration_seconds_saved": duration_diff,
+                "cache_hit_ratio_baseline": b["cache_hit_ratio"],
+                "cache_hit_ratio_icm": i["cache_hit_ratio"],
+                "cost_per_mtok_baseline": cost_per_mtok_base,
+                "cost_per_mtok_icm": cost_per_mtok_icm,
+                "savings_usd_per_mtok": savings_per_mtok,
+                "projected_savings_10m": (savings_per_mtok * 10) if savings_per_mtok is not None else None,
+                "projected_savings_100m": (savings_per_mtok * 100) if savings_per_mtok is not None else None,
+            }
 
     if should_close:
         conn.close()
@@ -437,7 +1549,7 @@ def cumulative_savings(
     model_override: Optional[str] = None,
     include_mock: bool = False,
 ) -> Dict[str, Any]:
-    """Compute total measured savings across all tasks with baseline and icm arms."""
+    """Compute total measured savings across all tasks using shared eligibility."""
     should_close = False
     if conn is None:
         conn = get_connection(db_path)
@@ -445,61 +1557,90 @@ def cumulative_savings(
 
     cursor = conn.cursor()
     cursor.execute("SELECT DISTINCT task_id FROM runs ORDER BY task_id")
-    task_ids = [
-        row["task_id"]
-        for row in cursor.fetchall()
-        if include_mock or not row["task_id"].upper().startswith("MOCK")
-    ]
+    all_task_ids = [row["task_id"] for row in cursor.fetchall()]
+
+    is_sim = (model_override is not None)
 
     total_baseline_cost = 0.0
     total_icm_cost = 0.0
     total_baseline_tokens = 0
     total_icm_tokens = 0
-    total_runs = 0
+    total_measured_runs = 0
     task_summaries = []
 
-    for tid in task_ids:
+    total_fixture_count = 0
+    total_historical_count = 0
+    total_imported_count = 0
+    total_simulated_count = 0
+
+    has_measured_pairs = False
+
+    for tid in all_task_ids:
         s = task_summary(tid, conn=conn, model_override=model_override)
         task_summaries.append(s)
-        if "baseline" in s.get("arms", {}) and "icm" in s.get("arms", {}):
+
+        total_fixture_count += s.get("fixture_runs_count", 0)
+        total_historical_count += s.get("historical_runs_count", 0)
+        total_imported_count += s.get("imported_runs_count", 0)
+        total_simulated_count += s.get("simulated_runs_count", 0)
+
+        gov_arm = s.get("governed_arm")
+        if s.get("has_measured_data") and "baseline" in s.get("arms", {}) and gov_arm and gov_arm in s.get("arms", {}):
             b_n = s["arms"]["baseline"]["n"]
-            i_n = s["arms"]["icm"]["n"]
-            total_runs += b_n + i_n
+            g_n = s["arms"][gov_arm]["n"]
+            total_measured_runs += b_n + g_n
 
             b_runs = {r["run_index"]: r for r in s["arms"]["baseline"]["runs"]}
-            i_runs = {r["run_index"]: r for r in s["arms"]["icm"]["runs"]}
-            common_indexes = sorted(set(b_runs.keys()) & set(i_runs.keys()))
+            g_runs = {r["run_index"]: r for r in s["arms"][gov_arm]["runs"]}
+            common_indexes = sorted(set(b_runs.keys()) & set(g_runs.keys()))
             for ridx in common_indexes:
-                total_baseline_cost += b_runs[ridx]["cost_usd"]
-                total_icm_cost += i_runs[ridx]["cost_usd"]
-                total_baseline_tokens += b_runs[ridx]["total_tokens"]
-                total_icm_tokens += i_runs[ridx]["total_tokens"]
+                b_r = b_runs[ridx]
+                g_r = g_runs[ridx]
+                if b_r.get("cost_usd") is not None and g_r.get("cost_usd") is not None:
+                    total_baseline_cost += b_r["cost_usd"]
+                    total_icm_cost += g_r["cost_usd"]
+                    total_baseline_tokens += (b_r.get("total_tokens") or 0)
+                    total_icm_tokens += (g_r.get("total_tokens") or 0)
+                    has_measured_pairs = True
 
-    measured_savings_usd = total_baseline_cost - total_icm_cost
-    savings_pct = (
-        (measured_savings_usd / total_baseline_cost * 100.0)
-        if total_baseline_cost > 0
-        else 0.0
-    )
-
-    cost_per_mtok_base = (total_baseline_cost / total_baseline_tokens * 1_000_000) if total_baseline_tokens > 0 else 0.0
-    cost_per_mtok_icm = (total_icm_cost / total_icm_tokens * 1_000_000) if total_icm_tokens > 0 else 0.0
-    savings_usd_per_mtok = cost_per_mtok_base - cost_per_mtok_icm
+    if has_measured_pairs:
+        measured_savings_usd = total_baseline_cost - total_icm_cost
+        savings_pct = (
+            (measured_savings_usd / total_baseline_cost * 100.0)
+            if total_baseline_cost > 0
+            else None
+        )
+        cost_per_mtok_base = (total_baseline_cost / total_baseline_tokens * 1_000_000) if total_baseline_tokens > 0 else None
+        cost_per_mtok_icm = (total_icm_cost / total_icm_tokens * 1_000_000) if total_icm_tokens > 0 else None
+        savings_usd_per_mtok = (cost_per_mtok_base - cost_per_mtok_icm) if (cost_per_mtok_base is not None and cost_per_mtok_icm is not None) else None
+    else:
+        measured_savings_usd = None
+        savings_pct = None
+        cost_per_mtok_base = None
+        cost_per_mtok_icm = None
+        savings_usd_per_mtok = None
 
     result = {
-        "tasks_evaluated": len(task_summaries),
-        "total_runs": total_runs,
-        "total_baseline_cost_usd": total_baseline_cost,
-        "total_icm_cost_usd": total_icm_cost,
-        "total_baseline_tokens": total_baseline_tokens,
-        "total_icm_tokens": total_icm_tokens,
+        "has_measured_data": has_measured_pairs,
+        "is_simulation": is_sim,
+        "tasks_evaluated": len([t for t in task_summaries if t.get("has_measured_data")]),
+        "total_tasks": len(task_summaries),
+        "total_runs": total_measured_runs,
+        "fixture_runs_count": total_fixture_count,
+        "historical_runs_count": total_historical_count,
+        "imported_runs_count": total_imported_count,
+        "simulated_runs_count": total_simulated_count,
+        "total_baseline_cost_usd": total_baseline_cost if has_measured_pairs else None,
+        "total_icm_cost_usd": total_icm_cost if has_measured_pairs else None,
+        "total_baseline_tokens": total_baseline_tokens if has_measured_pairs else None,
+        "total_icm_tokens": total_icm_tokens if has_measured_pairs else None,
         "cumulative_savings_usd": measured_savings_usd,
         "cumulative_savings_percent": savings_pct,
         "cost_per_mtok_baseline": cost_per_mtok_base,
         "cost_per_mtok_icm": cost_per_mtok_icm,
         "savings_usd_per_mtok": savings_usd_per_mtok,
-        "projected_savings_10m": savings_usd_per_mtok * 10,
-        "projected_savings_100m": savings_usd_per_mtok * 100,
+        "projected_savings_10m": (savings_usd_per_mtok * 10) if savings_usd_per_mtok is not None else None,
+        "projected_savings_100m": (savings_usd_per_mtok * 100) if savings_usd_per_mtok is not None else None,
         "tasks": task_summaries,
     }
 
@@ -541,16 +1682,22 @@ def print_cascade(conn: Optional[sqlite3.Connection] = None, db_path: Optional[P
             pct = cum["cumulative_savings_percent"]
             proj_100m = cum["projected_savings_100m"]
 
+            b_str = f"${b_cost:<8.4f}" if b_cost is not None else "N/A     "
+            i_str = f"${i_cost:<8.4f}" if i_cost is not None else "N/A     "
+            s_str = f"${saved:<8.4f}" if saved is not None else "N/A     "
+            p_str = f"{pct:>5.1f}%" if pct is not None else " N/A "
+            pr_str = f"+${proj_100m:,.2f}" if proj_100m is not None else "N/A"
+
             row = (
                 f"{m:<20} | "
                 f"${p['input_usd_per_mtok']:<6.3f} | "
                 f"${p['output_usd_per_mtok']:<6.2f} | "
                 f"${p['cache_read_usd_per_mtok']:<6.4f} | "
-                f"${b_cost:<8.4f} | "
-                f"${i_cost:<8.4f} | "
-                f"${saved:<8.4f} | "
-                f"{pct:>5.1f}% | "
-                f"+${proj_100m:,.2f}"
+                f"{b_str} | "
+                f"{i_str} | "
+                f"{s_str} | "
+                f"{p_str} | "
+                f"{pr_str}"
             )
             print(row)
 
@@ -559,10 +1706,13 @@ def print_cascade(conn: Optional[sqlite3.Connection] = None, db_path: Optional[P
         for p in pricing_rows:
             m = p["model"]
             cum = cumulative_savings(conn=conn, model_override=m)
-            saved_1b = cum["savings_usd_per_mtok"] * 1000.0
-            base_1b = cum["cost_per_mtok_baseline"] * 1000.0
-            icm_1b = cum["cost_per_mtok_icm"] * 1000.0
-            print(f"  • {m:<20}: Base ${base_1b:>10,.2f}  ->  ICM ${icm_1b:>10,.2f}  |  Net Savings: +${saved_1b:>10,.2f}")
+            saved_1b = (cum["savings_usd_per_mtok"] * 1000.0) if cum["savings_usd_per_mtok"] is not None else None
+            base_1b = (cum["cost_per_mtok_baseline"] * 1000.0) if cum["cost_per_mtok_baseline"] is not None else None
+            icm_1b = (cum["cost_per_mtok_icm"] * 1000.0) if cum["cost_per_mtok_icm"] is not None else None
+            if saved_1b is not None and base_1b is not None and icm_1b is not None:
+                print(f"  • {m:<20}: Base ${base_1b:>10,.2f}  ->  ICM ${icm_1b:>10,.2f}  |  Net Savings: +${saved_1b:>10,.2f}")
+            else:
+                print(f"  • {m:<20}: Pricing simulation unavailable (no qualifying tokens)")
         print("=" * 86)
     finally:
         if should_close:
@@ -578,11 +1728,14 @@ def print_summary(
     conn = get_connection(db_path)
     try:
         if model_override:
-            rates = get_pricing(model_override, conn=conn)
-            print("~" * 72)
-            print(f"  [SIMULATED MODEL PRICING: {model_override.upper()}]")
-            print(f"  Rates: Input ${rates['input_usd_per_mtok']:.3f}/M, Cache ${rates['cache_read_usd_per_mtok']:.4f}/M, Output ${rates['output_usd_per_mtok']:.2f}/M")
-            print("~" * 72)
+            try:
+                rates = get_pricing(model_override, conn=conn)
+                print("~" * 72)
+                print(f"  [SIMULATED MODEL PRICING: {model_override.upper()}]")
+                print(f"  Rates: Input ${rates['input_usd_per_mtok']:.3f}/M, Cache ${rates['cache_read_usd_per_mtok']:.4f}/M, Output ${rates['output_usd_per_mtok']:.2f}/M")
+                print("~" * 72)
+            except Exception as e:
+                print(f"~ Warning: could not load simulated rates for {model_override}: {e} ~")
 
         if task_id:
             s = task_summary(task_id, conn=conn, model_override=model_override)
@@ -592,39 +1745,39 @@ def print_summary(
 
             print("=" * 72)
             print(f"  USAGE LEDGER SUMMARY: Task {task_id}")
+            print(f"  Total Runs: {s['total_runs']} (Measured: {s['measured_runs_count']}, Fixtures: {s['fixture_runs_count']}, Historical: {s['historical_runs_count']}, Imported: {s['imported_runs_count']})")
+            if not s["has_measured_data"] and not s["is_simulation"]:
+                print("  [STATUS: NO ELIGIBLE MEASURED DATA — Excluded from empirical totals]")
             print("=" * 72)
             arm_names = sorted(s.get("arms", {}).keys(), key=lambda x: (0 if x == "baseline" else 1, x))
             for arm_name in arm_names:
                 a = s["arms"][arm_name]
                 print(f"\n[{arm_name.upper()} ARM] (n={a['n']}, Model: {a['model']})")
-                print(f"  Mean Cost:           ${a['mean_cost_usd']:.5f} (min: ${a['min_cost_usd']:.5f}, max: ${a['max_cost_usd']:.5f})")
-                print(f"  Mean Input Tokens:   {a['mean_input_tokens']:,.0f}")
-                print(f"  Mean Cache Read:     {a['mean_cache_read_tokens']:,.0f}")
-                print(f"  Mean Output Tokens:  {a['mean_output_tokens']:,.0f}")
-                print(f"  Mean Thinking Tokens:{a.get('mean_thinking_tokens', 0):,.0f}")
-                print(f"  Mean Total Tokens:   {a['mean_total_tokens']:,.0f}")
+                cost_str = f"${a['mean_cost_usd']:.5f}" if a["mean_cost_usd"] is not None else "unavailable"
+                print(f"  Mean Cost:           {cost_str}")
+                in_str = f"{a['mean_input_tokens']:,.0f}" if a['mean_input_tokens'] is not None else "unknown"
+                cache_str = f"{a['mean_cache_read_tokens']:,.0f}" if a['mean_cache_read_tokens'] is not None else "unknown"
+                out_str = f"{a['mean_output_tokens']:,.0f}" if a['mean_output_tokens'] is not None else "unknown"
+                tot_str = f"{a['mean_total_tokens']:,.0f}" if a['mean_total_tokens'] is not None else "unknown"
+                print(f"  Mean Input Tokens:   {in_str}")
+                print(f"  Mean Cache Read:     {cache_str}")
+                print(f"  Mean Output Tokens:  {out_str}")
+                print(f"  Mean Total Tokens:   {tot_str}")
                 print(f"  Cache Hit Ratio:     {a['cache_hit_ratio'] * 100:.2f}%")
                 print(f"  Mean Turns:          {a['mean_num_turns']:.1f}")
                 print(f"  Mean Duration:       {a['mean_duration_seconds']:.2f}s")
 
-            if "savings" in s:
+            if s.get("savings"):
                 sv = s["savings"]
                 gov_label = s.get("governed_arm", "ICM").upper()
                 print("-" * 72)
                 print(f"[MEASURED SAVINGS: BASELINE vs. {gov_label}]")
                 print(f"  Cost Reduction:      ${sv['mean_savings_usd']:.5f} ({sv['mean_savings_percent']:.2f}%)")
-                print(f"  Total Tokens Saved:  {sv['mean_total_tokens_saved']:,.0f}")
-                print(f"  Thinking Saved:      {sv.get('mean_thinking_tokens_saved', 0):,.0f} tokens")
+                if sv['mean_total_tokens_saved'] is not None:
+                    print(f"  Total Tokens Saved:  {sv['mean_total_tokens_saved']:,.0f}")
                 print(f"  Turns Saved:         {sv['mean_turns_saved']:.1f}")
                 print(f"  Duration Saved:      {sv['mean_duration_seconds_saved']:.2f}s")
                 print(f"  Cache Hit Ratio:     Baseline {sv['cache_hit_ratio_baseline']*100:.1f}% -> {gov_label} {sv['cache_hit_ratio_icm']*100:.1f}%")
-                print("-" * 72)
-                print("[1M TOKEN SCALE MULTIPLIER & PROJECTIONS]")
-                print(f"  Baseline / 1M Tokens:   ${sv['cost_per_mtok_baseline']:.4f}")
-                print(f"  {gov_label} / 1M Tokens:        ${sv['cost_per_mtok_icm']:.4f}")
-                print(f"  Net Savings / 1M Tokens: +${sv['savings_usd_per_mtok']:.4f} ({sv['mean_savings_percent']:.1f}%)")
-                print(f"  Projected Savings @ 10M:  +${sv['projected_savings_10m']:.3f}")
-                print(f"  Projected Savings @ 100M: +${sv['projected_savings_100m']:.2f}")
             print("=" * 72)
 
         else:
@@ -632,27 +1785,15 @@ def print_summary(
             print("=" * 72)
             print("  USAGE LEDGER CUMULATIVE SUMMARY (ALL TASKS)")
             print("=" * 72)
-            print(f"Tasks Evaluated:       {cum['tasks_evaluated']}")
-            print(f"Total Runs Recorded:   {cum['total_runs']}")
-            print(f"Total Baseline Cost:   ${cum['total_baseline_cost_usd']:.5f}")
-            print(f"Total ICM Cost:        ${cum['total_icm_cost_usd']:.5f}")
-            print(f"Cumulative Savings:    ${cum['cumulative_savings_usd']:.5f} ({cum['cumulative_savings_percent']:.2f}%)")
-            print("-" * 72)
-            print("[1M TOKEN SCALE MULTIPLIER & VOLUME PROJECTIONS]")
-            print(f"  Baseline / 1M Tokens:   ${cum['cost_per_mtok_baseline']:.4f}")
-            print(f"  ICM / 1M Tokens:        ${cum['cost_per_mtok_icm']:.4f}")
-            print(f"  Net Savings / 1M Tokens: +${cum['savings_usd_per_mtok']:.4f} ({cum['cumulative_savings_percent']:.1f}%)")
-            print(f"  Projected Savings @ 10M:  +${cum['projected_savings_10m']:.3f}")
-            print(f"  Projected Savings @ 100M: +${cum['projected_savings_100m']:.2f}")
-            print("=" * 72)
-            for t in cum["tasks"]:
-                tid = t["task_id"]
-                if "savings" in t:
-                    sv = t["savings"]
-                    print(f"  • {tid:10s} | Saved: ${sv['mean_savings_usd']:.5f} ({sv['mean_savings_percent']:4.1f}%) | 1M Rate: Base ${sv['cost_per_mtok_baseline']:.3f} vs ICM ${sv['cost_per_mtok_icm']:.3f} (Save +${sv['savings_usd_per_mtok']:.3f}/M)")
-                elif t.get("total_runs", 0) > 0:
-                    arms = list(t.get("arms", {}).keys())
-                    print(f"  • {tid:10s} | Runs: {t['total_runs']} | Arms: {arms} (partial)")
+            print(f"Tasks Evaluated (Measured): {cum['tasks_evaluated']} of {cum['total_tasks']}")
+            print(f"Measured Runs Recorded:     {cum['total_runs']}")
+            print(f"Excluded / Historical Runs: Fixture: {cum['fixture_runs_count']} | Historical: {cum['historical_runs_count']} | Imported: {cum['imported_runs_count']}")
+            if cum["has_measured_data"]:
+                print(f"Total Baseline Cost:        ${cum['total_baseline_cost_usd']:.5f}")
+                print(f"Total ICM Cost:             ${cum['total_icm_cost_usd']:.5f}")
+                print(f"Cumulative Savings:         ${cum['cumulative_savings_usd']:.5f} ({cum['cumulative_savings_percent']:.2f}%)")
+            else:
+                print("Status:                     No qualifying measured runs exist.")
             print("=" * 72)
     finally:
         conn.close()
@@ -665,47 +1806,65 @@ def main():
     subparsers = parser.add_subparsers(dest="command")
 
     # init
-    subparsers.add_parser("init", help="Initialize the database schema")
+    init_p = subparsers.add_parser("init", help="Initialize the database schema")
+    init_p.add_argument("--db", default=None, help="Custom path to SQLite database")
+
+    # migrate
+    mig_p = subparsers.add_parser("migrate", help="Migrate database to Phase 1 provenance schema")
+    mig_p.add_argument("--db", default=None, help="Custom path to SQLite database")
 
     # seed-pricing
     seed_p = subparsers.add_parser("seed-pricing", help="Seed pricing table from config/PRICING.json")
     seed_p.add_argument("--config", help="Custom path to PRICING.json")
+    seed_p.add_argument("--db", default=None, help="Custom path to SQLite database")
 
     # summary
     sum_p = subparsers.add_parser("summary", help="Print summary of tasks and savings")
     sum_p.add_argument("task_id", nargs="?", default=None, help="Task ID to summarize")
     sum_p.add_argument("--model", "-m", default=None, help="Simulate spend under a specific model pricing rate card")
+    sum_p.add_argument("--db", default=None, help="Custom path to SQLite database")
 
     # cumulative
     cum_p = subparsers.add_parser("cumulative", help="Print cumulative measured savings across all tasks")
     cum_p.add_argument("--model", "-m", default=None, help="Simulate spend under a specific model pricing rate card")
+    cum_p.add_argument("--db", default=None, help="Custom path to SQLite database")
 
     # cascade
-    subparsers.add_parser("cascade", help="Print multi-model spend cascade demonstrating how savings scale")
+    casc_p = subparsers.add_parser("cascade", help="Print multi-model spend cascade demonstrating how savings scale")
+    casc_p.add_argument("--db", default=None, help="Custom path to SQLite database")
 
     args = parser.parse_args()
+    custom_db = Path(args.db) if hasattr(args, "db") and args.db else None
 
     if args.command == "init":
-        conn = get_connection()
+        conn = get_connection(custom_db)
         conn.close()
         print("✓ Ledger database initialized.")
+    elif args.command == "migrate":
+        conn = get_connection(custom_db)
+        applied = migrate_db(conn)
+        conn.close()
+        if applied:
+            print("✓ Database successfully migrated to Phase 1 schema.")
+        else:
+            print("✓ Database was already migrated (no changes needed).")
     elif args.command == "seed-pricing":
         p = Path(args.config) if args.config else None
-        count = seed_pricing(pricing_path=p)
+        count = seed_pricing(pricing_path=p, db_path=custom_db)
         print(f"✓ Seeded pricing for {count} model(s) from config/PRICING.json.")
     elif args.command == "cascade":
-        print_cascade()
+        print_cascade(db_path=custom_db)
     elif args.command == "cumulative":
-        print_summary(None, model_override=args.model)
+        print_summary(None, model_override=args.model, db_path=custom_db)
     elif args.command == "summary":
-        print_summary(args.task_id, model_override=args.model)
+        print_summary(args.task_id, model_override=args.model, db_path=custom_db)
     else:
-        # Default behavior: if a task_id is passed as first arg without subcommand
         if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
-            print_summary(sys.argv[1])
+            print_summary(sys.argv[1], db_path=custom_db)
         else:
-            print_summary(None)
+            print_summary(None, db_path=custom_db)
 
 
 if __name__ == "__main__":
     main()
+
