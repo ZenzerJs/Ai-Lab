@@ -1995,8 +1995,10 @@ def cumulative_savings(
         cost_per_mtok_base = (total_baseline_cost / total_baseline_tokens * 1_000_000) if total_baseline_tokens > 0 else None
         cost_per_mtok_icm = (total_icm_cost / total_icm_tokens * 1_000_000) if total_icm_tokens > 0 else None
         savings_usd_per_mtok = (cost_per_mtok_base - cost_per_mtok_icm) if (cost_per_mtok_base is not None and cost_per_mtok_icm is not None) else None
-        icm_cache_hit_pct = round(total_icm_cache_read / total_icm_input * 100.0, 1) if total_icm_input > 0 else None
-        baseline_cache_hit_pct = round(total_baseline_cache_read / total_baseline_input * 100.0, 1) if total_baseline_input > 0 else None
+        total_icm_all_in = total_icm_input + total_icm_cache_read
+        total_base_all_in = total_baseline_input + total_baseline_cache_read
+        icm_cache_hit_pct = round(total_icm_cache_read / total_icm_all_in * 100.0, 1) if total_icm_all_in > 0 else None
+        baseline_cache_hit_pct = round(total_baseline_cache_read / total_base_all_in * 100.0, 1) if total_base_all_in > 0 else None
     else:
         measured_savings_usd = None
         savings_pct = None

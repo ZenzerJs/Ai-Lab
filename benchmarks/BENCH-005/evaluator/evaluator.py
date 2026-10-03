@@ -20,7 +20,11 @@ BASELINE_FILE_HASHES = {
 
 
 def compute_file_hash(p: Path) -> str:
-    return hashlib.sha256(p.read_bytes()).hexdigest()
+    try:
+        content = p.read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8")
+        return hashlib.sha256(content).hexdigest()
+    except Exception:
+        return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
 def run_checks():

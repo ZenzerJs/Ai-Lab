@@ -514,7 +514,8 @@ def main():
     print(f"  Dry-Run Mode:   {'YES (fixtures only)' if args.dry_run else 'NO (live headless CLI)'}")
     print("=" * 72)
 
-    cli_executable = None if args.dry_run else (shutil.which(args.cli) or shutil.which("agy"))
+    default_agy = os.path.expandvars(r"%LOCALAPPDATA%\agy\bin\agy.exe")
+    cli_executable = None if args.dry_run else (shutil.which(args.cli) or shutil.which("agy") or (default_agy if os.path.exists(default_agy) else None))
 
     if args.dry_run or not cli_executable:
         if not args.dry_run and not cli_executable:
