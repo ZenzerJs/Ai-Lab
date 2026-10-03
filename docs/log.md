@@ -1,5 +1,8 @@
 # Knowledge Bundle Update Log
 
+## 2026-10-03
+* **TSK-009: Live Data & Impactful Statistics Dashboard Overhaul**: Completed full architectural overhaul of the GitHub Pages benchmark dashboard. Audited all session transcripts to verify data provenance; isolated mock fixture replays out of live statistics. Implemented native live telemetry streaming via the Antigravity CLI (`agy`), byte-exact SHA-256 evidence hashing, and bounded cache hit ratio formulas. Redesigned the dashboard into a high-impact single page featuring top-level headline statistics with 95% bootstrap confidence intervals, side-by-side cost comparison bars, transparent operational tradeoff disclosure (+65% duration / turn overhead for ICM governance), a detailed task breakdown table, and a collapsible provenance audit drawer. Resolved Windows subprocess handle inheritance across test suites; all 126 unit/integration tests and Vite production builds pass with 100% compliance.
+
 ## 2026-09-10
 * **v1.0.0 Release Polish & Flagship Evidence Overhaul**: Completed rigorous morning audit following overnight builds. Frontmatter linter, porcelain git tree hygiene, and TypeScript production dashboard build all exit 0. Overhauled `README.md` with official status badges (MIT, OKF v0.2, CI passing, 61.58% empirical savings), live deployment link to GitHub Pages, core empirical finding matrix across Gemini 3.8 Flash, GLM 5.3 Flash, and Frontier Class simulations, verbatim provider telemetry limitation callouts, and auditable citations for all rate cards in `config/PRICING.json`. Staged overnight verification handoff record.
 

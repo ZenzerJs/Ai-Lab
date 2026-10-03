@@ -6,7 +6,7 @@ import { Button } from './ui/button';
 import { Layers, Check, Zap, Sparkles } from 'lucide-react';
 import { Info } from 'lucide-react';
 import { formatCurrency, formatSignedCurrency, formatSignedPercent } from '../lib/formatters';
-import { ScaleMode } from './ScaleSelector';
+import { ScaleMode } from '../types';
 
 interface SpendCascadeComparisonProps {
   cascade: ModelCascadeItem[];

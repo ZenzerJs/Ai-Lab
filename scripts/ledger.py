@@ -388,19 +388,20 @@ def validate_and_parse_telemetry(
                 else:
                     turn_usages.append(turn_u)
 
-        # Run complete / summary event
-        if ev_type in ("run_complete", "session_end", "summary"):
-            if "num_turns" in event and event["num_turns"] is not None:
-                nt = _check_int(event["num_turns"], "num_turns")
+        # Run complete / summary / agy result event
+        if ev_type in ("run_complete", "session_end", "summary", "result") or "result" in event:
+            res_obj = event.get("result") if isinstance(event.get("result"), dict) else event
+            if "num_turns" in res_obj and res_obj["num_turns"] is not None:
+                nt = _check_int(res_obj["num_turns"], "num_turns")
                 if nt:
                     num_turns = nt
-            if "duration_seconds" in event and event["duration_seconds"] is not None:
-                dur = _check_float(event["duration_seconds"], "duration_seconds")
+            if "duration_seconds" in res_obj and res_obj["duration_seconds"] is not None:
+                dur = _check_float(res_obj["duration_seconds"], "duration_seconds")
                 if dur is not None:
                     duration_seconds = dur
 
-            if "usage" in event and isinstance(event["usage"], dict):
-                ev_u = event["usage"]
+            if "usage" in res_obj and isinstance(res_obj["usage"], dict):
+                ev_u = res_obj["usage"]
                 new_cumulative = {
                     "input_tokens": _check_int(ev_u.get("input_tokens"), "input_tokens"),
                     "output_tokens": _check_int(ev_u.get("output_tokens"), "output_tokens"),
@@ -421,7 +422,7 @@ def validate_and_parse_telemetry(
                     )
                 if has_run_complete and cumulative_usage is not None and cumulative_usage != new_cumulative:
                     raise TelemetryValidationError(
-                        f"Line {idx}: Multiple conflicting run_complete events in stream",
+                        f"Line {idx}: Multiple conflicting run_complete/result events in stream",
                         line_number=idx,
                         event_data=event,
                     )
@@ -837,6 +838,22 @@ def init_db(conn: sqlite3.Connection) -> None:
                     conn.execute("ALTER TABLE runs ADD COLUMN manifest_id TEXT")
                 if "evaluator_hash" not in cols:
                     conn.execute("ALTER TABLE runs ADD COLUMN evaluator_hash TEXT")
+
+        # Ensure pricing columns exist on existing pricing tables
+        cursor.execute("PRAGMA table_info(pricing)")
+        p_cols = {row[1] for row in cursor.fetchall()}
+        if p_cols:
+            with conn:
+                if "pricing_mode" not in p_cols:
+                    conn.execute("ALTER TABLE pricing ADD COLUMN pricing_mode TEXT")
+                if "provider_note" not in p_cols:
+                    conn.execute("ALTER TABLE pricing ADD COLUMN provider_note TEXT")
+                if "cache_accounting" not in p_cols:
+                    conn.execute("ALTER TABLE pricing ADD COLUMN cache_accounting TEXT DEFAULT 'separate'")
+                if "thinking_usd_per_mtok" not in p_cols:
+                    conn.execute("ALTER TABLE pricing ADD COLUMN thinking_usd_per_mtok REAL")
+                if "thinking_billed_as" not in p_cols:
+                    conn.execute("ALTER TABLE pricing ADD COLUMN thinking_billed_as TEXT")
 
 
 def migrate_db(conn: sqlite3.Connection) -> bool:
@@ -1782,7 +1799,8 @@ def task_summary(
 
         mean_input = (sum(inputs) / len(inputs)) if inputs else None
         mean_cache = (sum(caches) / len(caches)) if caches else None
-        cache_hit_ratio = ((mean_cache / mean_input) if (mean_input and mean_input > 0 and mean_cache is not None) else 0.0)
+        total_prompt = ((mean_input or 0) + (mean_cache or 0))
+        cache_hit_ratio = ((mean_cache / total_prompt) if (total_prompt > 0 and mean_cache is not None) else 0.0)
 
         arm_exc_reasons: List[str] = []
         for r in all_arm_rows:

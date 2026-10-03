@@ -622,6 +622,7 @@ class ProtectedEvaluator:
                     cmd,
                     cwd=str(workspace_path),
                     env=env,
+                    stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,

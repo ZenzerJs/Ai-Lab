@@ -267,6 +267,7 @@ def test_bench006_mutation_grading_rejects_collection_errors(tmp_path: Path):
         res = subprocess.run(
             [sys.executable, str(evaluator_file)],
             cwd=str(ws.path),
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -460,6 +461,7 @@ def test_bench006_mutation_grading_rejects_timeouts(tmp_path: Path):
             [sys.executable, str(evaluator_file)],
             cwd=str(ws.path),
             env=test_env,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
