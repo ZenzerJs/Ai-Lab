@@ -10,8 +10,11 @@ Evaluates agent test suite against genuine implementation and 5 predefined fault
 import hashlib
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 GENUINE_HASH = "dda7ef21d09750f257066c0682f431f5c763a6f407be8f04b85548d155dd9417"
 
@@ -151,29 +154,75 @@ def run_checks():
         sys.exit(1)
 
     # Check 3: Submitted tests must FAIL against all 5 predefined faulty variants
+    # Use disposable variant workspace to avoid in-place workspace mutation (Finding 5)
     detected = []
     missed = []
+    infra_errors = []
 
-    try:
-        for var_name, var_code in VARIANTS.items():
-            # Inject faulty variant
-            validator_file.write_text(var_code, encoding="utf-8")
-            res_var = subprocess.run(
-                [sys.executable, "-m", "pytest", str(test_file)],
-                cwd=str(cwd),
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            # If pytest failed (returncode != 0), the test caught the mutant!
-            if res_var.returncode != 0:
-                detected.append(var_name)
-            else:
+    for var_name, var_code in VARIANTS.items():
+        with tempfile.TemporaryDirectory() as tmp_variant_dir:
+            tmp_dir_p = Path(tmp_variant_dir)
+            tmp_tests = tmp_dir_p / "tests"
+            tmp_tests.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(test_file, tmp_tests / "test_accounting.py")
+
+            # Write variant implementation in disposable workspace
+            (tmp_dir_p / "accounting_validator.py").write_text(var_code, encoding="utf-8")
+
+            var_env = dict(os.environ)
+            var_env["PYTHONPATH"] = str(tmp_dir_p) + os.pathsep + var_env.get("PYTHONPATH", "")
+
+            timeout_sec = float(os.environ.get("BENCH006_MUTANT_TIMEOUT", "30.0"))
+            try:
+                res_var = subprocess.run(
+                    [sys.executable, "-m", "pytest", str(tmp_tests / "test_accounting.py")],
+                    cwd=str(tmp_dir_p),
+                    env=var_env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    timeout=timeout_sec,
+                )
+            except subprocess.TimeoutExpired:
+                infra_errors.append((var_name, "timeout_expired"))
+                continue
+            except Exception as e:
+                infra_errors.append((var_name, f"execution_exception: {e}"))
+                continue
+
+            # Analyze pytest outcome:
+            # Code 0: all tests passed -> mutant was MISSED by the test suite
+            # Code 1: tests collected and at least 1 test failed -> mutant DETECTED
+            # Note: Verify actual test assertion/failure, NOT a collection or syntax error!
+            stdout = res_var.stdout
+            stderr = res_var.stderr
+            combined = stdout + "\n" + stderr
+
+            if res_var.returncode == 0:
                 missed.append(var_name)
-    finally:
-        # Restore genuine implementation
-        validator_file.write_text(orig_code, encoding="utf-8")
+            elif res_var.returncode == 1:
+                has_collection_err = (
+                    "ERROR collecting" in combined
+                    or "error during collection" in combined
+                    or "=== ERRORS ===" in combined
+                )
+                has_test_failure = (
+                    "=== FAILURES ===" in combined
+                    or "FAILED " in combined
+                    or bool(re.search(r"\b\d+ failed\b", stdout))
+                )
+                if has_collection_err or not has_test_failure:
+                    infra_errors.append((var_name, "collection_error"))
+                else:
+                    detected.append(var_name)
+            else:
+                # Exit code 2 (interrupted), 3 (internal error), 4 (usage error), 5 (no tests collected)
+                infra_errors.append((var_name, f"pytest_infrastructure_exit_code_{res_var.returncode}"))
+
+    if infra_errors:
+        print(f"REASON: mutation_infrastructure_error", file=sys.stderr)
+        print(f"Encountered infrastructure/collection errors on variants: {infra_errors}", file=sys.stderr)
+        sys.exit(1)
 
     if len(detected) < len(VARIANTS):
         print(f"REASON: insufficient_faulty_variant_detection ({len(detected)}/{len(VARIANTS)} detected)", file=sys.stderr)

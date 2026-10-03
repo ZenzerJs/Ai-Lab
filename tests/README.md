@@ -13,7 +13,7 @@ python scripts/filter_output.py uv run --isolated --python 3.12 --with pytest py
 ```
 
 ### Characteristics:
-- **Zero External Network**: All network sockets are intercepted (`scripts/runner.py:block_network`). Offline execution tests replay fixtures without paid API calls.
+- **Zero External Network**: Network sockets in the current Python process are intercepted (`scripts/runner.py:block_network`). Offline execution tests replay fixtures without paid API calls. (Note: evaluator subprocesses execute outside this in-process monkeypatch).
 - **Isolated SQLite Storage**: All tests utilize `tmp_path` fixtures for temporary SQLite ledgers. The baseline production ledger (`data/usage.db`) is strictly protected and never modified.
 - **Fast & Deterministic**: Runs in under 5 seconds on Python 3.12 without external services or container prerequisites.
 
@@ -25,7 +25,8 @@ python scripts/filter_output.py uv run --isolated --python 3.12 --with pytest py
 - `tests/unit/test_migration.py`: Schema migrations and backward compatibility.
 - `tests/integration/test_reporting_export.py`: Public JSON export sanitization and data consistency.
 - `tests/unit/test_hardening_phase1_2.py`: Dedicated Phase 1/2 hardening regression assertions (Findings 1–7).
-- `tests/unit/test_benchmarks.py`: First-party benchmark pack integrity, reference solutions, and tampered patches (BEN-01 to BEN-04).
+- `tests/unit/test_hardening_phase3_4.py`: Dedicated Phase 3/4 hardening regression assertions (Findings 1–8).
+- `tests/unit/test_benchmarks.py`: First-party benchmark pack integrity, reference solutions, and tampered patches (BEN-01 to BEN-04). Validates organizational filesystem separation.
 - `tests/unit/test_campaign.py`: Campaign matrix planning, repeat comparisons, cache stratification, and reporting (REP-01 to REP-10).
 
 ---

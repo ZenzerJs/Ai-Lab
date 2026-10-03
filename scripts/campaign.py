@@ -97,6 +97,8 @@ class CampaignSlot:
     arm: str
     planned_order: int
     cache_condition: str = "cold"
+    intended_cache_condition: str = "cold"
+    observed_cache_condition: str = "unknown"
     model: str = "gemini-2.5-pro"
     model_settings: Dict[str, Any] = field(default_factory=lambda: {"temperature": 0.0, "top_p": 1.0})
     resource_budget: Dict[str, Any] = field(default_factory=lambda: {
@@ -126,6 +128,12 @@ class CampaignSlot:
     error_message: Optional[str] = None
     notes: Optional[str] = None
 
+    def __post_init__(self):
+        if self.cache_condition and (not self.intended_cache_condition or self.intended_cache_condition == "cold"):
+            self.intended_cache_condition = self.cache_condition
+        elif self.intended_cache_condition:
+            self.cache_condition = self.intended_cache_condition
+
     def to_dict(self) -> Dict[str, Any]:
         return dataclasses.asdict(self)
 
@@ -142,6 +150,8 @@ class CampaignSlot:
             "campaign_id": self.campaign_id,
             "planned_order": self.planned_order,
             "cache_condition": self.cache_condition,
+            "intended_cache_condition": self.intended_cache_condition,
+            "observed_cache_condition": self.observed_cache_condition,
         }
         if self.notes:
             notes_dict["user_notes"] = self.notes
@@ -189,8 +199,8 @@ class CampaignManifest:
     manifest_hash: str = ""
 
     def __post_init__(self):
-        if not self.manifest_hash:
-            self.manifest_hash = self.compute_manifest_hash()
+        # Finding 4: Do NOT auto-compute a hash if missing when loading a manifest
+        pass
 
     def compute_manifest_hash(self) -> str:
         """Compute SHA-256 integrity hash of the scheduled matrix plan."""
@@ -223,6 +233,8 @@ class CampaignManifest:
 
     def verify_integrity(self) -> bool:
         """Verify that the manifest plan has not been tampered with."""
+        if not self.manifest_hash:
+            return False
         return self.compute_manifest_hash() == self.manifest_hash
 
     def to_dict(self) -> Dict[str, Any]:
@@ -375,6 +387,8 @@ def plan_campaign(
                         arm=arm_name,
                         planned_order=planned_order_seq,
                         cache_condition=cond,
+                        intended_cache_condition=cond,
+                        observed_cache_condition="unknown",
                         model=model,
                         model_settings=copy.deepcopy(default_settings),
                         resource_budget=copy.deepcopy(default_budget),
@@ -394,6 +408,7 @@ def plan_campaign(
         cache_conditions=active_cache_conds,
         slots=slots,
     )
+    manifest.manifest_hash = manifest.compute_manifest_hash()
     return manifest
 
 
@@ -415,6 +430,7 @@ def simulate_slot_execution(
     num_turns: int = 3,
     error_message: Optional[str] = None,
     exclusion_reasons: Optional[List[str]] = None,
+    observed_cache_condition: Optional[str] = None,
 ) -> CampaignSlot:
     """
     Update a slot with simulated execution outcome without live network calls (REP-02).
@@ -426,6 +442,8 @@ def simulate_slot_execution(
     slot.num_turns = num_turns
     slot.error_message = error_message
     slot.exclusion_reasons = list(exclusion_reasons or [])
+    if observed_cache_condition is not None:
+        slot.observed_cache_condition = observed_cache_condition
 
     if outcome == "unexecuted":
         slot.verification_status = "not_run"
@@ -536,9 +554,9 @@ def execute_campaign_mock(
 # Campaign Report Generator (REP-02 to REP-10)
 # ---------------------------------------------------------------------------
 
-def _is_slot_cost_eligible(slot: CampaignSlot) -> bool:
-    """Determine if a slot qualifies for cost and token measurement."""
-    if slot.status != "completed":
+def _slot_has_valid_cost(slot: CampaignSlot) -> bool:
+    """Determine if an executed slot has complete, usable token and cost data (Finding 3)."""
+    if slot.status not in ("completed", "failed", "timed_out", "interrupted"):
         return False
     if slot.input_tokens is None or slot.output_tokens is None:
         return False
@@ -552,17 +570,43 @@ def _is_slot_cost_eligible(slot: CampaignSlot) -> bool:
     return True
 
 
+def _evaluate_slot_eligibility(slot: CampaignSlot, capture_policy: str = "approved") -> Dict[str, Any]:
+    """Evaluate slot through shared ledger eligibility rules (Finding 1)."""
+    run_dict = slot.to_ledger_run()
+    return ledger.evaluate_run_eligibility(run_dict, capture_policy=capture_policy)
+
+
+def _is_slot_empirical_measured(slot: CampaignSlot, capture_policy: str = "approved") -> bool:
+    """Determine if a slot qualifies as an empirical measured run under shared ledger rules (Finding 1)."""
+    if slot.is_simulation or slot.source_kind != "live":
+        return False
+    elig = _evaluate_slot_eligibility(slot, capture_policy=capture_policy)
+    return bool(elig.get("is_measurement_eligible") and elig.get("category") == "measured")
+
+
+def _is_slot_cost_eligible(slot: CampaignSlot) -> bool:
+    """Determine if a completed slot qualifies for cost and token measurement."""
+    if slot.status != "completed":
+        return False
+    return _slot_has_valid_cost(slot)
+
+
 def _compute_arm_metrics(arm_slots: List[CampaignSlot]) -> Dict[str, Any]:
-    """Compute decoupled correctness and cost metrics for a single arm (REP-03, REP-06, REP-07)."""
+    """Compute decoupled correctness and cost metrics for a single arm (REP-03, REP-06, REP-07, Findings 2 & 3)."""
     n_scheduled = len(arm_slots)
     if n_scheduled == 0:
         return {
             "n_scheduled": 0,
             "n_executed": 0,
+            "executed_attempts_count": 0,
             "sample_count": 0,
             "passed_count": 0,
             "failed_count": 0,
+            "evaluator_error_count": 0,
+            "attempt_success_rate": None,
             "verified_success_rate": None,
+            "evaluated_success_rate": None,
+            "evaluation_coverage": 0.0,
             "cost_eligible_sample_count": 0,
             "cost_excluded_sample_count": 0,
             "cost_exclusion_reasons": [],
@@ -576,23 +620,30 @@ def _compute_arm_metrics(arm_slots: List[CampaignSlot]) -> Dict[str, Any]:
             "mean_duration_seconds": None,
             "mean_num_turns": None,
             "cost_per_success": None,
+            "cost_per_success_type": "undefined",
             "cost_per_success_reason": "no_attempts",
+            "has_missing_spend": False,
+            "missing_cost_sample_count": 0,
         }
 
     executed_slots = [s for s in arm_slots if s.status in ("completed", "failed", "timed_out", "interrupted")]
     n_executed = len(executed_slots)
 
-    # 1. Correctness evaluation (decoupled from cost telemetry - REP-07)
+    # 1. Correctness evaluation (decoupled from cost telemetry - REP-07, Finding 2)
     evaluated_slots = [s for s in arm_slots if s.verification_status in ("passed", "failed", "evaluator_error")]
     passed_slots = [s for s in evaluated_slots if s.verification_status == "passed"]
     failed_slots = [s for s in evaluated_slots if s.verification_status in ("failed", "evaluator_error")]
+    evaluator_error_slots = [s for s in evaluated_slots if s.verification_status == "evaluator_error"]
 
-    verified_success_rate = (len(passed_slots) / len(evaluated_slots)) if evaluated_slots else None
+    attempt_success_rate = (len(passed_slots) / n_executed) if n_executed > 0 else None
+    # Verified success rate divides by executed attempts per REP-02/Finding 2
+    verified_success_rate = attempt_success_rate
+    evaluated_success_rate = (len(passed_slots) / len(evaluated_slots)) if evaluated_slots else None
+    evaluation_coverage = (len(evaluated_slots) / n_executed) if n_executed > 0 else 0.0
 
     # 2. Cost completeness & eligibility (REP-07)
     cost_eligible_slots = [s for s in arm_slots if _is_slot_cost_eligible(s)]
     cost_excluded_slots = [s for s in arm_slots if not _is_slot_cost_eligible(s)]
-    cost_eligible_passed = [s for s in passed_slots if _is_slot_cost_eligible(s)]
 
     cost_exclusion_reasons = []
     for s in cost_excluded_slots:
@@ -608,7 +659,7 @@ def _compute_arm_metrics(arm_slots: List[CampaignSlot]) -> Dict[str, Any]:
             if r not in cost_exclusion_reasons:
                 cost_exclusion_reasons.append(r)
 
-    # Token & cost aggregations on eligible runs only
+    # Token & cost aggregations on eligible completed runs
     valid_costs = [s.cost_usd for s in cost_eligible_slots if s.cost_usd is not None]
     valid_inputs = [s.input_tokens for s in cost_eligible_slots if s.input_tokens is not None]
     valid_outputs = [s.output_tokens for s in cost_eligible_slots if s.output_tokens is not None]
@@ -621,26 +672,46 @@ def _compute_arm_metrics(arm_slots: List[CampaignSlot]) -> Dict[str, Any]:
     min_cost = min(valid_costs) if valid_costs else None
     max_cost = max(valid_costs) if valid_costs else None
 
-    # Cost per success (REP-06: undefined if all verified outcomes fail, never $0.00;
-    # REP-07: calculated strictly on cost-eligible successes so missing runs aren't treated as $0.00)
+    # 3. Cost per success (Findings 2 & 3):
+    # Include all known failure/timeout spend across executed attempts, and disclose missing spend
+    executed_with_cost = [s for s in executed_slots if _slot_has_valid_cost(s)]
+    executed_missing_cost = [s for s in executed_slots if not _slot_has_valid_cost(s)]
+    has_missing_spend = len(executed_missing_cost) > 0
+    missing_cost_sample_count = len(executed_missing_cost)
+
+    total_arm_spend = sum(s.cost_usd for s in executed_with_cost if s.cost_usd is not None)
+
+    cost_eligible_passed = [s for s in passed_slots if _is_slot_cost_eligible(s)]
+
     if len(passed_slots) == 0:
         cost_per_success = None
+        cost_per_success_type = "undefined"
         cost_per_success_reason = "no_successful_runs"
     elif len(cost_eligible_passed) == 0:
         cost_per_success = None
+        cost_per_success_type = "undefined"
         cost_per_success_reason = "missing_cost_data"
     else:
-        total_arm_cost = sum(valid_costs)
-        cost_per_success = total_arm_cost / len(cost_eligible_passed)
-        cost_per_success_reason = None
+        cost_per_success = total_arm_spend / len(cost_eligible_passed)
+        if has_missing_spend:
+            cost_per_success_type = "partial_observed"
+            cost_per_success_reason = "partial_cost_coverage"
+        else:
+            cost_per_success_type = "complete"
+            cost_per_success_reason = None
 
     return {
         "n_scheduled": n_scheduled,
         "n_executed": n_executed,
+        "executed_attempts_count": n_executed,
         "sample_count": n_executed,
         "passed_count": len(passed_slots),
         "failed_count": len(failed_slots),
+        "evaluator_error_count": len(evaluator_error_slots),
+        "attempt_success_rate": attempt_success_rate,
         "verified_success_rate": verified_success_rate,
+        "evaluated_success_rate": evaluated_success_rate,
+        "evaluation_coverage": evaluation_coverage,
         "cost_eligible_sample_count": len(cost_eligible_slots),
         "cost_excluded_sample_count": len(cost_excluded_slots),
         "cost_exclusion_reasons": sorted(list(set(cost_exclusion_reasons))),
@@ -654,7 +725,10 @@ def _compute_arm_metrics(arm_slots: List[CampaignSlot]) -> Dict[str, Any]:
         "mean_duration_seconds": (sum(valid_durations) / len(valid_durations)) if valid_durations else None,
         "mean_num_turns": (sum(valid_turns) / len(valid_turns)) if valid_turns else None,
         "cost_per_success": cost_per_success,
+        "cost_per_success_type": cost_per_success_type,
         "cost_per_success_reason": cost_per_success_reason,
+        "has_missing_spend": has_missing_spend,
+        "missing_cost_sample_count": missing_cost_sample_count,
     }
 
 
@@ -785,6 +859,7 @@ def _compute_savings_and_pairs(
 def _compute_single_stratum_summary(
     stratum_slots: List[CampaignSlot],
     arms: List[str],
+    capture_policy: str = "approved",
 ) -> Dict[str, Any]:
     """Compute metrics for a homogenous stratum of slots."""
     total_scheduled = len(stratum_slots)
@@ -796,9 +871,18 @@ def _compute_single_stratum_summary(
 
     total_executed = len(completed_slots) + len(failed_slots) + len(timed_out_slots) + len(interrupted_slots)
 
-    # REP-04: Honest empty state if no eligible measured runs exist
-    eligible_measured_slots = [s for s in stratum_slots if _is_slot_cost_eligible(s)]
-    has_measured_data = len(eligible_measured_slots) > 0
+    # Finding 1: Empirical measurement eligibility via shared ledger rules
+    empirical_measured_slots = [s for s in stratum_slots if _is_slot_empirical_measured(s, capture_policy=capture_policy)]
+    has_measured_data = len(empirical_measured_slots) > 0
+    is_demo_report = (not has_measured_data) and (total_executed > 0 or any(s.cost_usd is not None for s in stratum_slots))
+
+    measured_totals = None
+    if has_measured_data:
+        measured_totals = {
+            "total_cost_usd": sum(s.cost_usd for s in empirical_measured_slots if s.cost_usd is not None),
+            "total_tokens": sum(s.total_tokens for s in empirical_measured_slots if s.total_tokens is not None),
+            "measured_runs_count": len(empirical_measured_slots),
+        }
 
     # Per-arm calculations
     arms_summary: Dict[str, Any] = {}
@@ -824,15 +908,16 @@ def _compute_single_stratum_summary(
     # Savings & paired differences
     sp_res = _compute_savings_and_pairs(stratum_slots, arms_summary)
 
-    status = "completed"
+    status = "completed" if has_measured_data else ("demo_report" if is_demo_report else "no_eligible_measured_runs")
     if total_scheduled == 0:
         status = "empty"
-    elif not has_measured_data:
-        status = "no_eligible_measured_runs"
 
     return {
         "status": status,
         "has_measured_data": has_measured_data,
+        "is_demo_report": is_demo_report,
+        "measured_runs_count": len(empirical_measured_slots),
+        "measured_totals": measured_totals,
         "total_scheduled": total_scheduled,
         "total_executed": total_executed,
         "execution_coverage_pct": (total_executed / total_scheduled * 100.0) if total_scheduled > 0 else 0.0,
@@ -861,9 +946,12 @@ def generate_campaign_report(
     db_path: Optional[Path] = None,
     campaign_id: Optional[str] = None,
     pooling_method: str = "macro_average",  # "macro_average" or "micro_sum"
+    strict_manifest: bool = True,
+    capture_policy: str = "approved",
 ) -> Dict[str, Any]:
     """
     Generate comprehensive campaign report covering REP-02 through REP-10.
+    Enforces manifest integrity, schedule reconciliation, and shared ledger eligibility rules (Findings 1, 2, 3, 4).
 
     Args:
         manifest: Pre-planned campaign manifest with slots.
@@ -873,7 +961,17 @@ def generate_campaign_report(
         db_path: Optional SQLite database path.
         campaign_id: Optional campaign ID filter for database runs.
         pooling_method: 'macro_average' (unweighted average of per-task means) or 'micro_sum' (aggregate pooled sum).
+        strict_manifest: If True, enforce non-empty valid manifest_hash when manifest is supplied.
+        capture_policy: Policy for evidence validation ('approved', 'permissive', etc.).
     """
+    # Finding 4: Enforce manifest integrity validation before reporting
+    if manifest is not None:
+        if not manifest.manifest_hash:
+            if strict_manifest:
+                raise ValueError("Campaign manifest lacks a manifest_hash. Manifest integrity cannot be verified in strict mode.")
+        elif not manifest.verify_integrity():
+            raise ValueError(f"Campaign manifest integrity verification failed: manifest_hash {manifest.manifest_hash} does not match computed plan hash.")
+
     active_slots: List[CampaignSlot] = []
 
     # 1. Harvest slots
@@ -911,8 +1009,11 @@ def generate_campaign_report(
             except Exception:
                 pass
 
-        slot_id = str(parsed_notes.get("slot_id") or f"run_{r.get('id')}_{r.get('task_id')}_{r.get('arm')}")
-        cond = str(parsed_notes.get("cache_condition") or "cold")
+        slot_id = str(parsed_notes.get("slot_id") or "")
+        if not slot_id and r.get("id"):
+            slot_id = f"run_{r.get('id')}_{r.get('task_id')}_{r.get('arm')}"
+        intended_cond = str(parsed_notes.get("intended_cache_condition") or parsed_notes.get("cache_condition") or "cold")
+        observed_cond = str(parsed_notes.get("observed_cache_condition") or "unknown")
         order = int(parsed_notes.get("planned_order") or r.get("id") or 1)
 
         raw_exc = r.get("exclusion_reasons")
@@ -938,7 +1039,9 @@ def generate_campaign_report(
             repetition_index=int(r.get("run_index", 1)),
             arm=str(r.get("arm", "baseline")).lower(),
             planned_order=order,
-            cache_condition=cond,
+            cache_condition=intended_cond,
+            intended_cache_condition=intended_cond,
+            observed_cache_condition=observed_cond,
             model=str(r.get("model", "gemini-2.5-pro")),
             status=exec_st,
             execution_status=exec_st,
@@ -962,22 +1065,61 @@ def generate_campaign_report(
             notes=r.get("notes"),
         )
 
-    # 3. Reconcile database runs into active_slots or populate active_slots from all_runs
+    # 3. Reconcile database runs into active_slots (Finding 4: require explicit slot IDs, flag duplicates/unscheduled)
+    reconciliation_issues: Dict[str, Any] = {
+        "duplicate_runs": [],
+        "unscheduled_runs": [],
+        "mismatched_runs": [],
+        "has_schedule_violations": False,
+    }
+
     if active_slots and all_runs:
         slots_by_id = {s.slot_id: s for s in active_slots}
-        slots_by_tuple = {(s.task_id, s.repetition_index, s.arm, s.cache_condition): s for s in active_slots}
+        reconciled_slot_ids: Set[str] = set()
 
         for r in all_runs:
             s_candidate = _run_to_slot(r)
-            target_slot = None
-            if s_candidate.slot_id in slots_by_id:
-                target_slot = slots_by_id[s_candidate.slot_id]
-            else:
-                tup = (s_candidate.task_id, s_candidate.repetition_index, s_candidate.arm, s_candidate.cache_condition)
-                if tup in slots_by_tuple:
-                    target_slot = slots_by_tuple[tup]
+            cand_id = s_candidate.slot_id
 
-            if target_slot is not None:
+            if cand_id in slots_by_id:
+                target_slot = slots_by_id[cand_id]
+                # Validate configuration match (task, arm, repetition, model, cache condition)
+                cand_task = r.get("task_id")
+                cand_arm = str(r.get("arm", "")).lower()
+                cand_rep = int(r.get("run_index", 1))
+                cand_model = str(r.get("model", "")).lower() if r.get("model") else None
+                cand_cache = s_candidate.intended_cache_condition
+
+                is_mismatch = (
+                    cand_task != target_slot.task_id
+                    or cand_arm != target_slot.arm.lower()
+                    or cand_rep != target_slot.repetition_index
+                    or (cand_model is not None and target_slot.model and cand_model != target_slot.model.lower())
+                    or (cand_cache and target_slot.cache_condition and cand_cache != target_slot.cache_condition)
+                )
+
+                if is_mismatch:
+                    reconciliation_issues["mismatched_runs"].append({
+                        "run_id": r.get("id"),
+                        "slot_id": cand_id,
+                        "task_id": r.get("task_id"),
+                        "expected_task_id": target_slot.task_id,
+                        "model": r.get("model"),
+                        "expected_model": target_slot.model,
+                        "reason": "configuration_mismatch",
+                    })
+                    continue
+
+                if cand_id in reconciled_slot_ids:
+                    # Finding 4: Flag duplicate execution of scheduled slot
+                    reconciliation_issues["duplicate_runs"].append({
+                        "run_id": r.get("id"),
+                        "slot_id": cand_id,
+                        "reason": "duplicate_slot_execution",
+                    })
+                    continue
+
+                reconciled_slot_ids.add(cand_id)
                 target_slot.status = s_candidate.status
                 target_slot.execution_status = s_candidate.execution_status
                 target_slot.verification_status = s_candidate.verification_status
@@ -998,9 +1140,22 @@ def generate_campaign_report(
                 target_slot.evidence_ref = s_candidate.evidence_ref
                 target_slot.evidence_hash = s_candidate.evidence_hash
                 target_slot.notes = s_candidate.notes
+                target_slot.observed_cache_condition = s_candidate.observed_cache_condition
             else:
-                active_slots.append(s_candidate)
+                # Finding 4: Unscheduled run; do NOT silently append to scheduled active_slots!
+                reconciliation_issues["unscheduled_runs"].append({
+                    "run_id": r.get("id"),
+                    "slot_id": cand_id,
+                    "task_id": r.get("task_id"),
+                    "arm": r.get("arm"),
+                    "reason": "unscheduled_run",
+                })
 
+        reconciliation_issues["has_schedule_violations"] = bool(
+            reconciliation_issues["duplicate_runs"]
+            or reconciliation_issues["unscheduled_runs"]
+            or reconciliation_issues["mismatched_runs"]
+        )
     elif not active_slots and all_runs:
         for r in all_runs:
             active_slots.append(_run_to_slot(r))
@@ -1011,6 +1166,9 @@ def generate_campaign_report(
             "campaign_id": (manifest.campaign_id if manifest else (effective_cid or "empty_campaign")),
             "status": "empty",
             "has_measured_data": False,
+            "is_demo_report": False,
+            "measured_runs_count": 0,
+            "measured_totals": None,
             "total_scheduled": 0,
             "total_executed": 0,
             "execution_coverage_pct": 0.0,
@@ -1043,6 +1201,7 @@ def generate_campaign_report(
             "strata": {},
             "by_task": {},
             "all_attempts": [],
+            "reconciliation_issues": reconciliation_issues,
             "message": "No scheduled evaluation attempts or measured runs exist.",
         }
 
@@ -1058,16 +1217,16 @@ def generate_campaign_report(
     strata_reports: Dict[str, Any] = {}
     for cond in cache_conditions_present:
         c_slots = [s for s in active_slots if s.cache_condition == cond]
-        strata_reports[cond] = _compute_single_stratum_summary(c_slots, arms)
+        strata_reports[cond] = _compute_single_stratum_summary(c_slots, arms, capture_policy=capture_policy)
 
     # 4. Task-level breakdown (REP-10: Large and small tasks coexist)
     by_task: Dict[str, Any] = {}
     for tid in tasks:
         t_slots = [s for s in active_slots if s.task_id == tid]
-        by_task[tid] = _compute_single_stratum_summary(t_slots, arms)
+        by_task[tid] = _compute_single_stratum_summary(t_slots, arms, capture_policy=capture_policy)
 
     # 5. Pooled summary with explicit pooling method (REP-10)
-    overall_summary = _compute_single_stratum_summary(active_slots, arms)
+    overall_summary = _compute_single_stratum_summary(active_slots, arms, capture_policy=capture_policy)
 
     # If macro_average requested, average per-task means for pooled summary
     if pooling_method == "macro_average" and len(tasks) > 1:
@@ -1078,6 +1237,9 @@ def generate_campaign_report(
             arm_task_outputs = [by_task[t]["arms"][arm]["mean_output_tokens"] for t in tasks if by_task[t]["arms"][arm]["mean_output_tokens"] is not None]
             arm_task_totals = [by_task[t]["arms"][arm]["mean_total_tokens"] for t in tasks if by_task[t]["arms"][arm]["mean_total_tokens"] is not None]
             arm_task_successes = [by_task[t]["arms"][arm]["verified_success_rate"] for t in tasks if by_task[t]["arms"][arm]["verified_success_rate"] is not None]
+            arm_task_attempts = [by_task[t]["arms"][arm]["attempt_success_rate"] for t in tasks if by_task[t]["arms"][arm]["attempt_success_rate"] is not None]
+            arm_task_evals = [by_task[t]["arms"][arm]["evaluated_success_rate"] for t in tasks if by_task[t]["arms"][arm]["evaluated_success_rate"] is not None]
+            arm_task_covs = [by_task[t]["arms"][arm]["evaluation_coverage"] for t in tasks if by_task[t]["arms"][arm]["evaluation_coverage"] is not None]
 
             macro_arms[arm] = dict(overall_summary["arms"][arm])
             macro_arms[arm]["mean_cost_usd"] = (sum(arm_task_means) / len(arm_task_means)) if arm_task_means else None
@@ -1085,6 +1247,9 @@ def generate_campaign_report(
             macro_arms[arm]["mean_output_tokens"] = (sum(arm_task_outputs) / len(arm_task_outputs)) if arm_task_outputs else None
             macro_arms[arm]["mean_total_tokens"] = (sum(arm_task_totals) / len(arm_task_totals)) if arm_task_totals else None
             macro_arms[arm]["verified_success_rate"] = (sum(arm_task_successes) / len(arm_task_successes)) if arm_task_successes else None
+            macro_arms[arm]["attempt_success_rate"] = (sum(arm_task_attempts) / len(arm_task_attempts)) if arm_task_attempts else None
+            macro_arms[arm]["evaluated_success_rate"] = (sum(arm_task_evals) / len(arm_task_evals)) if arm_task_evals else None
+            macro_arms[arm]["evaluation_coverage"] = (sum(arm_task_covs) / len(arm_task_covs)) if arm_task_covs else None
 
         overall_summary["arms"] = macro_arms
         # Recalculate savings under macro averages
@@ -1119,6 +1284,9 @@ def generate_campaign_report(
     return {
         "campaign_id": manifest.campaign_id if manifest else (effective_cid or "ad_hoc_campaign"),
         "has_measured_data": overall_summary["has_measured_data"],
+        "is_demo_report": overall_summary.get("is_demo_report", False),
+        "measured_runs_count": overall_summary.get("measured_runs_count", 0),
+        "measured_totals": overall_summary.get("measured_totals"),
         "status": overall_summary["status"],
         "total_scheduled": overall_summary["total_scheduled"],
         "total_executed": overall_summary["total_executed"],
@@ -1146,6 +1314,7 @@ def generate_campaign_report(
         "strata": strata_reports,
         "by_task": by_task,
         "all_attempts": [s.to_dict() for s in active_slots],
+        "reconciliation_issues": reconciliation_issues,
     }
 
 
@@ -1159,7 +1328,7 @@ def main() -> None:
 
     # Command: plan
     plan_parser = subparsers.add_parser("plan", help="Generate immutable campaign evaluation matrix (REP-01)")
-    plan_parser.add_argument("--tasks", required=True, help="Comma-separated task IDs (e.g. BENCH-01,BENCH-02)")
+    plan_parser.add_argument("--tasks", required=True, help="Comma-separated task IDs (e.g. BENCH-001,BENCH-002)")
     plan_parser.add_argument("--arms", default="baseline,icm", help="Comma-separated arms (default: baseline,icm)")
     plan_parser.add_argument("--repetitions", type=int, default=1, help="Repetitions per task-arm slot")
     plan_parser.add_argument("--seed", type=int, default=42, help="Seed for randomized arm ordering")

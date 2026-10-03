@@ -24,6 +24,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import ledger
+import campaign
 
 # Ensure UTF-8 output encoding
 if hasattr(sys.stdout, "reconfigure"):
@@ -201,6 +202,9 @@ def build_data_payload(
             if r.get("cost_usd") is None:
                 r["cost_usd"] = cost_info["cost_usd"]
 
+            r["source_kind"] = r.get("source_kind") or "unknown"
+            r["evidence_status"] = r.get("evidence_status") or "unverified"
+
             elig = ledger.evaluate_run_eligibility(r, capture_policy=capture_policy)
             r["is_eligible"] = elig["is_eligible"]
             r["is_comparison_eligible"] = elig["is_comparison_eligible"]
@@ -276,10 +280,29 @@ def build_data_payload(
             })
 
         has_data = bool(cum.get("has_measured_data", False))
+        is_demo_report = bool(cum.get("is_demo_report", False))
+        if not is_demo_report and not has_data and len(processed_runs) > 0:
+            is_demo_report = True
+
+        # Generate shared campaign report if possible (EXP-01)
+        campaign_rep = None
+        try:
+            campaign_rep = campaign.generate_campaign_report(
+                conn=conn,
+                db_path=db_path,
+                strict_manifest=False,
+                capture_policy=capture_policy,
+            )
+            if campaign_rep and campaign_rep.get("is_demo_report"):
+                is_demo_report = True
+        except Exception:
+            campaign_rep = None
 
         payload = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "has_data": has_data,
+            "is_demo_report": is_demo_report,
+            "is_simulation": False,
             "cumulative": cum,
             "tasks": cum.get("tasks", []),
             "runs": processed_runs,
@@ -287,6 +310,7 @@ def build_data_payload(
             "pricing": pricing_rows,
             "cascade": cascade,
             "operational": build_operational_block(),
+            "campaign": campaign_rep,
         }
         return sanitize_export_payload(payload)
     finally:
@@ -324,7 +348,15 @@ def main():
             placeholder = {
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "has_data": False,
-                "cumulative": {},
+                "is_demo_report": False,
+                "is_simulation": False,
+                "cumulative": {
+                    "tasks_evaluated": 0,
+                    "total_runs": 0,
+                    "has_measured_data": False,
+                    "is_demo_report": False,
+                    "tasks": [],
+                },
                 "tasks": [],
                 "runs": [],
                 "timeline": [],

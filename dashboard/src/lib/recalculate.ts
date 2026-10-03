@@ -23,49 +23,78 @@ export function deriveDataForModel(
   };
 
   // 1. Recalculate raw runs
-  const updatedRuns: RunRecord[] = data.runs.map((r) => ({
-    ...r,
-    model: selectedModel,
-    cost_usd: computeCost(r.input_tokens, r.cache_read_tokens, r.output_tokens),
-  }));
+  const updatedRuns: RunRecord[] = data.runs.map((r) => {
+    const isCostUnavailable =
+      r.cost_status === 'incomplete' ||
+      r.cost_status === 'unavailable' ||
+      r.input_tokens === null ||
+      r.output_tokens === null ||
+      r.cost_usd === null;
+
+    return {
+      ...r,
+      model: selectedModel,
+      is_simulation: true,
+      cost_usd: isCostUnavailable
+        ? null
+        : computeCost(r.input_tokens, r.cache_read_tokens, r.output_tokens),
+      cost_status: isCostUnavailable ? r.cost_status : 'simulation',
+    };
+  });
 
   // 2. Recalculate tasks
   const updatedTasks: TaskSummaryItem[] = data.tasks.map((t) => {
     const taskRuns = updatedRuns.filter((r) => r.task_id === t.task_id);
-    const bRuns = taskRuns.filter((r) => r.arm.toLowerCase() === 'baseline');
-    const iRuns = taskRuns.filter((r) => r.arm.toLowerCase() === 'icm');
 
     const updateArm = (armRuns: RunRecord[], prevArm?: ArmStats): ArmStats | undefined => {
       if (!prevArm || armRuns.length === 0) return prevArm;
-      const costs = armRuns.map((r) => r.cost_usd);
+      const qualifyingCosts = armRuns
+        .filter((r) => r.is_comparison_eligible && r.cost_usd !== null)
+        .map((r) => r.cost_usd as number);
       return {
         ...prevArm,
         model: selectedModel,
-        mean_cost_usd: costs.reduce((a, b) => a + b, 0) / costs.length,
-        min_cost_usd: Math.min(...costs),
-        max_cost_usd: Math.max(...costs),
+        mean_cost_usd: qualifyingCosts.length > 0 ? qualifyingCosts.reduce((a, b) => a + b, 0) / qualifyingCosts.length : null,
+        min_cost_usd: qualifyingCosts.length > 0 ? Math.min(...qualifyingCosts) : null,
+        max_cost_usd: qualifyingCosts.length > 0 ? Math.max(...qualifyingCosts) : null,
         runs: armRuns,
       };
     };
 
-    const newBaseline = updateArm(bRuns, t.arms.baseline);
-    const newIcm = updateArm(iRuns, t.arms.icm);
+    const updatedArms: Record<string, ArmStats | undefined> = {};
+    for (const [armName, armStats] of Object.entries(t.arms)) {
+      if (!armStats) continue;
+      const armRuns = taskRuns.filter((r) => r.arm.toLowerCase() === armName.toLowerCase());
+      updatedArms[armName] = updateArm(armRuns, armStats);
+    }
+
+    const baselineArm = updatedArms.baseline;
+    const govArmName =
+      'icm-subagents' in updatedArms
+        ? 'icm-subagents'
+        : 'icm' in updatedArms
+        ? 'icm'
+        : 'delegation' in updatedArms
+        ? 'delegation'
+        : Object.keys(updatedArms).find((k) => k !== 'baseline');
+    const govArm = govArmName ? updatedArms[govArmName] : undefined;
 
     let newSavings = t.savings;
-    if (newBaseline && newIcm) {
-      const costDiff = newBaseline.mean_cost_usd - newIcm.mean_cost_usd;
+    if (baselineArm && govArm && baselineArm.mean_cost_usd !== null && govArm.mean_cost_usd !== null) {
+      const costDiff = baselineArm.mean_cost_usd - govArm.mean_cost_usd;
       const costPct =
-        newBaseline.mean_cost_usd > 0
-          ? (costDiff / newBaseline.mean_cost_usd) * 100
-          : 0;
+        baselineArm.mean_cost_usd > 0
+          ? (costDiff / baselineArm.mean_cost_usd) * 100
+          : null;
 
-      const baseTokens = newBaseline.mean_total_tokens;
-      const icmTokens = newIcm.mean_total_tokens;
+      const baseTokens = baselineArm.mean_total_tokens;
+      const icmTokens = govArm.mean_total_tokens;
       const costPerMtokBase =
-        baseTokens > 0 ? (newBaseline.mean_cost_usd / baseTokens) * 1_000_000 : 0;
+        baseTokens && baseTokens > 0 ? (baselineArm.mean_cost_usd / baseTokens) * 1_000_000 : null;
       const costPerMtokIcm =
-        icmTokens > 0 ? (newIcm.mean_cost_usd / icmTokens) * 1_000_000 : 0;
-      const savingsPerMtok = costPerMtokBase - costPerMtokIcm;
+        icmTokens && icmTokens > 0 ? (govArm.mean_cost_usd / icmTokens) * 1_000_000 : null;
+      const savingsPerMtok =
+        costPerMtokBase !== null && costPerMtokIcm !== null ? costPerMtokBase - costPerMtokIcm : null;
 
       newSavings = {
         ...t.savings!,
@@ -74,17 +103,17 @@ export function deriveDataForModel(
         cost_per_mtok_baseline: costPerMtokBase,
         cost_per_mtok_icm: costPerMtokIcm,
         savings_usd_per_mtok: savingsPerMtok,
-        projected_savings_10m: savingsPerMtok * 10,
-        projected_savings_100m: savingsPerMtok * 100,
+        projected_savings_10m: savingsPerMtok !== null ? savingsPerMtok * 10 : null,
+        projected_savings_100m: savingsPerMtok !== null ? savingsPerMtok * 100 : null,
       };
     }
 
     return {
       ...t,
+      is_simulation: true,
       arms: {
         ...t.arms,
-        baseline: newBaseline,
-        icm: newIcm,
+        ...updatedArms,
       },
       savings: newSavings,
     };
@@ -97,9 +126,10 @@ export function deriveDataForModel(
   let totalIcmTokens = 0;
   let totalRunsCount = 0;
 
-  // Group runs by task and run_index
+  // Group runs by task and run_index (only eligible comparison runs)
   const taskPairs: Record<string, Record<number, Record<string, RunRecord>>> = {};
   for (const r of updatedRuns) {
+    if (!r.is_comparison_eligible || r.cost_usd === null) continue;
     const tid = r.task_id;
     const ridx = r.run_index;
     const arm = r.arm.toLowerCase();
@@ -112,21 +142,35 @@ export function deriveDataForModel(
   let runningSaved = 0;
   let step = 1;
 
+  let hasValidPairs = false;
+
   for (const tid of Object.keys(taskPairs).sort()) {
     const indexes = taskPairs[tid];
     for (const ridxStr of Object.keys(indexes).sort((a, b) => Number(a) - Number(b))) {
       const ridx = Number(ridxStr);
       const arms = indexes[ridx];
-      if (arms.baseline && arms.icm) {
-        const bCost = arms.baseline.cost_usd;
-        const iCost = arms.icm.cost_usd;
+      const bRun = arms.baseline;
+      const gArmName =
+        'icm-subagents' in arms
+          ? 'icm-subagents'
+          : 'icm' in arms
+          ? 'icm'
+          : 'delegation' in arms
+          ? 'delegation'
+          : Object.keys(arms).find((k) => k !== 'baseline');
+      const gRun = gArmName ? arms[gArmName] : undefined;
+
+      if (bRun && gRun && bRun.cost_usd !== null && gRun.cost_usd !== null) {
+        hasValidPairs = true;
+        const bCost = bRun.cost_usd;
+        const iCost = gRun.cost_usd;
         const delta = bCost - iCost;
         runningSaved += delta;
 
         totalBaselineCost += bCost;
         totalIcmCost += iCost;
-        totalBaselineTokens += arms.baseline.total_tokens;
-        totalIcmTokens += arms.icm.total_tokens;
+        totalBaselineTokens += bRun.total_tokens || 0;
+        totalIcmTokens += gRun.total_tokens || 0;
         totalRunsCount += 2;
 
         updatedTimeline.push({
@@ -134,7 +178,8 @@ export function deriveDataForModel(
           label: `${tid} Run ${ridx}`,
           task_id: tid,
           run_index: ridx,
-          timestamp: arms.icm.timestamp,
+          governed_arm: gArmName,
+          timestamp: gRun.timestamp,
           baseline_cost_usd: bCost,
           icm_cost_usd: iCost,
           delta_saved_usd: delta,
@@ -145,36 +190,41 @@ export function deriveDataForModel(
     }
   }
 
-  const measuredSavings = totalBaselineCost - totalIcmCost;
+  const measuredSavings = hasValidPairs ? totalBaselineCost - totalIcmCost : null;
   const savingsPct =
-    totalBaselineCost > 0 ? (measuredSavings / totalBaselineCost) * 100 : 0;
+    hasValidPairs && totalBaselineCost > 0
+      ? (measuredSavings! / totalBaselineCost) * 100
+      : null;
   const costPerMtokBase =
-    totalBaselineTokens > 0
+    hasValidPairs && totalBaselineTokens > 0
       ? (totalBaselineCost / totalBaselineTokens) * 1_000_000
-      : 0;
+      : null;
   const costPerMtokIcm =
-    totalIcmTokens > 0 ? (totalIcmCost / totalIcmTokens) * 1_000_000 : 0;
-  const savingsPerMtok = costPerMtokBase - costPerMtokIcm;
+    hasValidPairs && totalIcmTokens > 0 ? (totalIcmCost / totalIcmTokens) * 1_000_000 : null;
+  const savingsPerMtok =
+    costPerMtokBase !== null && costPerMtokIcm !== null ? costPerMtokBase - costPerMtokIcm : null;
 
   const updatedCumulative: CumulativeSummary = {
     ...data.cumulative,
+    is_simulation: true,
     total_runs: totalRunsCount,
-    total_baseline_cost_usd: totalBaselineCost,
-    total_icm_cost_usd: totalIcmCost,
-    total_baseline_tokens: totalBaselineTokens,
-    total_icm_tokens: totalIcmTokens,
+    total_baseline_cost_usd: hasValidPairs ? totalBaselineCost : null,
+    total_icm_cost_usd: hasValidPairs ? totalIcmCost : null,
+    total_baseline_tokens: hasValidPairs ? totalBaselineTokens : null,
+    total_icm_tokens: hasValidPairs ? totalIcmTokens : null,
     cumulative_savings_usd: measuredSavings,
     cumulative_savings_percent: savingsPct,
     cost_per_mtok_baseline: costPerMtokBase,
     cost_per_mtok_icm: costPerMtokIcm,
     savings_usd_per_mtok: savingsPerMtok,
-    projected_savings_10m: savingsPerMtok * 10,
-    projected_savings_100m: savingsPerMtok * 100,
+    projected_savings_10m: savingsPerMtok !== null ? savingsPerMtok * 10 : null,
+    projected_savings_100m: savingsPerMtok !== null ? savingsPerMtok * 100 : null,
     tasks: updatedTasks,
   };
 
   return {
     ...data,
+    is_simulation: true,
     runs: updatedRuns,
     tasks: updatedTasks,
     timeline: updatedTimeline,

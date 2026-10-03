@@ -92,10 +92,28 @@ export const Header: React.FC<HeaderProps> = ({
             <p className="text-[12px] text-muted-foreground font-mono mt-1 flex items-center flex-wrap gap-1.5">
               <span>Interpretable Context Methodology (ICM) Token &amp; Cache Efficiency Engine</span>
               <span className="hidden sm:inline">•</span>
-              <span className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-sage/10 text-sage border border-sage/30 text-[11px]">
-                <span className="w-1.5 h-1.5 rounded-full bg-sage" />
-                Measured Actuals (Zero Hallucinated Projections)
-              </span>
+              {data?.is_demo_report || !data?.cumulative?.has_measured_data ? (
+                <span
+                  data-testid="demo-fixture-badge"
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[11px] font-semibold"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  DEMO / FIXTURE DATA (Empirical Headlines Suppressed)
+                </span>
+              ) : data?.is_simulation ? (
+                <span
+                  data-testid="simulation-active-badge"
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/30 text-[11px] font-semibold"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                  SIMULATION ACTIVE
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded bg-sage/10 text-sage border border-sage/30 text-[11px]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-sage" />
+                  Measured Actuals (Zero Hallucinated Projections)
+                </span>
+              )}
             </p>
           </div>
         </div>

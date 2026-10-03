@@ -25,38 +25,53 @@ export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({
   timeline,
   scaleMode,
 }) => {
-  const pctSaved = cumulative.cumulative_savings_percent || 0;
+  const hasMeasured = Boolean(cumulative.has_measured_data);
+  const isSimulation = Boolean(cumulative.is_simulation);
+  const isDemo = Boolean(cumulative.is_demo_report);
+
+  const pctSaved = hasMeasured ? cumulative.cumulative_savings_percent : null;
   const totalRuns = cumulative.total_runs || 0;
 
   // Scale calculations
-  let scaleLabel = 'Raw Single-Run Expenditures';
-  let badgeText = 'Strict Actuals • Zero Projections';
-  let totalSaved = cumulative.cumulative_savings_usd || 0;
-  let baselineCost = cumulative.total_baseline_cost_usd || 0;
-  let icmCost = cumulative.total_icm_cost_usd || 0;
+  let scaleLabel = isSimulation
+    ? 'Simulated Single-Run Model Price Projections'
+    : 'Raw Single-Run Measured Expenditures';
+  let badgeText = isSimulation
+    ? 'SIMULATION · Rate-Card Projections'
+    : isDemo
+    ? 'DEMO / FIXTURE DATA'
+    : hasMeasured
+    ? 'Strict Actuals • Zero Projections'
+    : 'No Eligible Measured Runs';
 
-  if (scaleMode === '1m') {
-    scaleLabel = 'Normalized per 1,000,000 Tokens (1 MTok)';
-    badgeText = 'Scaled to 1M Tokens (1 MTok)';
-    totalSaved = cumulative.savings_usd_per_mtok ?? totalSaved;
-    baselineCost = cumulative.cost_per_mtok_baseline ?? baselineCost;
-    icmCost = cumulative.cost_per_mtok_icm ?? icmCost;
-  } else if (scaleMode === '10m') {
-    scaleLabel = 'Projected at 10M Tokens (Engineering Team Volume)';
-    badgeText = 'Projected @ 10M Tokens';
-    totalSaved = (cumulative.savings_usd_per_mtok ?? 0) * 10;
-    baselineCost = (cumulative.cost_per_mtok_baseline ?? 0) * 10;
-    icmCost = (cumulative.cost_per_mtok_icm ?? 0) * 10;
-  } else if (scaleMode === '100m') {
-    scaleLabel = 'Projected at 100M Tokens (Enterprise Monthly Volume)';
-    badgeText = 'Projected @ 100M Tokens';
-    totalSaved = (cumulative.savings_usd_per_mtok ?? 0) * 100;
-    baselineCost = (cumulative.cost_per_mtok_baseline ?? 0) * 100;
-    icmCost = (cumulative.cost_per_mtok_icm ?? 0) * 100;
+  let totalSaved: number | null = hasMeasured ? (cumulative.cumulative_savings_usd ?? null) : null;
+  let baselineCost: number | null = hasMeasured ? (cumulative.total_baseline_cost_usd ?? null) : null;
+  let icmCost: number | null = hasMeasured ? (cumulative.total_icm_cost_usd ?? null) : null;
+
+  if (hasMeasured) {
+    if (scaleMode === '1m') {
+      scaleLabel = 'Normalized per 1,000,000 Tokens (1 MTok)';
+      badgeText = isSimulation ? 'SIMULATION @ 1M Tokens' : 'Scaled to 1M Tokens (1 MTok)';
+      totalSaved = cumulative.savings_usd_per_mtok ?? totalSaved;
+      baselineCost = cumulative.cost_per_mtok_baseline ?? baselineCost;
+      icmCost = cumulative.cost_per_mtok_icm ?? icmCost;
+    } else if (scaleMode === '10m') {
+      scaleLabel = 'Projected at 10M Tokens (Engineering Team Volume)';
+      badgeText = isSimulation ? 'SIMULATION @ 10M Tokens' : 'Projected @ 10M Tokens';
+      totalSaved = cumulative.savings_usd_per_mtok !== null && cumulative.savings_usd_per_mtok !== undefined ? cumulative.savings_usd_per_mtok * 10 : null;
+      baselineCost = cumulative.cost_per_mtok_baseline !== null && cumulative.cost_per_mtok_baseline !== undefined ? cumulative.cost_per_mtok_baseline * 10 : null;
+      icmCost = cumulative.cost_per_mtok_icm !== null && cumulative.cost_per_mtok_icm !== undefined ? cumulative.cost_per_mtok_icm * 10 : null;
+    } else if (scaleMode === '100m') {
+      scaleLabel = 'Projected at 100M Tokens (Enterprise Monthly Volume)';
+      badgeText = isSimulation ? 'SIMULATION @ 100M Tokens' : 'Projected @ 100M Tokens';
+      totalSaved = cumulative.savings_usd_per_mtok !== null && cumulative.savings_usd_per_mtok !== undefined ? cumulative.savings_usd_per_mtok * 100 : null;
+      baselineCost = cumulative.cost_per_mtok_baseline !== null && cumulative.cost_per_mtok_baseline !== undefined ? cumulative.cost_per_mtok_baseline * 100 : null;
+      icmCost = cumulative.cost_per_mtok_icm !== null && cumulative.cost_per_mtok_icm !== undefined ? cumulative.cost_per_mtok_icm * 100 : null;
+    }
   }
 
   // Map timeline to SVG coordinates (monotone rise like prototype)
-  const points = timeline.map((p) => Math.max(0, p.cumulative_savings_usd));
+  const points = hasMeasured ? timeline.map((p) => Math.max(0, p.cumulative_savings_usd)) : [];
   const hasCurve = points.length >= 2;
   const maxY = Math.max(1e-9, ...points);
   const stepX =
@@ -88,6 +103,16 @@ export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({
             <Badge variant="secondary" className="font-normal text-[11px]">
               Total n={totalRuns} runs
             </Badge>
+            {isSimulation && (
+              <Badge className="bg-purple-500/20 text-purple-300 border-purple-500/40 text-[10px] font-mono">
+                SIMULATION
+              </Badge>
+            )}
+            {isDemo && (
+              <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/40 text-[10px] font-mono">
+                DEMO / FIXTURE DATA
+              </Badge>
+            )}
           </div>
           <CardDescription>
             {scaleLabel} — chronological execution trace across successive runs.
@@ -95,7 +120,7 @@ export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({
         </div>
 
         <Badge
-          variant={scaleMode === '1x' ? 'warning' : 'default'}
+          variant={isSimulation ? 'default' : isDemo ? 'destructive' : scaleMode === '1x' ? 'warning' : 'default'}
           className="self-start sm:self-auto flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono font-medium"
         >
           {scaleMode === '1x' ? <ShieldAlert className="size-3.5" /> : <Layers className="size-3.5" />}
@@ -111,12 +136,18 @@ export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({
               <span className="w-1.5 h-1.5 rounded-full bg-sage inline-block" /> Net USD Saved
             </span>
             <div className="text-2xl font-bold font-mono tabular-nums text-sage tracking-tight mt-1">
-              <RollingCounter target={totalSaved} decimals={totalSaved >= 1 ? 2 : 4} prefix="$" replayKey={totalSaved} />
+              {totalSaved !== null ? (
+                <RollingCounter target={totalSaved} decimals={totalSaved >= 1 ? 2 : 4} prefix="$" replayKey={totalSaved} />
+              ) : (
+                <span>—</span>
+              )}
             </div>
             <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-sage/10 text-sage border border-sage/20 font-mono tabular-nums self-start">
-              {pctSaved >= 0
-                ? `${pctSaved.toFixed(1)}% Saved`
-                : `${Math.abs(pctSaved).toFixed(1)}% Increase`}
+              {pctSaved !== null
+                ? pctSaved >= 0
+                  ? `${pctSaved.toFixed(1)}% Saved`
+                  : `${Math.abs(pctSaved).toFixed(1)}% Increase`
+                : 'Not Measured'}
             </span>
           </div>
 
@@ -125,9 +156,15 @@ export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({
               <span className="w-1.5 h-1.5 rounded-full bg-baseline inline-block" /> Baseline Cost
             </span>
             <div className="text-2xl font-bold font-mono tabular-nums text-baseline tracking-tight mt-1">
-              <RollingCounter target={baselineCost} decimals={baselineCost >= 1 ? 2 : 4} prefix="$" replayKey={baselineCost} />
+              {baselineCost !== null ? (
+                <RollingCounter target={baselineCost} decimals={baselineCost >= 1 ? 2 : 4} prefix="$" replayKey={baselineCost} />
+              ) : (
+                <span>—</span>
+              )}
             </div>
-            <span className="text-[10px] text-muted-foreground">Unconstrained context</span>
+            <span className="text-[10px] text-muted-foreground">
+              {hasMeasured ? 'Unconstrained context' : 'No eligible runs'}
+            </span>
           </div>
 
           <div className="p-3 rounded-lg bg-background/60 border border-surface-border flex flex-col justify-between">
@@ -135,9 +172,15 @@ export const CumulativeSavings: React.FC<CumulativeSavingsProps> = ({
               <span className="w-1.5 h-1.5 rounded-full bg-primary-light inline-block" /> ICM Pipeline Cost
             </span>
             <div className="text-2xl font-bold font-mono tabular-nums text-primary-light tracking-tight mt-1">
-              <RollingCounter target={icmCost} decimals={icmCost >= 1 ? 2 : 4} prefix="$" replayKey={icmCost} />
+              {icmCost !== null ? (
+                <RollingCounter target={icmCost} decimals={icmCost >= 1 ? 2 : 4} prefix="$" replayKey={icmCost} />
+              ) : (
+                <span>—</span>
+              )}
             </div>
-            <span className="text-[10px] text-muted-foreground">Byte-stable caching + AST slicing</span>
+            <span className="text-[10px] text-muted-foreground">
+              {hasMeasured ? 'Byte-stable caching + AST slicing' : 'No eligible runs'}
+            </span>
           </div>
 
           <div className="p-3 rounded-lg bg-background/60 border border-surface-border flex flex-col justify-between">

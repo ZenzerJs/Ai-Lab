@@ -25,14 +25,14 @@ Before any live model execution, the operator must obtain signed user authorizat
 
 ```text
 I approve only this live smoke campaign:
-- Task ID/version: [e.g. BENCH-01, version 1.0.0]
+- Task ID/version: [e.g. BENCH-001, version 1.0.0]
 - Arms: [e.g. baseline, icm]
 - Attempts per arm: [e.g. 1]
 - Model/provider and available version/settings: [e.g. gemini-2.5-pro, temp=0.0]
 - Execution mode: manual/automated
 - Maximum total budget and currency: [e.g. $1.00 USD]
 - Maximum runtime per attempt: [e.g. 300 seconds]
-- Budget enforcement capability and limitations: [Hard stop at $1.00 via process monitor]
+- Budget enforcement capability and limitations: [Planner records resource_budget; hard stops enforced via external execution wrapper / stop conditions]
 - Allowed telemetry capture and storage: [Local SQLite tmp_db only]
 - Human assistance policy: [Zero human intervention during execution]
 - Retry policy: [No retries on failure; record failure as-is]
@@ -51,7 +51,7 @@ Before initiating execution:
    ```
 3. **Plan Manifest Predeclaration**: Generate and inspect the immutable campaign plan:
    ```bash
-   python scripts/campaign.py plan --tasks BENCH-01 --arms baseline,icm --repetitions 1 --seed 42 --output live_plan.json
+   python scripts/campaign.py plan --tasks BENCH-001 --arms baseline,icm --repetitions 1 --seed 42 --output live_plan.json
    ```
    Confirm slot count, randomized order, and resource budgets in `live_plan.json`.
 4. **Environment Isolation**: Ensure no live API keys or credentials are leaked into untrusted workspaces (`sanitize_subprocess_env`).

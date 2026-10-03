@@ -15,14 +15,14 @@ Before any live model execution, fill and obtain approval for this template:
 
 ```text
 I approve only this live smoke campaign:
-- Task ID/version: [e.g. BENCH-01, version 1.0.0]
+- Task ID/version: [e.g. BENCH-001, version 1.0.0]
 - Arms: [e.g. baseline, icm]
 - Attempts per arm: [e.g. 1]
 - Model/provider and available version/settings: [e.g. gemini-2.5-pro, temperature=0.0, top_p=1.0]
 - Execution mode: manual/automated
 - Maximum total budget and currency: [e.g. $1.00 USD]
 - Maximum runtime per attempt: [e.g. 300 seconds]
-- Budget enforcement capability and limitations: [Hard stop at $1.00 via process monitor]
+- Budget enforcement capability and limitations: [Planner records resource_budget; hard stops enforced via external execution wrapper / process stop conditions]
 - Allowed telemetry capture and storage: [Local SQLite tmp_db only]
 - Human assistance policy: [Zero human intervention during execution]
 - Retry policy: [No retries on failure; record failure as-is]
@@ -40,7 +40,7 @@ I approve only this live smoke campaign:
    ```
 3. **Plan Manifest Predeclaration**: Generate the campaign manifest ahead of time with a fixed random seed:
    ```bash
-   python scripts/campaign.py plan --tasks BENCH-01 --arms baseline,icm --repetitions 1 --seed 42 --output live_manifest.json
+   python scripts/campaign.py plan --tasks BENCH-001 --arms baseline,icm --repetitions 1 --seed 42 --output live_manifest.json
    ```
    Inspect the manifest to confirm scheduled attempts, randomized arm order, and resource budgets.
 4. **Environment Sanitization**: Use `runner.sanitize_subprocess_env` to avoid credential leakage.
@@ -61,7 +61,7 @@ I approve only this live smoke campaign:
 3. **Protected Grading**:
    Grade the workspace outputs using `runner.ProtectedEvaluator` located outside the workspace:
    ```python
-   evaluator = runner.ProtectedEvaluator(Path("benchmarks/bench_01/evaluator.py"))
+   evaluator = runner.ProtectedEvaluator(Path("benchmarks/BENCH-001/evaluator/evaluator.py"))
    result = evaluator.evaluate_workspace(ws.path)
    ```
 

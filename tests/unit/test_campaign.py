@@ -531,7 +531,8 @@ def test_end_to_end_mock_campaign_with_ledger(tmp_path: Path):
     assert report["total_scheduled"] == 4
     assert report["total_executed"] == 4
     assert report["execution_coverage_pct"] == 100.0
-    assert report["has_measured_data"] is True
+    assert report["has_measured_data"] is False
+    assert report["is_demo_report"] is True
     assert "baseline" in report["pooled_summary"]["arms"]
     assert "icm" in report["pooled_summary"]["arms"]
 
@@ -570,7 +571,8 @@ def test_manifest_db_reconciliation_fresh_manifest(tmp_path: Path):
     assert report["total_scheduled"] == 2
     assert report["total_executed"] == 2
     assert report["execution_coverage_pct"] == 100.0
-    assert report["has_measured_data"] is True
+    assert report["has_measured_data"] is False
+    assert report["is_demo_report"] is True
     assert report["pooled_summary"]["arms"]["baseline"]["cost_eligible_sample_count"] == 1
     assert report["pooled_summary"]["arms"]["icm"]["cost_eligible_sample_count"] == 1
 
