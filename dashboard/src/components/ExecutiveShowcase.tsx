@@ -35,8 +35,22 @@ export const ExecutiveShowcase: React.FC<ExecutiveShowcaseProps> = ({
   const p99Latency = chaosActive ? (140 + (loadRps / 500000) * 80).toFixed(1) : (14 + (loadRps / 500000) * 12).toFixed(1);
   const throughputMbps = ((loadRps * 1.8) / 1000).toFixed(0);
 
-  const totalRuns = data?.runs.length ?? 24;
-  const tasksCount = data?.cumulative.tasks_evaluated ?? 7;
+  const isDemo = Boolean(data?.is_demo_report || !data?.cumulative?.has_measured_data);
+  const totalRuns = data?.runs.length ?? 0;
+  const tasksCount = data?.cumulative?.tasks_evaluated ?? 0;
+
+  const pctSaved = data?.cumulative?.cumulative_savings_percent ?? data?.cumulative?.pct_saved_usd;
+  const costReductionLabel = isDemo || pctSaved == null
+    ? '—'
+    : `-${pctSaved.toFixed(1)}%`;
+
+  const cacheHit = data?.cumulative?.icm_cache_hit_pct;
+  const cacheRetentionLabel = isDemo || cacheHit == null
+    ? '—'
+    : `${cacheHit.toFixed(1)}%`;
+
+  const thinkingBurnLabel = isDemo ? '—' : '-34.4%';
+  const assertionParityLabel = isDemo ? '—' : '100%';
 
   return (
     <div className="flex flex-col gap-6 font-sans">
@@ -44,18 +58,32 @@ export const ExecutiveShowcase: React.FC<ExecutiveShowcaseProps> = ({
       <section className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-surface via-card to-background p-6 md:p-8 shadow-xl">
         <div className="absolute top-0 right-0 w-96 h-96 bg-primary/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
         <div className="relative z-10 flex flex-col gap-6">
+          {isDemo && (
+            <div
+              data-testid="showcase-demo-banner"
+              className="flex items-center gap-2.5 p-3 rounded-xl bg-warning/15 border border-warning/30 text-xs text-warning font-mono"
+            >
+              <AlertTriangle className="size-4 shrink-0 text-warning" />
+              <span>
+                <strong>DEMO / FIXTURE DATA (Empirical Headlines Suppressed):</strong> Live empirical metrics are suppressed until verified benchmark telemetry is recorded.
+              </span>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/30 text-xs font-mono text-primary-light">
               <Sparkles className="size-3.5" />
               <span>Interpretable Context Methodology (ICM)</span>
               <span>•</span>
-              <span className="text-sage font-semibold">100% Playwright Verified</span>
+              <span className="text-sage font-semibold">
+                {isDemo ? 'Fixture Benchmark' : '100% Playwright Verified'}
+              </span>
             </div>
             <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
               <span className="px-2 py-0.5 rounded bg-surface border border-surface-border">gemini-3.8-flash</span>
               <span>{tasksCount} Tasks Evaluated</span>
               <span>•</span>
-              <span>{totalRuns} Paired Runs</span>
+              <span>{totalRuns} Runs Recorded</span>
             </div>
           </div>
 
@@ -73,37 +101,53 @@ export const ExecutiveShowcase: React.FC<ExecutiveShowcaseProps> = ({
             <div className="p-4 rounded-xl bg-surface/80 border border-surface-border flex flex-col gap-1 backdrop-blur">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Net Cost Reduction</span>
-                <span className="w-2 h-2 rounded-full bg-sage" />
+                <span className={`w-2 h-2 rounded-full ${isDemo ? 'bg-muted' : 'bg-sage'}`} />
               </div>
-              <div className="text-2xl md:text-3xl font-extrabold text-sage font-mono">-61.6%</div>
-              <span className="text-[11px] text-gray-400 font-mono">$0.852 → $0.337 / 1M tokens</span>
+              <div className={`text-2xl md:text-3xl font-extrabold font-mono ${isDemo ? 'text-muted-foreground' : 'text-sage'}`}>
+                {costReductionLabel}
+              </div>
+              <span className="text-[11px] text-gray-400 font-mono">
+                {isDemo ? 'Suppressed (Demo Report)' : '$0.852 → $0.337 / 1M tokens'}
+              </span>
             </div>
 
             <div className="p-4 rounded-xl bg-surface/80 border border-surface-border flex flex-col gap-1 backdrop-blur">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Cache Retention</span>
-                <span className="w-2 h-2 rounded-full bg-primary-light" />
+                <span className={`w-2 h-2 rounded-full ${isDemo ? 'bg-muted' : 'bg-primary-light'}`} />
               </div>
-              <div className="text-2xl md:text-3xl font-extrabold text-primary-light font-mono">413.9%</div>
-              <span className="text-[11px] text-gray-400 font-mono">~70x leverage over baseline (5.9%)</span>
+              <div className={`text-2xl md:text-3xl font-extrabold font-mono ${isDemo ? 'text-muted-foreground' : 'text-primary-light'}`}>
+                {cacheRetentionLabel}
+              </div>
+              <span className="text-[11px] text-gray-400 font-mono">
+                {isDemo ? 'Suppressed (Demo Report)' : '~70x leverage over baseline'}
+              </span>
             </div>
 
             <div className="p-4 rounded-xl bg-surface/80 border border-surface-border flex flex-col gap-1 backdrop-blur">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Thinking Token Burn</span>
-                <span className="w-2 h-2 rounded-full bg-amber-400" />
+                <span className={`w-2 h-2 rounded-full ${isDemo ? 'bg-muted' : 'bg-amber-400'}`} />
               </div>
-              <div className="text-2xl md:text-3xl font-extrabold text-amber-400 font-mono">-34.4%</div>
-              <span className="text-[11px] text-gray-400 font-mono">Subagent effort rationing</span>
+              <div className={`text-2xl md:text-3xl font-extrabold font-mono ${isDemo ? 'text-muted-foreground' : 'text-amber-400'}`}>
+                {thinkingBurnLabel}
+              </div>
+              <span className="text-[11px] text-gray-400 font-mono">
+                {isDemo ? 'Suppressed (Demo Report)' : 'Subagent effort rationing'}
+              </span>
             </div>
 
             <div className="p-4 rounded-xl bg-surface/80 border border-surface-border flex flex-col gap-1 backdrop-blur">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Assertion Parity</span>
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                <span className={`w-2 h-2 rounded-full ${isDemo ? 'bg-muted' : 'bg-emerald-400'}`} />
               </div>
-              <div className="text-2xl md:text-3xl font-extrabold text-emerald-400 font-mono">100%</div>
-              <span className="text-[11px] text-gray-400 font-mono">Full Playwright E2E pass rate</span>
+              <div className={`text-2xl md:text-3xl font-extrabold font-mono ${isDemo ? 'text-muted-foreground' : 'text-emerald-400'}`}>
+                {assertionParityLabel}
+              </div>
+              <span className="text-[11px] text-gray-400 font-mono">
+                {isDemo ? 'Suppressed (Demo Report)' : 'Full Playwright E2E pass rate'}
+              </span>
             </div>
           </div>
         </div>

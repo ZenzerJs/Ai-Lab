@@ -2,7 +2,7 @@ import React from 'react';
 import { useAnimatedCounter } from '../hooks/useAnimatedCounter';
 
 interface RollingCounterProps {
-  target: number;
+  target: number | null | undefined;
   decimals?: number;
   prefix?: string;
   suffix?: string;
@@ -21,14 +21,21 @@ export const RollingCounter: React.FC<RollingCounterProps> = ({
   replayKey,
   className = '',
 }) => {
+  const isFiniteNum = typeof target === 'number' && Number.isFinite(target);
+  const safeTarget = isFiniteNum ? target : 0;
+
   const ref = useAnimatedCounter({
-    target,
+    target: safeTarget,
     decimals,
     prefix,
     suffix,
     duration,
     replayKey,
   });
+
+  if (!isFiniteNum) {
+    return <span className={`tabular-nums ${className}`}>—</span>;
+  }
 
   return (
     <span

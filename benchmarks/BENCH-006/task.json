@@ -1,0 +1,7 @@
+{
+  "task_id": "BENCH-006",
+  "name": "Test Quality Through Faulty Variants: Accounting Helper",
+  "category": "test_suite_evaluation",
+  "description": "Write comprehensive unit test suite in tests/test_accounting.py for the accounting helper. Submitted tests must pass against the genuine implementation and fail against 5 predefined faulty variants: reversed comparison, removed validation, missing boundary case, double-counted cache input, swallowed error.",
+  "expected_broken_reason": "insufficient_faulty_variant_detection"
+}

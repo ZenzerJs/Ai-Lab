@@ -9,7 +9,9 @@ Provides analytical functions for per-task comparison and cumulative savings.
 
 import hashlib
 import json
+import math
 import os
+import re
 import sqlite3
 import sys
 from datetime import datetime, timezone
@@ -27,6 +29,93 @@ DEFAULT_DB_PATH = DEFAULT_ROOT / "data" / "usage.db"
 DEFAULT_PRICING_PATH = DEFAULT_ROOT / "config" / "PRICING.json"
 
 
+def sanitize_export_text(text: Optional[str]) -> Optional[str]:
+    """Redact private file paths and sentinel secrets from public export."""
+    if not text:
+        return text
+    # Windows user paths (both backslash and forward slash)
+    cleaned = re.sub(r"[A-Za-z]:[\\/][Uu]sers[\\/][^\\/]+[\\/]", lambda _: r".../...", text)
+    # Unix user paths
+    cleaned = re.sub(r"/(?:home|Users)/[^/]+/", lambda _: ".../", cleaned)
+    # Generic key-value secret patterns: api_key=..., key: ..., token: ..., secret=..., password=...
+    cleaned = re.sub(
+        r"(?:(?:api[_-]?)?key|secret|token|password|auth|bearer)\s*[:=]\s*[^\s,;\"'}{]+",
+        lambda _: "[REDACTED_SECRET]",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    # Provider-specific key tokens:
+    # Google AI Studio / Gemini: AIzaSy...
+    cleaned = re.sub(r"AIzaSy[a-zA-Z0-9_-]{30,}", "[REDACTED_SECRET]", cleaned)
+    # Anthropic API Key: sk-ant-...
+    cleaned = re.sub(r"sk-ant-[a-zA-Z0-9_-]{20,}", "[REDACTED_SECRET]", cleaned)
+    # OpenAI API Key: sk-... (including sk-proj-...)
+    cleaned = re.sub(r"sk-(?:proj-)?[a-zA-Z0-9_-]{20,}", "[REDACTED_SECRET]", cleaned)
+    # GitHub Token: ghp_..., gho_..., github_pat_...
+    cleaned = re.sub(r"(?:gh[pours]_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9_]{50,})", "[REDACTED_SECRET]", cleaned)
+    return cleaned
+
+
+PUBLIC_RUN_KEYS = {
+    "id",
+    "task_id",
+    "arm",
+    "model",
+    "run_index",
+    "timestamp",
+    "input_tokens",
+    "output_tokens",
+    "thinking_tokens",
+    "cache_read_tokens",
+    "total_tokens",
+    "num_turns",
+    "duration_seconds",
+    "source_kind",
+    "evidence_status",
+    "exclusion_reasons",
+    "cost_status",
+    "cost_usd",
+    "is_simulation",
+    "execution_status",
+    "verification_status",
+    "manifest_id",
+    "evaluator_hash",
+    "is_eligible",
+    "is_comparison_eligible",
+    "provenance_valid",
+    "reporting_category",
+    "evidence_ref",
+    "notes",
+}
+
+
+def to_public_run(run: Dict[str, Any], sanitize: bool = True) -> Dict[str, Any]:
+    """Convert an internal run dict to an allowlisted sanitized public representation."""
+    out = {}
+    for k in PUBLIC_RUN_KEYS:
+        if k in run:
+            out[k] = run[k]
+
+    out.setdefault("source_kind", run.get("source_kind") or "unknown")
+    out.setdefault("evidence_status", run.get("evidence_status") or "unverified")
+
+    if isinstance(out.get("exclusion_reasons"), str):
+        try:
+            out["exclusion_reasons"] = json.loads(out["exclusion_reasons"])
+        except Exception:
+            pass
+
+    if sanitize:
+        if out.get("evidence_ref"):
+            ref_str = str(out["evidence_ref"])
+            filename = re.split(r"[\\/]", ref_str)[-1]
+            out["evidence_ref"] = sanitize_export_text(filename)
+        if out.get("notes"):
+            out["notes"] = sanitize_export_text(str(out["notes"]))
+
+    return out
+
+
 class TelemetryValidationError(ValueError):
     """Raised when telemetry NDJSON syntax or fields are invalid."""
     def __init__(self, message: str, line_number: Optional[int] = None, event_data: Optional[Dict[str, Any]] = None):
@@ -38,6 +127,47 @@ class TelemetryValidationError(ValueError):
 class DuplicateConflictError(ValueError):
     """Raised when an import arrives with an existing import_id but conflicting data."""
     pass
+
+
+def reconstruct_total_tokens(
+    input_tokens: Optional[int],
+    output_tokens: Optional[int],
+    thinking_tokens: Optional[int],
+    cache_read_tokens: Optional[int],
+    adapter_name: Optional[str],
+) -> Optional[int]:
+    """
+    Reconstruct total_tokens strictly under an explicit adapter schema (Finding 4).
+    Prevents double-counting when cache_read or thinking tokens overlap with input/output.
+    """
+    if input_tokens is None:
+        return None
+
+    out = output_tokens or 0
+    has_extra = (cache_read_tokens is not None or thinking_tokens is not None)
+
+    # If neither cache nor thinking counters are present, total is simply input + output
+    if not has_extra:
+        return input_tokens + out
+
+    # Extra counters present: require explicit adapter schema to avoid double-counting
+    if not adapter_name:
+        return None
+
+    adapter = str(adapter_name).lower()
+    cache = cache_read_tokens or 0
+
+    if "subset" in adapter or any(m in adapter for m in ("anthropic", "claude")):
+        # In Anthropic / subset schema:
+        # - input_tokens already includes cache_read_tokens
+        # - output_tokens already includes thinking_tokens
+        return input_tokens + out
+    elif "separate" in adapter or any(m in adapter for m in ("gemini", "openai")):
+        # In separate schema:
+        # - input_tokens does not include cache_read_tokens
+        # - output_tokens already includes thinking_tokens or separate
+        return input_tokens + out + cache
+    return None
 
 
 def validate_and_parse_telemetry(
@@ -69,6 +199,7 @@ def validate_and_parse_telemetry(
     model = None
     run_index = None
     timestamp = None
+    resolved_adapter_name = adapter_name
     num_turns = 0
     duration_seconds = 0.0
 
@@ -102,6 +233,17 @@ def validate_and_parse_telemetry(
             model = str(event["model"])
         if "timestamp" in event and event["timestamp"]:
             timestamp = str(event["timestamp"])
+        if "adapter_name" in event and event["adapter_name"]:
+            resolved_adapter_name = str(event["adapter_name"])
+        elif "adapter" in event and event["adapter"]:
+            resolved_adapter_name = str(event["adapter"])
+        elif "cache_accounting" in event and event["cache_accounting"]:
+            resolved_adapter_name = str(event["cache_accounting"])
+        elif isinstance(event.get("usage"), dict):
+            if "adapter_name" in event["usage"] and event["usage"]["adapter_name"]:
+                resolved_adapter_name = str(event["usage"]["adapter_name"])
+            elif "cache_accounting" in event["usage"] and event["usage"]["cache_accounting"]:
+                resolved_adapter_name = str(event["usage"]["cache_accounting"])
 
         if "run_index" in event and event["run_index"] is not None:
             try:
@@ -126,6 +268,12 @@ def validate_and_parse_telemetry(
                     event_data=event,
                 )
             if isinstance(val, float):
+                if math.isnan(val) or math.isinf(val):
+                    raise TelemetryValidationError(
+                        f"Line {idx}: Counter '{field_name}' cannot be non-finite float (NaN/Inf): {val}",
+                        line_number=idx,
+                        event_data=event,
+                    )
                 if not val.is_integer():
                     raise TelemetryValidationError(
                         f"Line {idx}: Counter '{field_name}' cannot be a non-integer float: {val}",
@@ -152,11 +300,23 @@ def validate_and_parse_telemetry(
         def _check_float(val: Any, field_name: str) -> Optional[float]:
             if val is None:
                 return None
+            if isinstance(val, bool):
+                raise TelemetryValidationError(
+                    f"Line {idx}: Field '{field_name}' must be a float, got boolean: {val}",
+                    line_number=idx,
+                    event_data=event,
+                )
             try:
                 fval = float(val)
             except (ValueError, TypeError):
                 raise TelemetryValidationError(
                     f"Line {idx}: Field '{field_name}' must be a float, got: {val}",
+                    line_number=idx,
+                    event_data=event,
+                )
+            if math.isnan(fval) or math.isinf(fval):
+                raise TelemetryValidationError(
+                    f"Line {idx}: Field '{field_name}' cannot be non-finite float (NaN/Inf): {val}",
                     line_number=idx,
                     event_data=event,
                 )
@@ -210,8 +370,8 @@ def validate_and_parse_telemetry(
                 turn_u = {
                     "input_tokens": _check_int(u_obj.get("input_tokens"), "input_tokens"),
                     "output_tokens": _check_int(u_obj.get("output_tokens"), "output_tokens"),
-                    "thinking_tokens": _check_int(u_obj.get("thinking_tokens"), "thinking_tokens") or 0,
-                    "cache_read_tokens": _check_int(u_obj.get("cache_read_tokens"), "cache_read_tokens") or 0,
+                    "thinking_tokens": _check_int(u_obj.get("thinking_tokens"), "thinking_tokens"),
+                    "cache_read_tokens": _check_int(u_obj.get("cache_read_tokens"), "cache_read_tokens"),
                     "total_tokens": _check_int(u_obj.get("total_tokens"), "total_tokens"),
                 }
                 if t is not None:
@@ -244,19 +404,20 @@ def validate_and_parse_telemetry(
                 new_cumulative = {
                     "input_tokens": _check_int(ev_u.get("input_tokens"), "input_tokens"),
                     "output_tokens": _check_int(ev_u.get("output_tokens"), "output_tokens"),
-                    "thinking_tokens": _check_int(ev_u.get("thinking_tokens"), "thinking_tokens") or 0,
-                    "cache_read_tokens": _check_int(ev_u.get("cache_read_tokens"), "cache_read_tokens") or 0,
+                    "thinking_tokens": _check_int(ev_u.get("thinking_tokens"), "thinking_tokens"),
+                    "cache_read_tokens": _check_int(ev_u.get("cache_read_tokens"), "cache_read_tokens"),
                     "total_tokens": _check_int(ev_u.get("total_tokens"), "total_tokens"),
                 }
                 if (
                     new_cumulative["total_tokens"] is None
                     and new_cumulative["input_tokens"] is not None
                 ):
-                    new_cumulative["total_tokens"] = (
-                        new_cumulative["input_tokens"]
-                        + (new_cumulative["output_tokens"] or 0)
-                        + new_cumulative["thinking_tokens"]
-                        + new_cumulative["cache_read_tokens"]
+                    new_cumulative["total_tokens"] = reconstruct_total_tokens(
+                        input_tokens=new_cumulative["input_tokens"],
+                        output_tokens=new_cumulative["output_tokens"],
+                        thinking_tokens=new_cumulative["thinking_tokens"],
+                        cache_read_tokens=new_cumulative["cache_read_tokens"],
+                        adapter_name=resolved_adapter_name,
                     )
                 if has_run_complete and cumulative_usage is not None and cumulative_usage != new_cumulative:
                     raise TelemetryValidationError(
@@ -267,10 +428,20 @@ def validate_and_parse_telemetry(
                 cumulative_usage = new_cumulative
             has_run_complete = True
 
+    turns_with_usage = set(seen_turns.keys())
+    is_partial_turn_coverage = bool(num_turns > 1 and len(turns_with_usage) > 0 and len(turns_with_usage) < num_turns)
+
     # Resolve usage counters
     if cumulative_usage is not None:
         # TEL-05: Final cumulative usage chosen; per-turn usage not double-counted
         final_usage = cumulative_usage
+        is_partial_telemetry = False
+        field_completeness = {
+            "input_tokens": cumulative_usage["input_tokens"] is not None,
+            "output_tokens": cumulative_usage["output_tokens"] is not None,
+            "thinking_tokens": cumulative_usage["thinking_tokens"] is not None,
+            "cache_read_tokens": cumulative_usage["cache_read_tokens"] is not None,
+        }
     elif turn_usages:
         has_in = any(u["input_tokens"] is not None for u in turn_usages)
         has_out = any(u["output_tokens"] is not None for u in turn_usages)
@@ -278,14 +449,26 @@ def validate_and_parse_telemetry(
         has_cache = any(u["cache_read_tokens"] is not None for u in turn_usages)
         has_total = any(u["total_tokens"] is not None for u in turn_usages)
 
+        any_in_missing = any(u["input_tokens"] is None for u in turn_usages)
+        any_out_missing = any(u["output_tokens"] is None for u in turn_usages)
+        any_think_missing = any(u["thinking_tokens"] is None for u in turn_usages)
+        any_cache_missing = any(u["cache_read_tokens"] is None for u in turn_usages)
+        is_partial_telemetry = is_partial_turn_coverage or any_in_missing or any_out_missing
+
         sum_in = sum(u["input_tokens"] for u in turn_usages if u["input_tokens"] is not None) if has_in else None
         sum_out = sum(u["output_tokens"] for u in turn_usages if u["output_tokens"] is not None) if has_out else None
-        sum_think = sum(u["thinking_tokens"] for u in turn_usages if u["thinking_tokens"] is not None) if has_think else 0
-        sum_cache = sum(u["cache_read_tokens"] for u in turn_usages if u["cache_read_tokens"] is not None) if has_cache else 0
+        sum_think = sum(u["thinking_tokens"] for u in turn_usages if u["thinking_tokens"] is not None) if has_think else None
+        sum_cache = sum(u["cache_read_tokens"] for u in turn_usages if u["cache_read_tokens"] is not None) if has_cache else None
         sum_total = sum(u["total_tokens"] for u in turn_usages if u["total_tokens"] is not None) if has_total else None
 
-        if sum_total is None and (sum_in is not None or sum_out is not None or sum_cache > 0 or sum_think > 0):
-            sum_total = (sum_in or 0) + (sum_out or 0) + sum_think + sum_cache
+        if sum_total is None and sum_in is not None and not is_partial_telemetry:
+            sum_total = reconstruct_total_tokens(
+                input_tokens=sum_in,
+                output_tokens=sum_out,
+                thinking_tokens=sum_think,
+                cache_read_tokens=sum_cache,
+                adapter_name=resolved_adapter_name,
+            )
 
         final_usage = {
             "input_tokens": sum_in,
@@ -294,14 +477,27 @@ def validate_and_parse_telemetry(
             "cache_read_tokens": sum_cache,
             "total_tokens": sum_total,
         }
+        field_completeness = {
+            "input_tokens": has_in and not any_in_missing and not is_partial_turn_coverage,
+            "output_tokens": has_out and not any_out_missing and not is_partial_turn_coverage,
+            "thinking_tokens": has_think and not any_think_missing and not is_partial_turn_coverage,
+            "cache_read_tokens": has_cache and not any_cache_missing and not is_partial_turn_coverage,
+        }
     else:
         # TEL-02: Omit usage counters from a completed run -> unknown (None), NOT zero
+        is_partial_telemetry = False
         final_usage = {
             "input_tokens": None,
             "output_tokens": None,
             "thinking_tokens": None,
             "cache_read_tokens": None,
             "total_tokens": None,
+        }
+        field_completeness = {
+            "input_tokens": False,
+            "output_tokens": False,
+            "thinking_tokens": False,
+            "cache_read_tokens": False,
         }
 
     return {
@@ -315,6 +511,11 @@ def validate_and_parse_telemetry(
         "duration_seconds": duration_seconds,
         "has_usage": final_usage["input_tokens"] is not None,
         "has_run_complete": has_run_complete,
+        "is_partial": is_partial_telemetry,
+        "is_partial_turn_coverage": is_partial_turn_coverage,
+        "turns_with_usage_count": len(turns_with_usage),
+        "adapter_name": resolved_adapter_name,
+        "field_completeness": field_completeness,
     }
 
 
@@ -377,97 +578,175 @@ def validate_evidence_file(
     }
 
 
-def evaluate_run_eligibility(run: Dict[str, Any]) -> Dict[str, Any]:
+def evaluate_run_eligibility(
+    run: Dict[str, Any],
+    capture_policy: str = "approved",
+) -> Dict[str, Any]:
     """
-    Shared eligibility and reporting category rules across ledger and dashboard.
-    Returns:
-      is_eligible: bool (True only if qualifying empirical live evidence)
-      category: 'measured' | 'fixture' | 'historical' | 'imported' | 'simulation'
-      exclusion_reasons: List[str]
-      is_cost_complete: bool
+    Shared eligibility, provenance validation, cost completeness, and correctness evaluation rules.
+    Decouples provenance validity, correctness evaluation, cost completeness, and comparison eligibility (Finding 1 & 5).
     """
-    reasons: List[str] = []
+    provenance_reasons: List[str] = []
+    cost_reasons: List[str] = []
+    execution_reasons: List[str] = []
+    correctness_reasons: List[str] = []
+
     source_kind = str(run.get("source_kind", "unknown")).lower()
     evidence_status = str(run.get("evidence_status", "unverified")).lower()
     is_simulation = bool(run.get("is_simulation", 0))
     cost_status = str(run.get("cost_status", "unknown")).lower()
 
+    policy = (capture_policy or run.get("capture_policy") or "approved").lower()
+
     category = "measured"
     if source_kind == "fixture":
-        reasons.append("fixture_replay")
+        provenance_reasons.append("fixture_replay")
         category = "fixture"
     elif source_kind == "unknown":
-        reasons.append("legacy_unknown_provenance")
+        provenance_reasons.append("legacy_unknown_provenance")
         category = "historical"
     elif source_kind == "imported":
         category = "imported"
         if evidence_status != "verified":
-            reasons.append("unverified_import")
+            provenance_reasons.append("unverified_import")
         else:
-            reasons.append("imported_record")
+            provenance_reasons.append("imported_record")
     elif source_kind == "live":
-        if evidence_status != "verified":
-            category = "historical"
-            if evidence_status == "invalid":
-                reasons.append("evidence_hash_mismatch")
-            elif evidence_status == "missing":
-                reasons.append("evidence_missing")
+        ev_ref = run.get("evidence_ref")
+        ev_hash = run.get("evidence_hash")
+
+        # Under approved capture policy (default), require validated supporting evidence record
+        if policy in ("approved", "strict", "enforced"):
+            if not ev_ref:
+                provenance_reasons.append("evidence_missing")
+                category = "historical"
+            elif not ev_hash:
+                provenance_reasons.append("evidence_hash_missing")
+                category = "historical"
             else:
-                reasons.append("unverified_evidence")
+                p = Path(ev_ref)
+                if not p.is_file() and not p.is_absolute():
+                    candidate = DEFAULT_ROOT / p
+                    if candidate.is_file():
+                        p = candidate
+                if p.is_file():
+                    val = validate_evidence_file(p, ev_hash)
+                    if not val["is_valid"]:
+                        category = "historical"
+                        provenance_reasons.append(val["exclusion_reason"])
+                else:
+                    provenance_reasons.append("evidence_file_missing")
+                    category = "historical"
+        else:
+            # Permissive / legacy testing policy
+            if evidence_status != "verified":
+                category = "historical"
+                if evidence_status == "invalid":
+                    provenance_reasons.append("evidence_hash_mismatch")
+                elif evidence_status == "missing":
+                    provenance_reasons.append("evidence_missing")
+                else:
+                    provenance_reasons.append("unverified_evidence")
+            elif ev_ref and ev_hash:
+                p = Path(ev_ref)
+                if not p.is_file() and not p.is_absolute():
+                    candidate = DEFAULT_ROOT / p
+                    if candidate.is_file():
+                        p = candidate
+                if p.is_file():
+                    val = validate_evidence_file(p, ev_hash)
+                    if not val["is_valid"]:
+                        category = "historical"
+                        provenance_reasons.append(val["exclusion_reason"])
     else:
         category = "historical"
-        reasons.append(f"unrecognized_source_{source_kind}")
+        provenance_reasons.append(f"unrecognized_source_{source_kind}")
 
     if is_simulation:
-        reasons.append("simulation")
+        provenance_reasons.append("simulation")
         if category == "measured":
             category = "simulation"
 
+    provenance_valid = (len(provenance_reasons) == 0 and category == "measured")
+
+    # Cost completeness evaluation
     input_tokens = run.get("input_tokens")
     output_tokens = run.get("output_tokens")
     is_cost_complete = True
 
     if input_tokens is None or output_tokens is None:
-        reasons.append("missing_usage_telemetry")
+        cost_reasons.append("missing_usage_telemetry")
         is_cost_complete = False
 
     if cost_status in ("unavailable", "incomplete", "unknown"):
-        reasons.append(f"cost_{cost_status}")
+        cost_reasons.append(f"cost_{cost_status}")
         is_cost_complete = False
 
+    # Execution status evaluation
     exec_status = str(run.get("execution_status", "completed") or "completed").lower()
     if exec_status not in ("completed", ""):
-        reasons.append(f"execution_{exec_status}")
+        execution_reasons.append(f"execution_{exec_status}")
 
+    # Correctness evaluation (decoupled from cost and provenance)
     verif_status = str(run.get("verification_status", "not_run") or "not_run").lower()
-    if verif_status == "evaluator_error":
-        reasons.append("evaluator_error")
+    is_correct: Optional[bool] = None
+    if verif_status == "passed":
+        is_correct = True
+    elif verif_status in ("failed", "evaluator_error"):
+        is_correct = False
+        correctness_reasons.append(f"verification_{verif_status}")
 
+    # Parse stored exclusion reasons
+    stored_reasons_parsed = []
     stored_reasons = run.get("exclusion_reasons")
     if stored_reasons:
         if isinstance(stored_reasons, str):
             try:
                 parsed_r = json.loads(stored_reasons)
                 if isinstance(parsed_r, list):
-                    for r in parsed_r:
-                        if r not in reasons:
-                            reasons.append(r)
+                    stored_reasons_parsed.extend(parsed_r)
             except Exception:
                 pass
         elif isinstance(stored_reasons, list):
-            for r in stored_reasons:
-                if r not in reasons:
-                    reasons.append(r)
+            stored_reasons_parsed.extend(stored_reasons)
 
-    is_eligible = (len(reasons) == 0)
-    if not is_eligible and category == "measured":
+    # Measurement exclusion reasons: provenance, cost, and execution issues (NOT correctness failures)
+    measurement_exclusion_reasons: List[str] = []
+    for r_item in provenance_reasons + cost_reasons + execution_reasons + stored_reasons_parsed:
+        if r_item not in measurement_exclusion_reasons:
+            measurement_exclusion_reasons.append(r_item)
+
+    all_reasons: List[str] = []
+    for r_item in measurement_exclusion_reasons + correctness_reasons:
+        if r_item not in all_reasons:
+            all_reasons.append(r_item)
+
+    if (not provenance_valid or not is_cost_complete) and category == "measured":
         category = "historical"
+
+    is_measurement_eligible = bool(category == "measured" and exec_status in ("completed", "") and is_cost_complete)
+    # Comparison eligibility requires both measurement eligibility AND task correctness
+    is_comparison_eligible = bool(is_measurement_eligible and is_correct is True)
+    # is_eligible reflects measurement eligibility, so test failures remain measurable attempts
+    is_eligible = is_measurement_eligible
 
     return {
         "is_eligible": is_eligible,
+        "is_measurement_eligible": is_measurement_eligible,
+        "is_comparison_eligible": is_comparison_eligible,
+        "provenance_valid": provenance_valid,
         "category": category,
-        "exclusion_reasons": reasons,
+        "exclusion_reasons": all_reasons,
+        "measurement_exclusion_reasons": measurement_exclusion_reasons,
         "is_cost_complete": is_cost_complete,
+        "correctness_status": verif_status,
+        "verification_status": verif_status,
+        "is_correct": is_correct,
+        "execution_status": exec_status,
+        "provenance_reasons": provenance_reasons,
+        "cost_reasons": cost_reasons,
+        "execution_reasons": execution_reasons,
+        "correctness_reasons": correctness_reasons,
     }
 
 
@@ -964,8 +1243,8 @@ def record_run(
     timestamp: str,
     input_tokens: Optional[int],
     output_tokens: Optional[int],
-    thinking_tokens: Optional[int] = 0,
-    cache_read_tokens: Optional[int] = 0,
+    thinking_tokens: Optional[int] = None,
+    cache_read_tokens: Optional[int] = None,
     total_tokens: Optional[int] = None,
     num_turns: int = 1,
     duration_seconds: float = 0.0,
@@ -994,13 +1273,20 @@ def record_run(
 
     record_task(task_id, conn=conn)
 
-    # Compute total_tokens if not provided but input/output provided
+    # Reconstruct total_tokens strictly under an explicit adapter schema (Finding 4)
     if total_tokens is None and input_tokens is not None:
-        total_tokens = (
-            input_tokens
-            + (output_tokens or 0)
-            + (thinking_tokens or 0)
-            + (cache_read_tokens or 0)
+        rates = None
+        try:
+            rates = get_pricing(model, conn=conn, db_path=db_path)
+        except Exception:
+            pass
+        cache_mode = rates.get("cache_accounting") if rates else None
+        total_tokens = reconstruct_total_tokens(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            thinking_tokens=thinking_tokens,
+            cache_read_tokens=cache_read_tokens,
+            adapter_name=cache_mode,
         )
 
     # Ensure non-null execution and verification statuses
@@ -1283,11 +1569,19 @@ def import_run(
 
     total_tokens = run_dict.get("total_tokens")
     if total_tokens is None and run_dict.get("input_tokens") is not None:
-        total_tokens = (
-            run_dict["input_tokens"]
-            + (run_dict.get("output_tokens") or 0)
-            + (run_dict.get("thinking_tokens") or 0)
-            + (run_dict.get("cache_read_tokens") or 0)
+        adapter = run_dict.get("adapter_name") or run_dict.get("cache_accounting")
+        if not adapter:
+            try:
+                rates = get_pricing(model, conn=conn, db_path=db_path)
+                adapter = rates.get("cache_accounting") if rates else None
+            except Exception:
+                pass
+        total_tokens = reconstruct_total_tokens(
+            input_tokens=run_dict.get("input_tokens"),
+            output_tokens=run_dict.get("output_tokens"),
+            thinking_tokens=run_dict.get("thinking_tokens"),
+            cache_read_tokens=run_dict.get("cache_read_tokens"),
+            adapter_name=adapter,
         )
 
     run_id = record_run(
@@ -1298,8 +1592,8 @@ def import_run(
         timestamp=timestamp,
         input_tokens=run_dict.get("input_tokens"),
         output_tokens=run_dict.get("output_tokens"),
-        thinking_tokens=run_dict.get("thinking_tokens") or 0,
-        cache_read_tokens=run_dict.get("cache_read_tokens") or 0,
+        thinking_tokens=run_dict.get("thinking_tokens"),
+        cache_read_tokens=run_dict.get("cache_read_tokens"),
         total_tokens=total_tokens,
         num_turns=run_dict.get("num_turns", 1),
         duration_seconds=run_dict.get("duration_seconds", 0.0),
@@ -1329,6 +1623,7 @@ def task_summary(
     db_path: Optional[Path] = None,
     model_override: Optional[str] = None,
     include_all: bool = False,
+    capture_policy: str = "approved",
 ) -> Dict[str, Any]:
     """Calculate per-arm means, error bands, and savings metrics for a task."""
     should_close = False
@@ -1349,6 +1644,10 @@ def task_summary(
             "status": "empty",
             "total_runs": 0,
             "measured_runs_count": 0,
+            "comparison_eligible_runs_count": 0,
+            "passed_runs_count": 0,
+            "failed_runs_count": 0,
+            "cost_incomplete_runs_count": 0,
             "arms": {},
             "savings": None,
         }
@@ -1378,23 +1677,25 @@ def task_summary(
         if r.get("cost_usd") is None or is_sim:
             r["cost_usd"] = cost_info["cost_usd"]
 
+        elig = evaluate_run_eligibility(r, capture_policy=capture_policy)
+        r["is_eligible"] = elig["is_eligible"]
+        r["is_measurement_eligible"] = elig["is_measurement_eligible"]
+        r["is_comparison_eligible"] = elig["is_comparison_eligible"]
+        r["provenance_valid"] = elig["provenance_valid"]
+        r["reporting_category"] = elig["category"]
+        r["exclusion_reasons"] = elig["exclusion_reasons"]
+        r["is_cost_complete"] = elig["is_cost_complete"]
+        r["correctness_status"] = elig["correctness_status"]
+        r["is_correct"] = elig["is_correct"]
+
         if is_sim:
             r["is_simulation"] = 1
 
-        elig = evaluate_run_eligibility(r)
-        r["is_eligible"] = elig["is_eligible"]
-        r["reporting_category"] = elig["category"]
-        r["exclusion_reasons"] = elig["exclusion_reasons"]
-
     # Partition runs
-    measured_runs = [r for r in rows if r["is_eligible"] and not r.get("is_simulation")]
+    measured_runs = [r for r in rows if r["reporting_category"] == "measured" and not r.get("is_simulation")]
     sim_measured_runs = [
         r for r in rows
-        if r.get("source_kind") == "live"
-        and r.get("evidence_status") == "verified"
-        and "fixture_replay" not in r["exclusion_reasons"]
-        and "unverified_import" not in r["exclusion_reasons"]
-        and "legacy_record_unknown_provenance" not in r["exclusion_reasons"]
+        if r["reporting_category"] == "measured"
         and r.get("input_tokens") is not None
         and r.get("cost_status") not in ("unavailable", "incomplete")
     ]
@@ -1404,11 +1705,11 @@ def task_summary(
     simulated_runs = [r for r in rows if r.get("is_simulation") or r["reporting_category"] == "simulation"]
 
     if is_sim:
-        active_runs = sim_measured_runs
+        active_runs = [r for r in sim_measured_runs if r.get("is_comparison_eligible")] if not include_all else sim_measured_runs
     else:
-        active_runs = measured_runs if not include_all else rows
+        active_runs = [r for r in measured_runs if r.get("is_comparison_eligible")] if not include_all else rows
 
-    has_measured = len(measured_runs) > 0 if not is_sim else len(sim_measured_runs) > 0
+    has_measured = len(active_runs) > 0
 
     arms_data: Dict[str, List[Dict[str, Any]]] = {}
     for r in active_runs:
@@ -1417,12 +1718,38 @@ def task_summary(
             arms_data[arm] = []
         arms_data[arm].append(r)
 
+    task_exc_reasons: List[str] = []
+    for r in rows:
+        reasons = r.get("exclusion_reasons") or []
+        if isinstance(reasons, str):
+            try:
+                reasons = json.loads(reasons)
+            except Exception:
+                reasons = [reasons]
+        for re_item in reasons:
+            if re_item not in task_exc_reasons:
+                task_exc_reasons.append(str(re_item))
+
     summary: Dict[str, Any] = {
         "task_id": task_id,
         "has_measured_data": has_measured,
         "is_simulation": is_sim,
         "total_runs": len(rows),
+        "scheduled_count": len(rows),
+        "completed_count": len([r for r in rows if r.get("execution_status") == "completed"]),
+        "verified_count": len([r for r in rows if r.get("verification_status") == "passed"]),
+        "failed_count": len([r for r in rows if r.get("verification_status") in ("failed", "evaluator_error") or r.get("execution_status") == "failed"]),
+        "excluded_count": len([r for r in rows if not r.get("is_comparison_eligible")]),
+        "cost_eligible_count": len([r for r in rows if r.get("is_measurement_eligible") and r.get("cost_usd") is not None]),
+        "exclusion_reasons": task_exc_reasons,
+        "source_kinds": sorted(list({str(r.get("source_kind") or "unknown") for r in rows})),
+        "evidence_statuses": sorted(list({str(r.get("evidence_status") or "unverified") for r in rows})),
         "measured_runs_count": len(measured_runs) if not is_sim else len(sim_measured_runs),
+        "comparison_eligible_runs_count": len([r for r in rows if r.get("is_comparison_eligible")]),
+        "passed_runs_count": len([r for r in rows if r.get("verification_status") == "passed"]),
+        "failed_runs_count": len([r for r in rows if r.get("verification_status") in ("failed", "evaluator_error")]),
+        "unverified_runs_count": len([r for r in rows if r.get("verification_status") == "not_run"]),
+        "cost_incomplete_runs_count": len([r for r in rows if not r.get("is_cost_complete")]),
         "fixture_runs_count": len(fixture_runs),
         "historical_runs_count": len(historical_runs),
         "imported_runs_count": len(imported_runs),
@@ -1430,39 +1757,24 @@ def task_summary(
         "arms": {},
         "savings": None,
         "excluded_runs": [
-            {
-                "id": r.get("id"),
-                "arm": r["arm"],
-                "run_index": r["run_index"],
-                "source_kind": r.get("source_kind", "unknown"),
-                "evidence_status": r.get("evidence_status", "unverified"),
-                "exclusion_reasons": r.get("exclusion_reasons", []),
-                "cost_status": r.get("cost_status"),
-                "execution_status": r.get("execution_status", "completed"),
-                "verification_status": r.get("verification_status", "not_run"),
-            }
-            for r in rows if not r.get("is_eligible") or r.get("is_simulation")
+            to_public_run(r)
+            for r in rows if not r.get("is_comparison_eligible")
         ],
     }
 
-    if not active_runs or len(arms_data) == 0:
-        summary["status"] = "no_eligible_measured_runs"
-        if should_close:
-            conn.close()
-        return summary
-
-    for arm_name, runs_list in arms_data.items():
-        n = len(runs_list)
-        if n == 0:
-            continue
-        valid_costs = [r["cost_usd"] for r in runs_list if r["cost_usd"] is not None]
-        inputs = [r["input_tokens"] for r in runs_list if r["input_tokens"] is not None]
-        caches = [r["cache_read_tokens"] for r in runs_list if r["cache_read_tokens"] is not None]
-        outputs = [r["output_tokens"] for r in runs_list if r["output_tokens"] is not None]
-        totals = [r["total_tokens"] for r in runs_list if r["total_tokens"] is not None]
-        thinkings = [r["thinking_tokens"] for r in runs_list if r.get("thinking_tokens") is not None]
-        turns = [r["num_turns"] for r in runs_list]
-        durations = [r["duration_seconds"] for r in runs_list]
+    # Populate per-arm metrics for all arms present in rows
+    distinct_arms = sorted(list({r["arm"].lower() for r in rows}))
+    for arm_name in distinct_arms:
+        all_arm_rows = [r for r in rows if r["arm"].lower() == arm_name]
+        qualifying_runs = arms_data.get(arm_name, [])
+        valid_costs = [r["cost_usd"] for r in qualifying_runs if r["cost_usd"] is not None]
+        inputs = [r["input_tokens"] for r in qualifying_runs if r["input_tokens"] is not None]
+        caches = [r["cache_read_tokens"] for r in qualifying_runs if r["cache_read_tokens"] is not None]
+        outputs = [r["output_tokens"] for r in qualifying_runs if r["output_tokens"] is not None]
+        totals = [r["total_tokens"] for r in qualifying_runs if r["total_tokens"] is not None]
+        thinkings = [r["thinking_tokens"] for r in qualifying_runs if r.get("thinking_tokens") is not None]
+        turns = [r["num_turns"] for r in qualifying_runs]
+        durations = [r["duration_seconds"] for r in qualifying_runs]
 
         mean_cost = sum(valid_costs) / len(valid_costs) if valid_costs else None
         min_cost = min(valid_costs) if valid_costs else None
@@ -1472,10 +1784,34 @@ def task_summary(
         mean_cache = (sum(caches) / len(caches)) if caches else None
         cache_hit_ratio = ((mean_cache / mean_input) if (mean_input and mean_input > 0 and mean_cache is not None) else 0.0)
 
+        arm_exc_reasons: List[str] = []
+        for r in all_arm_rows:
+            reasons = r.get("exclusion_reasons") or []
+            if isinstance(reasons, str):
+                try:
+                    reasons = json.loads(reasons)
+                except Exception:
+                    reasons = [reasons]
+            for re_item in reasons:
+                if re_item not in arm_exc_reasons:
+                    arm_exc_reasons.append(str(re_item))
+
+        source_kinds = sorted(list({str(r.get("source_kind") or "unknown") for r in all_arm_rows}))
+        evidence_statuses = sorted(list({str(r.get("evidence_status") or "unverified") for r in all_arm_rows}))
+
         summary["arms"][arm_name] = {
-            "n": n,
+            "n": len(qualifying_runs),
             "cost_complete_n": len(valid_costs),
-            "model": model_override or runs_list[0]["model"],
+            "scheduled_count": len(all_arm_rows),
+            "completed_count": len([r for r in all_arm_rows if r.get("execution_status") == "completed"]),
+            "verified_count": len([r for r in all_arm_rows if r.get("verification_status") == "passed"]),
+            "failed_count": len([r for r in all_arm_rows if r.get("verification_status") in ("failed", "evaluator_error") or r.get("execution_status") == "failed"]),
+            "excluded_count": len([r for r in all_arm_rows if not r.get("is_comparison_eligible")]),
+            "cost_eligible_count": len([r for r in all_arm_rows if r.get("is_measurement_eligible") and r.get("cost_usd") is not None]),
+            "exclusion_reasons": arm_exc_reasons,
+            "source_kinds": source_kinds,
+            "evidence_statuses": evidence_statuses,
+            "model": model_override or all_arm_rows[0]["model"],
             "mean_cost_usd": mean_cost,
             "min_cost_usd": min_cost,
             "max_cost_usd": max_cost,
@@ -1484,21 +1820,32 @@ def task_summary(
             "mean_output_tokens": (sum(outputs) / len(outputs)) if outputs else None,
             "mean_thinking_tokens": (sum(thinkings) / len(thinkings)) if thinkings else None,
             "mean_total_tokens": (sum(totals) / len(totals)) if totals else None,
-            "mean_num_turns": sum(turns) / n,
-            "mean_duration_seconds": sum(durations) / n,
+            "mean_num_turns": (sum(turns) / len(turns)) if turns else 0,
+            "mean_duration_seconds": (sum(durations) / len(durations)) if durations else 0.0,
             "cache_hit_ratio": cache_hit_ratio,
-            "runs": runs_list,
+            "runs": [to_public_run(r) for r in qualifying_runs],
         }
+
+    is_task_demo = bool(not has_measured and len(rows) > 0)
+    summary["is_demo_report"] = is_task_demo
+
+    if not active_runs or len(arms_data) == 0:
+        summary["status"] = "no_eligible_measured_runs"
+        if should_close:
+            conn.close()
+        return summary
 
     # Compare baseline vs governed arm
     gov_arm = None
-    if "icm-subagents" in summary["arms"]:
+    if "icm-subagents" in summary["arms"] and summary["arms"]["icm-subagents"]["n"] > 0:
         gov_arm = "icm-subagents"
-    elif "icm" in summary["arms"]:
+    elif "icm" in summary["arms"] and summary["arms"]["icm"]["n"] > 0:
         gov_arm = "icm"
+    elif "delegation" in summary["arms"] and summary["arms"]["delegation"]["n"] > 0:
+        gov_arm = "delegation"
     else:
         for k in summary["arms"]:
-            if k != "baseline":
+            if k != "baseline" and summary["arms"][k]["n"] > 0:
                 gov_arm = k
                 break
 
@@ -1548,6 +1895,7 @@ def cumulative_savings(
     db_path: Optional[Path] = None,
     model_override: Optional[str] = None,
     include_mock: bool = False,
+    capture_policy: str = "approved",
 ) -> Dict[str, Any]:
     """Compute total measured savings across all tasks using shared eligibility."""
     should_close = False
@@ -1565,6 +1913,10 @@ def cumulative_savings(
     total_icm_cost = 0.0
     total_baseline_tokens = 0
     total_icm_tokens = 0
+    total_baseline_cache_read = 0
+    total_baseline_input = 0
+    total_icm_cache_read = 0
+    total_icm_input = 0
     total_measured_runs = 0
     task_summaries = []
 
@@ -1572,17 +1924,25 @@ def cumulative_savings(
     total_historical_count = 0
     total_imported_count = 0
     total_simulated_count = 0
+    total_passed_count = 0
+    total_failed_count = 0
+    total_cost_incomplete_count = 0
+    total_comparison_eligible_count = 0
 
     has_measured_pairs = False
 
     for tid in all_task_ids:
-        s = task_summary(tid, conn=conn, model_override=model_override)
+        s = task_summary(tid, conn=conn, model_override=model_override, capture_policy=capture_policy)
         task_summaries.append(s)
 
         total_fixture_count += s.get("fixture_runs_count", 0)
         total_historical_count += s.get("historical_runs_count", 0)
         total_imported_count += s.get("imported_runs_count", 0)
         total_simulated_count += s.get("simulated_runs_count", 0)
+        total_passed_count += s.get("passed_runs_count", 0)
+        total_failed_count += s.get("failed_runs_count", 0)
+        total_cost_incomplete_count += s.get("cost_incomplete_runs_count", 0)
+        total_comparison_eligible_count += s.get("comparison_eligible_runs_count", 0)
 
         gov_arm = s.get("governed_arm")
         if s.get("has_measured_data") and "baseline" in s.get("arms", {}) and gov_arm and gov_arm in s.get("arms", {}):
@@ -1601,6 +1961,10 @@ def cumulative_savings(
                     total_icm_cost += g_r["cost_usd"]
                     total_baseline_tokens += (b_r.get("total_tokens") or 0)
                     total_icm_tokens += (g_r.get("total_tokens") or 0)
+                    total_baseline_cache_read += (b_r.get("cache_read_tokens") or 0)
+                    total_baseline_input += (b_r.get("input_tokens") or 0)
+                    total_icm_cache_read += (g_r.get("cache_read_tokens") or 0)
+                    total_icm_input += (g_r.get("input_tokens") or 0)
                     has_measured_pairs = True
 
     if has_measured_pairs:
@@ -1613,29 +1977,101 @@ def cumulative_savings(
         cost_per_mtok_base = (total_baseline_cost / total_baseline_tokens * 1_000_000) if total_baseline_tokens > 0 else None
         cost_per_mtok_icm = (total_icm_cost / total_icm_tokens * 1_000_000) if total_icm_tokens > 0 else None
         savings_usd_per_mtok = (cost_per_mtok_base - cost_per_mtok_icm) if (cost_per_mtok_base is not None and cost_per_mtok_icm is not None) else None
+        icm_cache_hit_pct = round(total_icm_cache_read / total_icm_input * 100.0, 1) if total_icm_input > 0 else None
+        baseline_cache_hit_pct = round(total_baseline_cache_read / total_baseline_input * 100.0, 1) if total_baseline_input > 0 else None
     else:
         measured_savings_usd = None
         savings_pct = None
         cost_per_mtok_base = None
         cost_per_mtok_icm = None
         savings_usd_per_mtok = None
+        icm_cache_hit_pct = None
+        baseline_cache_hit_pct = None
+
+    # Compute per-arm counts across all task summaries
+    per_arm_counts: Dict[str, Dict[str, Any]] = {}
+    for s in task_summaries:
+        for arm_name, arm_stat in s.get("arms", {}).items():
+            if arm_name not in per_arm_counts:
+                per_arm_counts[arm_name] = {
+                    "scheduled": 0,
+                    "completed": 0,
+                    "verified": 0,
+                    "failed": 0,
+                    "excluded": 0,
+                    "cost_eligible": 0,
+                    "exclusion_reasons": set(),
+                }
+            per_arm_counts[arm_name]["scheduled"] += arm_stat.get("scheduled_count", 0)
+            per_arm_counts[arm_name]["completed"] += arm_stat.get("completed_count", 0)
+            per_arm_counts[arm_name]["verified"] += arm_stat.get("verified_count", 0)
+            per_arm_counts[arm_name]["failed"] += arm_stat.get("failed_count", 0)
+            per_arm_counts[arm_name]["excluded"] += arm_stat.get("excluded_count", 0)
+            per_arm_counts[arm_name]["cost_eligible"] += arm_stat.get("cost_eligible_count", 0)
+            for re_item in arm_stat.get("exclusion_reasons", []):
+                per_arm_counts[arm_name]["exclusion_reasons"].add(re_item)
+
+    for arm_name in per_arm_counts:
+        per_arm_counts[arm_name]["exclusion_reasons"] = sorted(list(per_arm_counts[arm_name]["exclusion_reasons"]))
+
+    total_scheduled = sum(a["scheduled"] for a in per_arm_counts.values())
+    total_completed = sum(a["completed"] for a in per_arm_counts.values())
+    total_verified = sum(a["verified"] for a in per_arm_counts.values())
+    total_failed = sum(a["failed"] for a in per_arm_counts.values())
+    total_excluded = sum(a["excluded"] for a in per_arm_counts.values())
+
+    is_demo = bool(not has_measured_pairs and (total_fixture_count > 0 or total_historical_count > 0 or total_imported_count > 0 or total_simulated_count > 0 or total_scheduled > 0))
+
+    cursor.execute("PRAGMA table_info(runs)")
+    table_cols = {row[1] for row in cursor.fetchall()}
+    if "source_kind" in table_cols:
+        cursor.execute("SELECT source_kind, count(*) as c FROM runs GROUP BY source_kind")
+        source_kind_counts = {row["source_kind"]: row["c"] for row in cursor.fetchall()}
+    else:
+        cursor.execute("SELECT count(*) as c FROM runs")
+        total_c = cursor.fetchone()["c"]
+        source_kind_counts = {"unknown": total_c} if total_c > 0 else {}
+
+    if "evidence_status" in table_cols:
+        cursor.execute("SELECT evidence_status, count(*) as c FROM runs GROUP BY evidence_status")
+        evidence_status_counts = {row["evidence_status"]: row["c"] for row in cursor.fetchall()}
+    else:
+        cursor.execute("SELECT count(*) as c FROM runs")
+        total_c = cursor.fetchone()["c"]
+        evidence_status_counts = {"unverified": total_c} if total_c > 0 else {}
 
     result = {
         "has_measured_data": has_measured_pairs,
         "is_simulation": is_sim,
+        "is_demo_report": is_demo,
         "tasks_evaluated": len([t for t in task_summaries if t.get("has_measured_data")]),
         "total_tasks": len(task_summaries),
         "total_runs": total_measured_runs,
+        "scheduled_count": total_scheduled,
+        "completed_count": total_completed,
+        "verified_count": total_verified,
+        "failed_count": total_failed,
+        "excluded_count": total_excluded,
+        "per_arm_counts": per_arm_counts,
+        "source_kind_counts": source_kind_counts,
+        "evidence_status_counts": evidence_status_counts,
         "fixture_runs_count": total_fixture_count,
         "historical_runs_count": total_historical_count,
         "imported_runs_count": total_imported_count,
         "simulated_runs_count": total_simulated_count,
+        "passed_runs_count": total_passed_count,
+        "failed_runs_count": total_failed_count,
+        "cost_incomplete_runs_count": total_cost_incomplete_count,
+        "comparison_eligible_runs_count": total_comparison_eligible_count,
         "total_baseline_cost_usd": total_baseline_cost if has_measured_pairs else None,
         "total_icm_cost_usd": total_icm_cost if has_measured_pairs else None,
         "total_baseline_tokens": total_baseline_tokens if has_measured_pairs else None,
         "total_icm_tokens": total_icm_tokens if has_measured_pairs else None,
         "cumulative_savings_usd": measured_savings_usd,
         "cumulative_savings_percent": savings_pct,
+        "pct_saved_usd": savings_pct,
+        "baseline_cache_hit_pct": baseline_cache_hit_pct,
+        "icm_cache_hit_pct": icm_cache_hit_pct,
         "cost_per_mtok_baseline": cost_per_mtok_base,
         "cost_per_mtok_icm": cost_per_mtok_icm,
         "savings_usd_per_mtok": savings_usd_per_mtok,

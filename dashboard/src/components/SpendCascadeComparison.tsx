@@ -73,20 +73,29 @@ export const SpendCascadeComparison: React.FC<SpendCascadeComparisonProps> = ({
                 if (scaleMode === '1m') {
                   bSpend = item.cost_per_mtok_baseline;
                   iSpend = item.cost_per_mtok_icm;
-                  saved = item.cost_per_mtok_baseline - item.cost_per_mtok_icm;
+                  saved =
+                    item.cost_per_mtok_baseline != null && item.cost_per_mtok_icm != null
+                      ? item.cost_per_mtok_baseline - item.cost_per_mtok_icm
+                      : null;
                 } else if (scaleMode === '10m') {
-                  bSpend = item.cost_per_mtok_baseline * 10;
-                  iSpend = item.cost_per_mtok_icm * 10;
-                  saved = (item.cost_per_mtok_baseline - item.cost_per_mtok_icm) * 10;
+                  bSpend = item.cost_per_mtok_baseline != null ? item.cost_per_mtok_baseline * 10 : null;
+                  iSpend = item.cost_per_mtok_icm != null ? item.cost_per_mtok_icm * 10 : null;
+                  saved =
+                    item.cost_per_mtok_baseline != null && item.cost_per_mtok_icm != null
+                      ? (item.cost_per_mtok_baseline - item.cost_per_mtok_icm) * 10
+                      : null;
                 } else if (scaleMode === '100m') {
-                  bSpend = item.cost_per_mtok_baseline * 100;
-                  iSpend = item.cost_per_mtok_icm * 100;
+                  bSpend = item.cost_per_mtok_baseline != null ? item.cost_per_mtok_baseline * 100 : null;
+                  iSpend = item.cost_per_mtok_icm != null ? item.cost_per_mtok_icm * 100 : null;
                   saved = item.projected_savings_100m;
                 }
 
                 // Relative bar width
-                const maxSpend = Math.max(...cascade.map((c) => c.total_baseline_cost_usd));
-                const barWidthPct = Math.min(100, Math.max(10, (item.total_baseline_cost_usd / maxSpend) * 100));
+                const maxSpend = Math.max(1e-9, ...cascade.map((c) => c.total_baseline_cost_usd ?? 0));
+                const barWidthPct =
+                  item.total_baseline_cost_usd != null && maxSpend > 0
+                    ? Math.min(100, Math.max(10, (item.total_baseline_cost_usd / maxSpend) * 100))
+                    : 0;
 
                 return (
                   <tr

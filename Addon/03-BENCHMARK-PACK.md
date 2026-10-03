@@ -52,17 +52,17 @@ Broken snapshot fails a boundary case. Reference fix passes. A patch that simply
 
 ### Agent assignment
 
-Update a small TypeScript API and frontend consumer from a flat item list to a documented paginated response. Preserve item rendering and handle empty pages and request errors.
+Update a small Python API server and client consumer from a flat item list to a documented paginated response. Preserve client data processing and handle empty pages and request errors. (Note: Initial pack implements a Python server/client contract; a TypeScript/browser task may be added in future iterations).
 
 ### Accessible material
 
-Server handler, client adapter/component, schema/type definitions, package scripts, and visible contract examples.
+Server handler (`server.py`), client consumer (`client.py`), schema/contract definitions, and visible contract tests (`tests/test_client.py`).
 
 ### Protected checks
 
-- Response shape and client parsing agree.
-- Empty and populated pages render correctly.
-- Pagination metadata is correct.
+- Response shape and client parsing agree on pagination metadata.
+- Empty and populated pages process correctly.
+- Pagination metadata (`total_items`, `page`, `page_size`, `has_next`) is correct.
 - Error responses do not masquerade as successful empty data.
 - No unrelated public endpoints change.
 
@@ -92,27 +92,27 @@ Existing parser, public API specification, sample inputs, and representative gol
 
 A faulty refactor that changes error handling is rejected. Reference refactor passes all compatibility checks. A no-op submission fails only if structural refactoring requirements are explicitly defined and objectively checked.
 
-## BENCH-004 — Frontend filter regression
+## BENCH-004 — Filter controller state regression
 
 ### Agent assignment
 
-Fix a stale filter state in a small React table/dashboard. Preserve the existing design, keyboard interaction, and reset behaviour.
+Fix a stale filter state in a Python filter-controller class. Preserve the filter logic, keyboard event handling (e.g. Escape key resets), and multi-criteria sequence processing. (Note: Initial pack implements a Python state controller; a full browser Playwright task may be added in future iterations).
 
 ### Accessible material
 
-Component source, deterministic sample data, visible tests, and a documented expected user journey.
+Controller source (`filter_controller.py`), sample dataset, visible tests (`tests/test_filter_controller.py`), and documented state transition requirements.
 
 ### Protected checks
 
-- Changing filters updates displayed rows and count.
-- Clearing filters restores the complete data set.
-- Rapid changes do not render stale results.
-- Empty results display the proper state.
-- The relevant controls are keyboard-operable.
+- Changing filters updates filtered rows and result count.
+- Clearing filters or pressing Escape resets the complete dataset.
+- Sequence of filter changes handles resets cleanly without stale residue.
+- Empty result states return expected structure without exceptions.
+- Key event handler correctly processes Escape and reset actions.
 
 ### Release evidence
 
-A Playwright journey fails on the broken snapshot and passes on the reference solution. Screenshot appearance alone is not a pass condition.
+Protected tests fail on the broken snapshot and pass on the reference solution. Patches modifying unrelated state or breaking keyboard handlers are rejected.
 
 ## BENCH-005 — Distractor resistance and scope control
 
@@ -178,7 +178,7 @@ If multiple mechanisms change between A and B, interpret the result as the combi
 - Start fresh sessions; prevent writable memory or artifacts from leaking across arms.
 - Randomize and record arm order before execution.
 - Pin tool/dependency versions and note provider/model-version changes.
-- Keep reference patches and protected tests outside agent access.
+- Keep reference patches and protected tests outside agent access (organizational separation: evaluators and solutions are kept external to copied workspaces; note this is structural layout rather than OS sandbox access enforcement).
 - Record human assistance using a predeclared policy. Assisted runs remain labelled.
 - Run evaluator checks after the agent finishes; evaluator compute is separate from agent execution compute.
 - Count failed attempts and retries rather than selecting the best submission.

@@ -13,6 +13,7 @@ Supports --dry-run to replay NDJSON fixtures from experiments/fixtures/mock_stre
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -127,7 +128,8 @@ def verify_fairness_invariants(
 def reset_workspace_state(target_repo_path: Path) -> None:
     """
     Safely handle workspace state before a run (RUN-03).
-    Never executes destructive git reset or git clean against the user's source checkout.
+    Never executes destructive git reset or git clean against the user's source checkout
+    or arbitrary external repositories lacking disposable workspace ownership markers.
     """
     resolved_target = target_repo_path.resolve()
     resolved_root = WORKSPACE_ROOT.resolve()
@@ -143,27 +145,9 @@ def reset_workspace_state(target_repo_path: Path) -> None:
         print(f"[*] Preserving host checkout in '{target_repo_path}'; destructive git reset barred (RUN-03).")
         return
 
-    # Only run git cleanup if explicitly a separate non-host directory
-    if (target_repo_path / ".git").exists():
-        try:
-            subprocess.run(
-                ["git", "checkout", "--", "."],
-                cwd=str(target_repo_path),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=False,
-            )
-            subprocess.run(
-                ["git", "clean", "-fd", "-e", "sandbox/", "-e", "experiments/"],
-                cwd=str(target_repo_path),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=False,
-            )
-        except Exception as exc:
-            sys.stderr.write(f"✗ Non-host worktree reset error in '{target_repo_path}': {exc}\n")
+    # Finding 2: Arbitrary external-repository cleanup is barred to protect disposable and host isolation
+    print(f"[*] Preserving external repository in '{target_repo_path}'; arbitrary external-repository cleanup barred.")
+    return
 
 
 def parse_ndjson_stream(stream_lines: List[str]) -> Dict[str, Any]:
@@ -387,11 +371,24 @@ def execute_live_run(
     if parsed["duration_seconds"] == 0.0:
         parsed["duration_seconds"] = duration_seconds
 
+    # Save raw stdout NDJSON stream to evidence file and compute SHA-256 (Finding 1)
+    evidence_dir = WORKSPACE_ROOT / "experiments" / "evidence"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    task_id = task.get("task_id", "task")
+    evidence_filename = f"live_{task_id}_{arm}_run{run_index}_{int(start_time)}.ndjson"
+    evidence_file = evidence_dir / evidence_filename
+    evidence_content = "".join(stdout_lines)
+    evidence_file.write_text(evidence_content, encoding="utf-8")
+    evidence_hash = hashlib.sha256(evidence_content.encode("utf-8")).hexdigest()
+    evidence_ref = str(evidence_file.relative_to(WORKSPACE_ROOT))
+
     return {
         "arm": arm,
         "run_index": run_index,
         "timestamp": timestamp,
         "parsed": parsed,
+        "evidence_ref": evidence_ref,
+        "evidence_hash": evidence_hash,
     }
 
 
@@ -557,6 +554,8 @@ def main():
                     duration_seconds=res["parsed"]["duration_seconds"],
                     source_kind="live",
                     evidence_status="verified",
+                    evidence_ref=res.get("evidence_ref"),
+                    evidence_hash=res.get("evidence_hash"),
                     db_path=db_path,
                 )
 
@@ -583,6 +582,8 @@ def main():
                     duration_seconds=res["parsed"]["duration_seconds"],
                     source_kind="live",
                     evidence_status="verified",
+                    evidence_ref=res.get("evidence_ref"),
+                    evidence_hash=res.get("evidence_hash"),
                     db_path=db_path,
                 )
 

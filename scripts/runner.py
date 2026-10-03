@@ -15,11 +15,14 @@ manual import adapters:
 
 import argparse
 import copy
+from contextlib import contextmanager
 import dataclasses
 import hashlib
 import json
 import os
+import re
 import shutil
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -59,9 +62,10 @@ def sanitize_subprocess_env(base_env: Optional[Dict[str, str]] = None) -> Dict[s
         if any(pat in k_upper for pat in SENSITIVE_ENV_PATTERNS):
             continue
         safe_env[k] = v
-    # Enforce offline invariant flags
+    # Enforce offline invariant flags and prevent bytecode cache pollution
     safe_env["OFFLINE_MODE"] = "1"
     safe_env["AI_LAB_OFFLINE"] = "1"
+    safe_env["PYTHONDONTWRITEBYTECODE"] = "1"
     return safe_env
 
 
@@ -104,6 +108,11 @@ class EvaluatorTamperingError(RuntimeError):
 
 class OfflineModeViolationError(RuntimeError):
     """Raised if any live provider or paid API call is attempted during offline execution (RUN-08)."""
+    pass
+
+
+class NetworkAccessBlockedError(OfflineModeViolationError):
+    """Raised when active network/socket access is attempted during offline execution (RUN-08)."""
     pass
 
 
@@ -342,6 +351,12 @@ class DisposableWorkspace:
             return
 
         _safe_rmtree(self.path)
+        external_marker = self.path.parent / f".ai_lab_marker_{self.path.name}.json"
+        if external_marker.exists():
+            try:
+                external_marker.unlink()
+            except OSError:
+                pass
         self._is_cleaned = True
 
     def __enter__(self) -> "DisposableWorkspace":
@@ -349,6 +364,17 @@ class DisposableWorkspace:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.cleanup()
+
+
+DISPOSABLE_MARKER = ".ai_lab_disposable_workspace"
+SAFE_IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]+$")
+
+
+def _validate_identifier(identifier: str, field_name: str) -> None:
+    if not identifier or not SAFE_IDENTIFIER_PATTERN.match(identifier):
+        raise ValueError(
+            f"Invalid {field_name} '{identifier}': must contain only alphanumeric characters, underscores, and hyphens."
+        )
 
 
 class WorkspaceManager:
@@ -364,6 +390,7 @@ class WorkspaceManager:
         """
         Prepare an isolated disposable workspace directory from a pinned task snapshot (RUN-01, RUN-03).
         Preserves user uncommitted files and repository state completely.
+        Validates identifiers, enforces path containment within workspace root, and verifies ownership.
         """
         if not snapshot_dir.exists():
             raise FileNotFoundError(f"Snapshot directory not found: {snapshot_dir}")
@@ -371,20 +398,70 @@ class WorkspaceManager:
         if not run_id:
             run_id = f"run_{int(time.time() * 1000)}"
 
-        if workspace_root is None:
-            base_temp = WORKSPACE_ROOT / "tmp" / "disposable_workspaces"
-            base_temp.mkdir(parents=True, exist_ok=True)
-            ws_dir = base_temp / f"{run_id}_{arm}"
-        else:
-            workspace_root.mkdir(parents=True, exist_ok=True)
-            ws_dir = workspace_root / f"{run_id}_{arm}"
+        _validate_identifier(run_id, "run_id")
+        _validate_identifier(arm, "arm")
 
-        # Clean if directory already exists from a prior interrupted trial
+        if workspace_root is None:
+            base_temp = (WORKSPACE_ROOT / "tmp" / "disposable_workspaces").resolve()
+        else:
+            base_temp = Path(workspace_root).resolve()
+
+        base_temp.mkdir(parents=True, exist_ok=True)
+        ws_dir = (base_temp / f"{run_id}_{arm}").resolve()
+
+        # Enforce strict path containment within base_temp
+        try:
+            ws_dir.relative_to(base_temp)
+        except ValueError:
+            raise ValueError(
+                f"Path containment violation: workspace directory '{ws_dir}' escapes root '{base_temp}'"
+            )
+
+        if ws_dir == base_temp:
+            raise ValueError(f"Workspace path cannot be the root directory '{base_temp}'")
+
+        # Refuse to delete existing directory unless ownership is established
         if ws_dir.exists():
+            external_marker = base_temp / f".ai_lab_marker_{ws_dir.name}.json"
+            internal_marker = ws_dir / DISPOSABLE_MARKER
+            marker = external_marker if external_marker.exists() else (internal_marker if internal_marker.exists() else None)
+            if not marker:
+                raise RuntimeError(
+                    f"Refusing to delete existing directory '{ws_dir}': missing ownership marker."
+                )
+            try:
+                marker_data = json.loads(marker.read_text(encoding="utf-8"))
+                if marker_data.get("run_id") != run_id or marker_data.get("arm") != arm:
+                    raise RuntimeError(
+                        f"Refusing to delete existing directory '{ws_dir}': marker ownership mismatch."
+                    )
+            except Exception as exc:
+                if isinstance(exc, RuntimeError):
+                    raise
+                raise RuntimeError(
+                    f"Refusing to delete existing directory '{ws_dir}': invalid marker ({exc})."
+                )
             _safe_rmtree(ws_dir)
+            if external_marker.exists():
+                try:
+                    external_marker.unlink()
+                except OSError:
+                    pass
 
         # Copy snapshot into disposable workspace
         shutil.copytree(snapshot_dir, ws_dir, dirs_exist_ok=True)
+
+        # Write external ownership marker file (stored outside ws_dir to preserve snapshot files)
+        external_marker = base_temp / f".ai_lab_marker_{ws_dir.name}.json"
+        external_marker.write_text(
+            json.dumps({
+                "run_id": run_id,
+                "arm": arm,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "disposable": True,
+            }),
+            encoding="utf-8",
+        )
 
         return DisposableWorkspace(
             path=ws_dir,
@@ -440,6 +517,9 @@ class ProtectedEvaluator:
     """
     Evaluator stored strictly outside the writable agent workspace (RUN-09).
     Verifies SHA-256 integrity hash before grading to detect tampering (RUN-10).
+    Note: Storing evaluators outside the workspace directory provides organizational
+    separation and tamper detection via SHA-256 verification, but does not provide
+    OS-level filesystem sandboxing if an agent process has broad host filesystem access.
     """
     def __init__(
         self,
@@ -464,10 +544,13 @@ class ProtectedEvaluator:
         if self.evaluator_path.is_file():
             return hashlib.sha256(self.evaluator_path.read_bytes()).hexdigest()
 
-        # If directory, compute hash of all sorted files
+        # If directory, compute hash of all sorted files, ignoring transient cache files
         h = hashlib.sha256()
         for p in sorted(self.evaluator_path.rglob("*")):
             if p.is_file():
+                parts = p.parts
+                if "__pycache__" in parts or ".pytest_cache" in parts or p.suffix in (".pyc", ".pyo"):
+                    continue
                 rel = p.relative_to(self.evaluator_path).as_posix().encode("utf-8")
                 h.update(rel)
                 h.update(p.read_bytes())
@@ -527,7 +610,11 @@ class ProtectedEvaluator:
         if self.evaluator_path.is_file() and self.evaluator_path.suffix == ".py":
             cmd = [sys.executable, str(self.evaluator_path)]
         elif self.evaluator_path.is_dir():
-            cmd = [sys.executable, "-m", "pytest", str(self.evaluator_path)]
+            eval_py = self.evaluator_path / "evaluator.py"
+            if eval_py.exists():
+                cmd = [sys.executable, str(eval_py)]
+            else:
+                cmd = [sys.executable, "-m", "pytest", str(self.evaluator_path)]
 
         if cmd is not None:
             try:
@@ -541,10 +628,29 @@ class ProtectedEvaluator:
                     timeout=45,
                     check=False,
                 )
+
+                # Re-verify hash after execution to detect runtime tampering (RUN-10)
+                is_valid_post, post_hash = self.verify_hash()
+                if not is_valid_post:
+                    return VerificationResult(
+                        verification_status="evaluator_error",
+                        passed=False,
+                        reasons=["evaluator_hash_mismatch", "evaluator_tampered_during_execution"],
+                        evaluator_hash=post_hash,
+                        output=f"Evaluator tampering detected during execution! Expected hash {self.expected_hash}, got {post_hash}",
+                    )
+
                 passed = (res.returncode == 0)
                 status = "passed" if passed else "failed"
                 reasons = [] if passed else ["test_failure"]
                 out = res.stdout + ("\n" + res.stderr if res.stderr else "")
+                if not passed:
+                    for line in out.splitlines():
+                        line_s = line.strip()
+                        if line_s.startswith("REASON:"):
+                            r_val = line_s.split("REASON:", 1)[1].strip()
+                            if r_val and r_val not in reasons:
+                                reasons.append(r_val)
                 return VerificationResult(
                     verification_status=status,
                     passed=passed,
@@ -594,10 +700,41 @@ class ExecutionResult:
     evidence_hash: Optional[str] = None
 
 
+@contextmanager
+def block_network():
+    """
+    Context manager that intercepts socket creation/connection attempts to prevent
+    accidental network calls during offline execution.
+    Note: This provides Python process-level socket interception to guard against outbound
+    network calls, but does not provide OS-level container sandboxing.
+    """
+    orig_connect = socket.socket.connect
+    orig_create_connection = socket.create_connection
+
+    def _blocked_connect(self, *args, **kwargs):
+        raise NetworkAccessBlockedError(
+            f"Network access is blocked in offline mode: socket.connect attempted with args {args}"
+        )
+
+    def _blocked_create_connection(*args, **kwargs):
+        raise NetworkAccessBlockedError(
+            f"Network access is blocked in offline mode: socket.create_connection attempted with args {args}"
+        )
+
+    socket.socket.connect = _blocked_connect
+    socket.create_connection = _blocked_create_connection
+    try:
+        yield
+    finally:
+        socket.socket.connect = orig_connect
+        socket.create_connection = orig_create_connection
+
+
 class OfflineExecutionAdapter:
     """
     Offline execution workflow asserting zero provider or paid API invocations (RUN-08).
-    Replays fixture telemetry streams and ensures absolute network isolation.
+    Replays fixture telemetry streams and provides process-level socket interception to guard
+    against outbound network calls (note: does not provide OS-level container sandboxing).
     """
     def __init__(self, fixtures_path: Optional[Path] = None):
         self.fixtures_path = fixtures_path or DEFAULT_FIXTURES_PATH
@@ -626,87 +763,88 @@ class OfflineExecutionAdapter:
         Execute offline run by replaying mock fixtures without any external network calls (RUN-08).
         Supports simulated timeout (RUN-06), simulated interruption (RUN-07), and simulated failure.
         """
-        # Enforce zero live calls
-        self.assert_zero_provider_calls()
+        with block_network():
+            # Enforce zero live calls
+            self.assert_zero_provider_calls()
 
-        if simulate_timeout:
-            return ExecutionResult(
-                execution_status="timed_out",
-                duration_seconds=timeout_seconds,
-                num_turns=1,
-                usage={"input_tokens": 1500, "output_tokens": 200, "thinking_tokens": 0, "cache_read_tokens": 500, "total_tokens": 2200},
-                partial_events=['{"event": "start"}', '{"event": "turn_1", "usage": {"input_tokens": 1500, "output_tokens": 200}}'],
-                error_message="Simulated run timeout exceeded.",
-            )
-
-        if simulate_interruption:
-            return ExecutionResult(
-                execution_status="interrupted",
-                duration_seconds=2.5,
-                num_turns=1,
-                usage={"input_tokens": 1000, "output_tokens": 100, "thinking_tokens": 0, "cache_read_tokens": 200, "total_tokens": 1300},
-                partial_events=['{"event": "start"}', '{"event": "interrupted"}'],
-                error_message="Simulated execution interrupted.",
-            )
-
-        if simulate_failure:
-            return ExecutionResult(
-                execution_status="failed",
-                duration_seconds=1.0,
-                num_turns=1,
-                usage={"input_tokens": 500, "output_tokens": 50, "thinking_tokens": 0, "cache_read_tokens": 0, "total_tokens": 550},
-                partial_events=['{"event": "start"}', '{"event": "error", "message": "Simulated agent process failure."}'],
-                error_message="Simulated agent process failure.",
-            )
-
-        # Standard replay from fixtures
-        if self.fixtures_path.exists():
-            lines = self.fixtures_path.read_text(encoding="utf-8").splitlines()
-            events = []
-            for l in lines:
-                l_str = l.strip()
-                if not l_str:
-                    continue
-                try:
-                    ev = json.loads(l_str)
-                    if ev.get("task_id") == task_id and ev.get("arm") == arm and ev.get("run_index", 1) == run_index:
-                        events.append(l_str)
-                except Exception:
-                    continue
-
-            if events:
-                parsed = ledger.validate_and_parse_telemetry(events)
+            if simulate_timeout:
                 return ExecutionResult(
-                    execution_status="completed",
-                    duration_seconds=parsed["duration_seconds"],
-                    num_turns=parsed["num_turns"],
-                    usage=parsed["usage"],
-                    partial_events=events,
-                    evidence_ref=self.fixtures_path.name,
+                    execution_status="timed_out",
+                    duration_seconds=timeout_seconds,
+                    num_turns=1,
+                    usage={"input_tokens": 1500, "output_tokens": 200, "thinking_tokens": 0, "cache_read_tokens": 500, "total_tokens": 2200},
+                    partial_events=['{"event": "start"}', '{"event": "turn_1", "usage": {"input_tokens": 1500, "output_tokens": 200}}'],
+                    error_message="Simulated run timeout exceeded.",
                 )
 
-        # Default synthetic fixture event if task not in mock_stream
-        default_events = [
-            json.dumps({"event": "start", "task_id": task_id, "arm": arm, "run_index": run_index}),
-            json.dumps({
-                "event": "run_complete",
-                "task_id": task_id,
-                "arm": arm,
-                "run_index": run_index,
-                "usage": {"input_tokens": 25000, "output_tokens": 1200, "thinking_tokens": 100, "cache_read_tokens": 5000, "total_tokens": 31300},
-                "num_turns": 3,
-                "duration_seconds": 12.0,
-            }),
-        ]
-        parsed = ledger.validate_and_parse_telemetry(default_events)
-        return ExecutionResult(
-            execution_status="completed",
-            duration_seconds=parsed["duration_seconds"],
-            num_turns=parsed["num_turns"],
-            usage=parsed["usage"],
-            partial_events=default_events,
-            evidence_ref="synthetic_fixture",
-        )
+            if simulate_interruption:
+                return ExecutionResult(
+                    execution_status="interrupted",
+                    duration_seconds=2.5,
+                    num_turns=1,
+                    usage={"input_tokens": 1000, "output_tokens": 100, "thinking_tokens": 0, "cache_read_tokens": 200, "total_tokens": 1300},
+                    partial_events=['{"event": "start"}', '{"event": "interrupted"}'],
+                    error_message="Simulated execution interrupted.",
+                )
+
+            if simulate_failure:
+                return ExecutionResult(
+                    execution_status="failed",
+                    duration_seconds=1.0,
+                    num_turns=1,
+                    usage={"input_tokens": 500, "output_tokens": 50, "thinking_tokens": 0, "cache_read_tokens": 0, "total_tokens": 550},
+                    partial_events=['{"event": "start"}', '{"event": "error", "message": "Simulated agent process failure."}'],
+                    error_message="Simulated agent process failure.",
+                )
+
+            # Standard replay from fixtures
+            if self.fixtures_path.exists():
+                lines = self.fixtures_path.read_text(encoding="utf-8").splitlines()
+                events = []
+                for l in lines:
+                    l_str = l.strip()
+                    if not l_str:
+                        continue
+                    try:
+                        ev = json.loads(l_str)
+                        if ev.get("task_id") == task_id and ev.get("arm") == arm and ev.get("run_index", 1) == run_index:
+                            events.append(l_str)
+                    except Exception:
+                        continue
+
+                if events:
+                    parsed = ledger.validate_and_parse_telemetry(events)
+                    return ExecutionResult(
+                        execution_status="completed",
+                        duration_seconds=parsed["duration_seconds"],
+                        num_turns=parsed["num_turns"],
+                        usage=parsed["usage"],
+                        partial_events=events,
+                        evidence_ref=self.fixtures_path.name,
+                    )
+
+            # Default synthetic fixture event if task not in mock_stream
+            default_events = [
+                json.dumps({"event": "start", "task_id": task_id, "arm": arm, "run_index": run_index}),
+                json.dumps({
+                    "event": "run_complete",
+                    "task_id": task_id,
+                    "arm": arm,
+                    "run_index": run_index,
+                    "usage": {"input_tokens": 25000, "output_tokens": 1200, "thinking_tokens": 100, "cache_read_tokens": 5000, "total_tokens": 31300},
+                    "num_turns": 3,
+                    "duration_seconds": 12.0,
+                }),
+            ]
+            parsed = ledger.validate_and_parse_telemetry(default_events)
+            return ExecutionResult(
+                execution_status="completed",
+                duration_seconds=parsed["duration_seconds"],
+                num_turns=parsed["num_turns"],
+                usage=parsed["usage"],
+                partial_events=default_events,
+                evidence_ref="synthetic_fixture",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -808,8 +946,8 @@ class ManualExecutionAdapter:
             timestamp=datetime.now(timezone.utc).isoformat(),
             input_tokens=u["input_tokens"],
             output_tokens=u["output_tokens"],
-            thinking_tokens=u["thinking_tokens"] or 0 if u["input_tokens"] is not None else None,
-            cache_read_tokens=u["cache_read_tokens"] or 0 if u["input_tokens"] is not None else None,
+            thinking_tokens=u.get("thinking_tokens"),
+            cache_read_tokens=u.get("cache_read_tokens"),
             total_tokens=u["total_tokens"],
             num_turns=num_turns,
             duration_seconds=duration,
@@ -918,8 +1056,8 @@ def execute_run_with_lifecycle(
     u = exec_res.usage or {
         "input_tokens": None,
         "output_tokens": None,
-        "thinking_tokens": 0,
-        "cache_read_tokens": 0,
+        "thinking_tokens": None,
+        "cache_read_tokens": None,
         "total_tokens": None,
     }
 
@@ -931,8 +1069,8 @@ def execute_run_with_lifecycle(
         timestamp=datetime.now(timezone.utc).isoformat(),
         input_tokens=u["input_tokens"],
         output_tokens=u["output_tokens"],
-        thinking_tokens=u.get("thinking_tokens", 0),
-        cache_read_tokens=u.get("cache_read_tokens", 0),
+        thinking_tokens=u.get("thinking_tokens"),
+        cache_read_tokens=u.get("cache_read_tokens"),
         total_tokens=u["total_tokens"],
         num_turns=exec_res.num_turns,
         duration_seconds=exec_res.duration_seconds,

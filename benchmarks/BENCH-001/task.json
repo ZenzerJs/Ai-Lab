@@ -1,0 +1,7 @@
+{
+  "task_id": "BENCH-001",
+  "name": "Boundary Bug: Date Range Generator",
+  "category": "boundary_condition",
+  "description": "Fix boundary conditions in date range generator: inclusive start, exclusive end, empty range when start equals end, and validation of reversed and invalid ranges.",
+  "expected_broken_reason": "boundary_exclusive_end_included"
+}

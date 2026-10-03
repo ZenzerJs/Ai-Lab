@@ -1,0 +1,7 @@
+{
+  "task_id": "BENCH-002",
+  "name": "Cross-File API Contract: Paginated Items Endpoint",
+  "category": "cross_file_contract",
+  "description": "Update server endpoint and client adapter from flat item list to documented paginated response shape with metadata, error handling, and empty page support.",
+  "expected_broken_reason": "client_server_contract_mismatch"
+}

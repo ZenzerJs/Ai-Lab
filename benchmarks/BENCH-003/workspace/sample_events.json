@@ -1,0 +1,18 @@
+[
+  {
+    "event_id": "EVT-001",
+    "event_type": "user_signup",
+    "version": "1.0",
+    "timestamp": "2026-06-01T12:00:00Z",
+    "payload": {"username": "alice", "plan": "pro", "note": "Welcome! 🚀"},
+    "metadata": {"source": "web", "region": "us-east"}
+  },
+  {
+    "event_id": "EVT-002",
+    "event_type": "checkout",
+    "version": "2.0",
+    "timestamp": "2026-06-01T12:05:00Z",
+    "payload": {"cart_id": "C-99", "amount": 49.99, "currency": "USD", "greeting": "こんにちは"},
+    "metadata": {"source": "mobile", "region": "ap-northeast"}
+  }
+]

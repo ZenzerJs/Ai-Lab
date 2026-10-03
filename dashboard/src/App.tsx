@@ -104,7 +104,11 @@ export const App: React.FC = () => {
     </div>
   );
 
-  const renderEmpty = data && !data.has_data && (
+  const hasAnyRuns = Boolean(data && data.runs && data.runs.length > 0);
+  const hasAnyTasks = Boolean(data && data.tasks && data.tasks.length > 0);
+  const hasAnyData = Boolean(data && (data.has_data || hasAnyRuns || hasAnyTasks || data.is_demo_report));
+
+  const renderEmpty = data && !hasAnyData && (
     <Card>
       <CardHeader className="pb-3">
         <div className="flex items-center gap-2">
@@ -140,7 +144,7 @@ export const App: React.FC = () => {
     </Card>
   );
 
-  const renderTelemetry = activeData && data?.has_data && (
+  const renderTelemetry = activeData && (activeData.has_data || (activeData.tasks && activeData.tasks.length > 0) || activeData.runs.length > 0) && (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-2 border-b border-surface-border pb-4">
         <h2 className="text-xl font-bold text-white font-mono">Telemetry & Cost Economics</h2>
@@ -168,7 +172,7 @@ export const App: React.FC = () => {
     </div>
   );
 
-  const renderSimulator = data?.has_data && (
+  const renderSimulator = data && (data.has_data || (data.pricing && data.pricing.length > 0)) && (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-2 border-b border-surface-border pb-4">
         <h2 className="text-xl font-bold text-white font-mono">Multi-Model Rate-Card Simulator</h2>
@@ -213,7 +217,7 @@ export const App: React.FC = () => {
     </div>
   );
 
-  const renderEvidence = data?.has_data && activeData && (
+  const renderEvidence = data && activeData && (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2 border-b border-surface-border pb-4">
         <h2 className="text-xl font-bold text-white font-mono">Audit Ledger & Provenance</h2>
@@ -242,7 +246,36 @@ export const App: React.FC = () => {
         {renderLoading}
         {renderEmpty}
 
-        {data && data.has_data && (
+        {activeData && (activeData.is_demo_report || !activeData.cumulative?.has_measured_data) && (
+          <div
+            data-testid="demo-fixture-banner"
+            className="rounded-lg border border-warning/40 bg-warning/10 p-4 text-warning flex items-start gap-3"
+          >
+            <AlertTriangle className="size-5 shrink-0 mt-0.5" />
+            <div className="flex-1 space-y-1">
+              <div className="font-semibold text-sm tracking-wide uppercase font-mono">
+                DEMO / FIXTURE DATA (Empirical Headlines Suppressed)
+              </div>
+              <div className="text-xs text-warning/90 leading-relaxed font-sans">
+                This dashboard is displaying synthetic fixtures or dry-run replayed telemetry. Empirical headline metrics and savings claims are suppressed until verified live benchmark telemetry is recorded.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeData && activeData.is_simulation && !activeData.is_demo_report && (
+          <div
+            data-testid="simulation-active-banner"
+            className="rounded-lg border border-cyan-500/40 bg-cyan-950/20 p-3 text-cyan-400 flex items-center gap-3 font-mono text-xs"
+          >
+            <Info className="size-4 shrink-0" />
+            <span>
+              MODEL-PRICE SIMULATION ACTIVE: Empirical token workloads repriced against target published rate-card.
+            </span>
+          </div>
+        )}
+
+        {data && hasAnyData && (
           <section
             role="tabpanel"
             id={`panel-${activeTab}`}
@@ -250,7 +283,7 @@ export const App: React.FC = () => {
             className="flex flex-col gap-5"
           >
             {activeTab === 'showcase' && (
-              <ExecutiveShowcase data={data} onNavigateTab={setActiveTab} />
+              <ExecutiveShowcase data={activeData || data} onNavigateTab={setActiveTab} />
             )}
             {activeTab === 'sandboxes' && <SandboxViewer />}
             {activeTab === 'telemetry' && renderTelemetry}
