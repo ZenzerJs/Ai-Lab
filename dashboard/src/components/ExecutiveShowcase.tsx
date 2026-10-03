@@ -49,8 +49,21 @@ export const ExecutiveShowcase: React.FC<ExecutiveShowcaseProps> = ({
     ? '—'
     : `${cacheHit.toFixed(1)}%`;
 
-  const thinkingBurnLabel = isDemo ? '—' : '-34.4%';
-  const assertionParityLabel = isDemo ? '—' : '100%';
+  const thinkingBurnLabel = isDemo
+    ? '—'
+    : (data?.cumulative?.thinking_tokens_saved_percent != null
+      ? `-${data.cumulative.thinking_tokens_saved_percent.toFixed(1)}%`
+      : '—');
+
+  const assertionParityLabel = isDemo
+    ? '—'
+    : (data?.campaign?.arms?.icm?.verified_success_rate != null
+      ? `${(data.campaign.arms.icm.verified_success_rate * 100).toFixed(0)}%`
+      : (data?.cumulative?.verified_count != null && data?.cumulative?.total_runs > 0
+        ? `${((data.cumulative.verified_count / data.cumulative.total_runs) * 100).toFixed(0)}%`
+        : '—'));
+
+  const activeModel = data?.campaign?.model || data?.runs?.[0]?.model || 'gemini-2.5-pro';
 
   return (
     <div className="flex flex-col gap-6 font-sans">
@@ -76,11 +89,15 @@ export const ExecutiveShowcase: React.FC<ExecutiveShowcaseProps> = ({
               <span>Interpretable Context Methodology (ICM)</span>
               <span>•</span>
               <span className="text-sage font-semibold">
-                {isDemo ? 'Fixture Benchmark' : '100% Playwright Verified'}
+                {isDemo
+                  ? 'Fixture Benchmark'
+                  : (data?.cumulative?.has_measured_data
+                    ? 'Empirical Measurements Active'
+                    : 'No Measured Verification')}
               </span>
             </div>
             <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
-              <span className="px-2 py-0.5 rounded bg-surface border border-surface-border">gemini-3.8-flash</span>
+              <span className="px-2 py-0.5 rounded bg-surface border border-surface-border">{activeModel}</span>
               <span>{tasksCount} Tasks Evaluated</span>
               <span>•</span>
               <span>{totalRuns} Runs Recorded</span>
@@ -559,9 +576,9 @@ export const ExecutiveShowcase: React.FC<ExecutiveShowcaseProps> = ({
               </div>
 
               <div className="p-3 rounded-lg bg-surface border border-surface-border space-y-1">
-                <strong className="text-sage block">3. 100% Functional Parity:</strong>
+                <strong className="text-sage block">3. EXP-007 Interactive Parity:</strong>
                 <span>
-                  Despite burning 63% fewer dollars and 81% fewer tokens, the governed arm delivered identical 3/3 automated test assertion passes.
+                  In the EXP-007 interactive gateway showcase scenario, the governed arm delivered identical 3/3 automated test assertion passes while reducing token and dollar spend.
                 </span>
               </div>
             </div>

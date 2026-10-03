@@ -36,6 +36,27 @@ OUTPUT_PATH = DASHBOARD_DIR / "public" / "data.json"
 OPS_DB_PATH = WORKSPACE_ROOT / "data" / "ops_exp005.db"
 
 
+def get_build_identity() -> str:
+    """Return short Git commit SHA or environment build identifier."""
+    env_sha = os.environ.get("GITHUB_SHA") or os.environ.get("BUILD_ID")
+    if env_sha:
+        return env_sha[:8]
+    try:
+        import subprocess
+        res = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(WORKSPACE_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip()
+    except Exception:
+        pass
+    return "dev-local"
+
+
 def sanitize_export_text(text: Optional[str]) -> Optional[str]:
     """Redact private file paths and sentinel secrets from public export."""
     if not text:
@@ -261,6 +282,8 @@ def build_data_payload(
             m_cum = ledger.cumulative_savings(conn=conn, db_path=db_path, model_override=m, capture_policy=capture_policy)
             cascade.append({
                 "model": m,
+                "is_simulation": True,
+                "counter_semantics_qualification": m_cum.get("counter_semantics_qualification"),
                 "input_usd_per_mtok": p["input_usd_per_mtok"],
                 "cache_read_usd_per_mtok": p["cache_read_usd_per_mtok"],
                 "output_usd_per_mtok": p["output_usd_per_mtok"],
@@ -300,6 +323,7 @@ def build_data_payload(
 
         payload = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "build_identity": get_build_identity(),
             "has_data": has_data,
             "is_demo_report": is_demo_report,
             "is_simulation": False,
@@ -334,27 +358,33 @@ def export_data(
 
 
 def main():
-    out_path = Path(sys.argv[1]) if len(sys.argv) > 1 else OUTPUT_PATH
+    # Allow env-var overrides for CI / test isolation
+    env_out = os.environ.get("AI_LAB_OUTPUT_PATH")
+    env_db = os.environ.get("AI_LAB_DB_PATH")
+
+    out_path = Path(env_out) if env_out else (Path(sys.argv[1]) if len(sys.argv) > 1 else OUTPUT_PATH)
+    db_path = Path(env_db) if env_db else (WORKSPACE_ROOT / "data" / "usage.db")
 
     # In CI, data/usage.db may not exist (it's gitignored).
     # The committed data.json snapshot is used directly; skip export gracefully.
-    db_path = WORKSPACE_ROOT / "data" / "usage.db"
     if not db_path.exists():
-        if out_path.exists():
+        if out_path.exists() and not env_out:
+            # Real output path exists and no override: preserve committed snapshot
             print(f"✓ No database found — using committed snapshot: {out_path}")
         else:
-            # Emit a minimal valid payload so the dashboard renders without errors
+            # Emit a minimal valid placeholder so the dashboard renders without errors
             out_path.parent.mkdir(parents=True, exist_ok=True)
             placeholder = {
                 "generated_at": datetime.now(timezone.utc).isoformat(),
+                "build_identity": get_build_identity(),
                 "has_data": False,
-                "is_demo_report": False,
+                "is_demo_report": True,
                 "is_simulation": False,
                 "cumulative": {
                     "tasks_evaluated": 0,
                     "total_runs": 0,
                     "has_measured_data": False,
-                    "is_demo_report": False,
+                    "is_demo_report": True,
                     "tasks": [],
                 },
                 "tasks": [],
@@ -369,7 +399,8 @@ def main():
             print(f"✓ No database — wrote empty placeholder: {out_path}")
         return
 
-    export_data(out_path)
+    export_data(out_path, db_path=db_path)
+
 
 
 if __name__ == "__main__":

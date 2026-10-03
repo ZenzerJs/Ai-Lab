@@ -55,38 +55,61 @@ export const PerTaskComparison: React.FC<PerTaskComparisonProps> = ({ tasks, sca
           ? 'ICM Subagents'
           : comparisonArmKey;
 
+      const hasBothArms = Boolean(
+        b &&
+        i &&
+        (b.n ?? 0) > 0 &&
+        (i.n ?? 0) > 0 &&
+        b.mean_cost_usd !== null &&
+        b.mean_cost_usd !== undefined &&
+        i.mean_cost_usd !== null &&
+        i.mean_cost_usd !== undefined
+      );
+
       let bMean = b?.mean_cost_usd ?? 0;
       let iMean = i?.mean_cost_usd ?? 0;
-      let savingsUsd: number | null =
-        t.savings?.mean_savings_usd !== null && t.savings?.mean_savings_usd !== undefined
-          ? t.savings.mean_savings_usd
-          : bMean > 0 || iMean > 0
-          ? bMean - iMean
-          : null;
-
-      if (isScaled) {
-        const rawBMean = b?.mean_cost_usd ?? 0;
-        const rawIMean = i?.mean_cost_usd ?? 0;
-        const scaledBMean = (t.savings?.cost_per_mtok_baseline ?? (rawBMean * 20)) * mult;
-        const scaledIMean = (t.savings?.cost_per_mtok_icm ?? (rawIMean * 20)) * mult;
-
-        bMean = scaledBMean;
-        iMean = scaledIMean;
-        savingsUsd =
-          t.savings?.savings_usd_per_mtok !== null && t.savings?.savings_usd_per_mtok !== undefined
-            ? t.savings.savings_usd_per_mtok * mult
-            : (bMean - iMean);
-      }
-
+      let savingsUsd: number | null = null;
       let savingsPct: number | null = null;
-      if (
-        t.savings?.mean_savings_percent !== null &&
-        t.savings?.mean_savings_percent !== undefined &&
-        Number.isFinite(t.savings.mean_savings_percent)
-      ) {
-        savingsPct = t.savings.mean_savings_percent;
-      } else if (bMean > 0) {
-        savingsPct = ((bMean - iMean) / bMean) * 100;
+
+      if (hasBothArms) {
+        savingsUsd =
+          t.savings?.mean_savings_usd !== null && t.savings?.mean_savings_usd !== undefined
+            ? t.savings.mean_savings_usd
+            : bMean - iMean;
+
+        if (isScaled) {
+          const rawBMean = b?.mean_cost_usd ?? 0;
+          const rawIMean = i?.mean_cost_usd ?? 0;
+          const scaledBMean = (t.savings?.cost_per_mtok_baseline ?? (rawBMean * 20)) * mult;
+          const scaledIMean = (t.savings?.cost_per_mtok_icm ?? (rawIMean * 20)) * mult;
+
+          bMean = scaledBMean;
+          iMean = scaledIMean;
+          savingsUsd =
+            t.savings?.savings_usd_per_mtok !== null && t.savings?.savings_usd_per_mtok !== undefined
+              ? t.savings.savings_usd_per_mtok * mult
+              : (bMean - iMean);
+        }
+
+        if (
+          t.savings?.mean_savings_percent !== null &&
+          t.savings?.mean_savings_percent !== undefined &&
+          Number.isFinite(t.savings.mean_savings_percent)
+        ) {
+          savingsPct = t.savings.mean_savings_percent;
+        } else if (bMean > 0) {
+          savingsPct = ((bMean - iMean) / bMean) * 100;
+        }
+      } else {
+        // Missing arm: savings is undefined; do not invent 100% savings or zero baseline
+        savingsUsd = null;
+        savingsPct = null;
+        if (isScaled) {
+          const rawBMean = b?.mean_cost_usd ?? 0;
+          const rawIMean = i?.mean_cost_usd ?? 0;
+          bMean = (t.savings?.cost_per_mtok_baseline ?? (rawBMean * 20)) * mult;
+          iMean = (t.savings?.cost_per_mtok_icm ?? (rawIMean * 20)) * mult;
+        }
       }
 
       return {
@@ -103,23 +126,28 @@ export const PerTaskComparison: React.FC<PerTaskComparisonProps> = ({ tasks, sca
     });
   }, [tasks, scaleMode]);
 
-  // Explicit Pooled Summary calculations
+  // Explicit Pooled Summary calculations - pools strictly paired tasks
   const pooledSummary = useMemo(() => {
     let totalBaseCost = 0;
     let totalGovCost = 0;
     let totalBaseRuns = 0;
     let totalGovRuns = 0;
+    let pairedTaskCount = 0;
 
     for (const d of chartData) {
-      totalBaseCost += d.baselineCost;
-      totalGovCost += d.governedCost;
       totalBaseRuns += d.baselineN;
       totalGovRuns += d.governedN;
+      // Only pool costs for tasks where BOTH arms are present and evaluated
+      if (d.baselineN > 0 && d.governedN > 0 && d.savingsUsd !== null) {
+        totalBaseCost += d.baselineCost;
+        totalGovCost += d.governedCost;
+        pairedTaskCount += 1;
+      }
     }
 
-    const netSavingsUsd = totalBaseCost - totalGovCost;
+    const netSavingsUsd = pairedTaskCount > 0 ? (totalBaseCost - totalGovCost) : null;
     const netSavingsPct =
-      totalBaseCost > 0 ? (netSavingsUsd / totalBaseCost) * 100 : null;
+      pairedTaskCount > 0 && totalBaseCost > 0 ? (netSavingsUsd! / totalBaseCost) * 100 : null;
 
     return {
       totalBaseCost,
@@ -129,6 +157,7 @@ export const PerTaskComparison: React.FC<PerTaskComparisonProps> = ({ tasks, sca
       netSavingsUsd,
       netSavingsPct,
       taskCount: chartData.length,
+      pairedTaskCount,
     };
   }, [chartData]);
 
@@ -246,7 +275,7 @@ export const PerTaskComparison: React.FC<PerTaskComparisonProps> = ({ tasks, sca
                   </div>
                   <div className="p-2.5 rounded-lg bg-surface border border-surface-border">
                     <span className="text-[10px] text-muted-foreground uppercase block">Pooled Net Savings</span>
-                    <span className={`font-bold text-sm ${pooledSummary.netSavingsUsd >= 0 ? 'text-sage' : 'text-danger'}`}>
+                    <span className={`font-bold text-sm ${pooledSummary.netSavingsUsd !== null && pooledSummary.netSavingsUsd >= 0 ? 'text-sage' : (pooledSummary.netSavingsUsd !== null ? 'text-danger' : 'text-muted-foreground')}`}>
                       {formatSignedCurrency(pooledSummary.netSavingsUsd)}
                     </span>
                   </div>

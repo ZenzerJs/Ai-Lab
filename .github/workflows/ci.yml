@@ -24,6 +24,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Run Python Unit Tests
+        run: |
+          python -m pytest tests/unit/ -v --tb=short
+          python -m pytest tests/browser/test_dashboard_production.py::TestSnapshotIntegrity tests/browser/test_dashboard_production.py::TestPagesWorkflowRegression -v --tb=short
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:

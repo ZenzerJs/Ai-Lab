@@ -227,7 +227,7 @@ export const App: React.FC = () => {
       </div>
       <ExperimentCards tasks={activeData.tasks} />
       {data.operational && <OperationalBenchmarkCard ops={data.operational} />}
-      <RawLedgerTable runs={activeData.runs} />
+      <RawLedgerTable runs={activeData.runs} generatedAt={activeData.generated_at} buildIdentity={activeData.build_identity} />
     </div>
   );
 

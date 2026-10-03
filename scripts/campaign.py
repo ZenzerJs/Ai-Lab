@@ -591,8 +591,12 @@ def _is_slot_cost_eligible(slot: CampaignSlot) -> bool:
     return _slot_has_valid_cost(slot)
 
 
-def _compute_arm_metrics(arm_slots: List[CampaignSlot]) -> Dict[str, Any]:
-    """Compute decoupled correctness and cost metrics for a single arm (REP-03, REP-06, REP-07, Findings 2 & 3)."""
+def _compute_arm_metrics(
+    arm_slots: List[CampaignSlot],
+    empirical_only: bool = False,
+    capture_policy: str = "approved",
+) -> Dict[str, Any]:
+    """Compute decoupled correctness and cost metrics for a single arm (REP-03, REP-06, REP-07, Findings 1, 2 & 3)."""
     n_scheduled = len(arm_slots)
     if n_scheduled == 0:
         return {
@@ -641,14 +645,26 @@ def _compute_arm_metrics(arm_slots: List[CampaignSlot]) -> Dict[str, Any]:
     evaluated_success_rate = (len(passed_slots) / len(evaluated_slots)) if evaluated_slots else None
     evaluation_coverage = (len(evaluated_slots) / n_executed) if n_executed > 0 else 0.0
 
-    # 2. Cost completeness & eligibility (REP-07)
-    cost_eligible_slots = [s for s in arm_slots if _is_slot_cost_eligible(s)]
-    cost_excluded_slots = [s for s in arm_slots if not _is_slot_cost_eligible(s)]
+    # 2. Cost completeness & eligibility (REP-07, Finding 1)
+    if empirical_only:
+        cost_eligible_slots = [
+            s for s in arm_slots
+            if _is_slot_cost_eligible(s) and _is_slot_empirical_measured(s, capture_policy=capture_policy)
+        ]
+        cost_excluded_slots = [
+            s for s in arm_slots
+            if not (_is_slot_cost_eligible(s) and _is_slot_empirical_measured(s, capture_policy=capture_policy))
+        ]
+    else:
+        cost_eligible_slots = [s for s in arm_slots if _is_slot_cost_eligible(s)]
+        cost_excluded_slots = [s for s in arm_slots if not _is_slot_cost_eligible(s)]
 
     cost_exclusion_reasons = []
     for s in cost_excluded_slots:
         if s.status != "completed":
             cost_exclusion_reasons.append(f"status_{s.status}")
+        elif empirical_only and not _is_slot_empirical_measured(s, capture_policy=capture_policy):
+            cost_exclusion_reasons.append("mixed_population_fixture_excluded")
         elif s.input_tokens is None or s.output_tokens is None:
             cost_exclusion_reasons.append("missing_usage_telemetry")
         elif s.cost_status in ("unavailable", "incomplete", "unknown"):
@@ -674,14 +690,27 @@ def _compute_arm_metrics(arm_slots: List[CampaignSlot]) -> Dict[str, Any]:
 
     # 3. Cost per success (Findings 2 & 3):
     # Include all known failure/timeout spend across executed attempts, and disclose missing spend
-    executed_with_cost = [s for s in executed_slots if _slot_has_valid_cost(s)]
-    executed_missing_cost = [s for s in executed_slots if not _slot_has_valid_cost(s)]
+    if empirical_only:
+        executed_with_cost = [
+            s for s in executed_slots
+            if _slot_has_valid_cost(s) and _is_slot_empirical_measured(s, capture_policy=capture_policy)
+        ]
+        executed_missing_cost = [
+            s for s in executed_slots
+            if not (_slot_has_valid_cost(s) and _is_slot_empirical_measured(s, capture_policy=capture_policy))
+        ]
+        cost_eligible_passed = [
+            s for s in passed_slots
+            if _is_slot_cost_eligible(s) and _is_slot_empirical_measured(s, capture_policy=capture_policy)
+        ]
+    else:
+        executed_with_cost = [s for s in executed_slots if _slot_has_valid_cost(s)]
+        executed_missing_cost = [s for s in executed_slots if not _slot_has_valid_cost(s)]
+        cost_eligible_passed = [s for s in passed_slots if _is_slot_cost_eligible(s)]
     has_missing_spend = len(executed_missing_cost) > 0
     missing_cost_sample_count = len(executed_missing_cost)
 
     total_arm_spend = sum(s.cost_usd for s in executed_with_cost if s.cost_usd is not None)
-
-    cost_eligible_passed = [s for s in passed_slots if _is_slot_cost_eligible(s)]
 
     if len(passed_slots) == 0:
         cost_per_success = None
@@ -735,12 +764,15 @@ def _compute_arm_metrics(arm_slots: List[CampaignSlot]) -> Dict[str, Any]:
 def _compute_savings_and_pairs(
     slots: List[CampaignSlot],
     arms_summary: Dict[str, Any],
+    empirical_only: bool = False,
+    capture_policy: str = "approved",
 ) -> Dict[str, Any]:
     """
     Compute savings, paired differences, and handle edge cases across all evaluated arms:
     - REP-05: Zero baseline cost -> savings percentage undefined (None), absolute numbers reported.
     - REP-08: Missing member in pair -> excluded from paired differences; missing-pair count reported.
     - Supports multi-arm comparisons (Arm A vs Arm B, Arm A vs Arm C).
+    - Finding 1: When empirical_only is True, fixtures/simulations in mixed populations cannot enter empirical paired differences.
     """
     comparison_arms = [k for k in arms_summary.keys() if k != "baseline"]
     primary_gov_arm = "icm" if "icm" in comparison_arms else ("delegation" if "delegation" in comparison_arms else (comparison_arms[0] if comparison_arms else None))
@@ -805,11 +837,22 @@ def _compute_savings_and_pairs(
                 b_s = arm_map.get("baseline")
                 g_s = arm_map.get(gov_arm)
 
-                if (
+                b_cost_ok = (
                     b_s is not None
-                    and g_s is not None
                     and _is_slot_cost_eligible(b_s)
+                    and (not empirical_only or _is_slot_empirical_measured(b_s, capture_policy=capture_policy))
+                )
+                g_cost_ok = (
+                    g_s is not None
                     and _is_slot_cost_eligible(g_s)
+                    and (not empirical_only or _is_slot_empirical_measured(g_s, capture_policy=capture_policy))
+                )
+
+                if (
+                    b_cost_ok
+                    and g_cost_ok
+                    and b_s is not None
+                    and g_s is not None
                     and b_s.cost_usd is not None
                     and g_s.cost_usd is not None
                 ):
@@ -890,7 +933,7 @@ def _compute_single_stratum_summary(
     scheduled_counts: Dict[str, int] = {}
     for arm in arms:
         arm_slots = [s for s in stratum_slots if s.arm == arm]
-        arm_res = _compute_arm_metrics(arm_slots)
+        arm_res = _compute_arm_metrics(arm_slots, empirical_only=has_measured_data, capture_policy=capture_policy)
         arms_summary[arm] = arm_res
         sample_counts[arm] = arm_res["sample_count"]
         scheduled_counts[arm] = arm_res["n_scheduled"]
@@ -906,7 +949,7 @@ def _compute_single_stratum_summary(
     balance_status = "balanced" if is_balanced else "uneven"
 
     # Savings & paired differences
-    sp_res = _compute_savings_and_pairs(stratum_slots, arms_summary)
+    sp_res = _compute_savings_and_pairs(stratum_slots, arms_summary, empirical_only=has_measured_data, capture_policy=capture_policy)
 
     status = "completed" if has_measured_data else ("demo_report" if is_demo_report else "no_eligible_measured_runs")
     if total_scheduled == 0:
@@ -1253,7 +1296,12 @@ def generate_campaign_report(
 
         overall_summary["arms"] = macro_arms
         # Recalculate savings under macro averages
-        sp_macro = _compute_savings_and_pairs(active_slots, macro_arms)
+        sp_macro = _compute_savings_and_pairs(
+            active_slots,
+            macro_arms,
+            empirical_only=overall_summary["has_measured_data"],
+            capture_policy=capture_policy,
+        )
         overall_summary["savings"] = sp_macro["savings"]
 
         # Macro-average paired differences across tasks

@@ -31,6 +31,8 @@ import { cn, getPublicUrl } from '../lib/utils';
 
 interface RawLedgerTableProps {
   runs: RunRecord[];
+  generatedAt?: string;
+  buildIdentity?: string;
 }
 
 type SortField =
@@ -43,7 +45,7 @@ type SortField =
   | 'cache_read_tokens'
   | 'duration_seconds';
 
-export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs }) => {
+export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs, generatedAt, buildIdentity }) => {
   const [isOpen, setIsOpen] = useState(true);
   const [sortField, setSortField] = useState<SortField>('id');
   const [sortAsc, setSortAsc] = useState(true);
@@ -154,6 +156,16 @@ export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs }) => {
             <ChevronDown className="size-4 text-gray-400" />
           )}
         </button>
+
+        {(generatedAt || buildIdentity) && (
+          <p className="text-[10px] text-gray-500 font-mono mt-0.5 sm:mt-0 sm:ml-1 shrink-0">
+            {buildIdentity && <span title="Build identity">build:{buildIdentity}</span>}
+            {generatedAt && buildIdentity && <span className="mx-1">·</span>}
+            {generatedAt && (
+              <span title="Snapshot generated at">{new Date(generatedAt).toLocaleString()}</span>
+            )}
+          </p>
+        )}
 
         <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto justify-between sm:justify-end">
           {/* Quick Search */}

@@ -80,6 +80,42 @@
 
 ---
 
+## Claims & Limitations
+
+> [!IMPORTANT]
+> **What the dashboard shows and what it cannot verify.**
+
+| Claim | Status | Qualification |
+|:---|:---|:---|
+| **Empirical token savings (EXP-001–008)** | Measured | Live Antigravity CLI telemetry against `gemini-3.8-flash`. Savings figures derive from actual prompt/cache/output token counts, not estimates. |
+| **Frontier model simulations** | Simulated | Rate-card repricing of the empirical token workload at Anthropic/OpenAI/Google list prices. No paid API calls made to those endpoints. Tokenizer differences and cache-threshold semantics may not translate exactly across providers. |
+| **FreeBuff / GLM 5.3 Flash results** | Operational only | FreeBuff endpoints do not expose token counters. Cost figures for GLM 5.3 Flash simulate OpenRouter public rates against turn counts, not measured token billing. |
+| **Dashboard fixture/demo banner** | Active when no live data | The dashboard reads `dashboard/public/data.json`. If that snapshot was built without a local database (`data/usage.db`), it is labelled **DEMO / FIXTURE DATA** and empirical aggregates are suppressed. |
+| **"Refresh" button** | Reloads published JSON | Refresh re-fetches `data.json` from the deployed server. It does not query a live SQLite database or trigger new model runs. |
+| **Snapshot timestamp / build identity** | Visible in Audit tab | The Raw Ledger Entries card shows `build:<sha>` and the ISO timestamp of when `build_data.py` last ran. Use this to verify which snapshot is deployed. |
+| **100% Playwright verified (EXP-007)** | Task-scoped | Playwright assertions cover the EXP-007 SVG topology sandbox only, not all dashboard tabs. |
+| **Cross-arm paired savings** | Only with both arms present | If one arm (Baseline or Governed) has no runs for a task, that task is excluded from pooled savings totals. The UI shows `—` rather than inventing a percentage. |
+
+### Verified execution commands
+
+```bash
+# Run unit + integration test suite (requires pytest>=7)
+python -m pytest tests/unit/ -v --tb=short
+
+# Build dashboard data snapshot from local DB (if present)
+python dashboard/build_data.py
+
+# Serve production build locally under /Ai-Lab/ base path
+cd dashboard && npm ci && npm run build
+npx serve dist -s --listen 4173 --base /Ai-Lab/
+# Then open http://localhost:4173/Ai-Lab/
+
+# Dry-run experiment (no live model calls)
+python scripts/run_experiment.py --task MOCK-001 --dry-run
+```
+
+---
+
 ## 1. System at a Glance
 
 The workspace is organized into **six colored layers**. Each layer has one responsibility and only interacts with adjacent layers. The layer model adapts the ICM architecture [2](#8-references--pinned-specifications). The knowledge layer is a conformant OKF v0.2 bundle [1](#8-references--pinned-specifications).
