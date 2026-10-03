@@ -5,10 +5,23 @@ import { TradeoffCallout } from './components/TradeoffCallout';
 import { TaskComparison } from './components/TaskComparison';
 import { TaskTable } from './components/TaskTable';
 import { SandboxViewer } from './components/SandboxViewer';
-import { MethodologyDrawer } from './components/MethodologyDrawer';
-import { DashboardPayload } from './types';
+import { SpendCascadeComparison } from './components/SpendCascadeComparison';
+import { ModelSelector } from './components/ModelSelector';
+import { RawLedgerTable } from './components/RawLedgerTable';
+import { DashboardPayload, ScaleMode } from './types';
 import { deriveDataForModel } from './lib/recalculate';
-import { AlertTriangle, RefreshCw, Terminal, PlayCircle } from 'lucide-react';
+import {
+  AlertTriangle,
+  RefreshCw,
+  Terminal,
+  PlayCircle,
+  LayoutDashboard,
+  Layers,
+  Cpu,
+  Monitor,
+  Database,
+  ArrowUpRight,
+} from 'lucide-react';
 import { Alert } from './components/ui/alert';
 import { Skeleton } from './components/ui/skeleton';
 import { Button } from './components/ui/button';
@@ -16,11 +29,15 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './com
 import { Empty, EmptyIcon, EmptyTitle, EmptyDescription, EmptyActions } from './components/ui/empty';
 import { getPublicUrl } from './lib/utils';
 
+type ActiveTab = 'overview' | 'tasks' | 'simulator' | 'sandboxes' | 'audit';
+
 export const App: React.FC = () => {
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
   const [selectedModel, setSelectedModel] = useState<string>('recorded');
+  const [scaleMode, setScaleMode] = useState<ScaleMode>('1x');
 
   const activeData = useMemo(() => {
     return deriveDataForModel(data, selectedModel);
@@ -57,16 +74,16 @@ export const App: React.FC = () => {
   }, [fetchData]);
 
   const renderError = error && (
-    <Alert variant="destructive" className="items-center justify-between">
+    <Alert variant="destructive" className="items-center justify-between glass-panel border-rose-500/30">
       <div className="flex items-center gap-2">
-        <AlertTriangle className="size-4 text-danger shrink-0" />
-        <span>{error}</span>
+        <AlertTriangle className="size-4 text-rose-400 shrink-0" />
+        <span className="text-xs font-mono">{error}</span>
       </div>
       <Button
         variant="outline"
         size="sm"
         onClick={() => fetchData()}
-        className="text-xs border-danger/40 text-danger hover:bg-danger/20 gap-1.5 font-mono"
+        className="text-xs border-rose-500/40 text-rose-300 hover:bg-rose-500/20 gap-1.5 font-mono"
       >
         <RefreshCw className="size-3" /> Retry
       </Button>
@@ -75,16 +92,16 @@ export const App: React.FC = () => {
 
   const renderLoading = loading && !data && (
     <div className="flex flex-col gap-6">
-      <div className="rounded-xl border border-surface-border p-5 bg-surface flex flex-col gap-3">
-        <Skeleton className="h-6 w-1/3" />
-        <Skeleton className="h-4 w-1/2" />
+      <div className="glass-panel rounded-2xl p-6 flex flex-col gap-4">
+        <Skeleton className="h-7 w-1/3 bg-white/5" />
+        <Skeleton className="h-4 w-1/2 bg-white/5" />
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Skeleton className="h-28 rounded-xl" />
-        <Skeleton className="h-28 rounded-xl" />
-        <Skeleton className="h-28 rounded-xl" />
+        <Skeleton className="h-32 rounded-2xl bg-white/5" />
+        <Skeleton className="h-32 rounded-2xl bg-white/5" />
+        <Skeleton className="h-32 rounded-2xl bg-white/5" />
       </div>
-      <Skeleton className="h-64 rounded-xl" />
+      <Skeleton className="h-72 rounded-2xl bg-white/5" />
     </div>
   );
 
@@ -93,33 +110,33 @@ export const App: React.FC = () => {
   const hasAnyData = Boolean(data && (data.has_data || hasAnyRuns || hasAnyTasks || data.is_demo_report));
 
   const renderEmpty = data && !hasAnyData && (
-    <Card>
+    <Card className="glass-panel border-white/10 rounded-2xl shadow-xl">
       <CardHeader className="pb-3">
         <div className="flex items-center gap-2">
-          <PlayCircle className="size-5 text-primary" />
-          <CardTitle>Welcome to Antigravity AI-Lab Benchmark Dashboard</CardTitle>
+          <PlayCircle className="size-5 text-indigo-400" />
+          <CardTitle className="text-white font-mono">Antigravity Benchmark Suite</CardTitle>
         </div>
-        <CardDescription>
-          No benchmark runs have been recorded in the local ledger database yet.
+        <CardDescription className="text-gray-400 font-mono">
+          No live benchmark runs detected in usage.db.
         </CardDescription>
       </CardHeader>
       <CardContent>
         <Empty className="py-12">
           <EmptyIcon>
-            <Terminal className="size-8 text-primary" />
+            <Terminal className="size-8 text-indigo-400" />
           </EmptyIcon>
-          <EmptyTitle>Ready to execute your first benchmark</EmptyTitle>
-          <EmptyDescription>
-            Execute live model evaluations to populate token economics and cache ratio curves:
+          <EmptyTitle className="text-white font-mono">Ready to execute benchmark matrix</EmptyTitle>
+          <EmptyDescription className="text-gray-400 font-sans">
+            Run empirical A/B trials across task archetypes:
           </EmptyDescription>
-          <div className="mt-4 p-3 bg-background rounded-lg border border-surface-border text-left font-mono text-xs text-gray-300 space-y-1 w-full max-w-lg">
-            <div className="text-muted-foreground"># Run live benchmark trial:</div>
-            <div className="text-sage">python scripts/run_experiment.py --task EXP-001 --runs 3</div>
-            <div className="text-muted-foreground pt-1"># Export database to dashboard:</div>
-            <div className="text-sage">python dashboard/build_data.py</div>
+          <div className="mt-4 p-4 bg-black/60 rounded-xl border border-white/10 text-left font-mono text-xs text-gray-300 space-y-1.5 w-full max-w-lg shadow-inner">
+            <div className="text-gray-500"># Run live benchmark trial:</div>
+            <div className="text-emerald-400">python scripts/run_experiment.py --task EXP-002 --runs 1</div>
+            <div className="text-gray-500 pt-2"># Export telemetry to dashboard:</div>
+            <div className="text-indigo-300">python dashboard/build_data.py</div>
           </div>
           <EmptyActions>
-            <Button onClick={() => fetchData()} variant="default" size="sm" className="gap-2 font-mono">
+            <Button onClick={() => fetchData()} variant="default" size="sm" className="gap-2 font-mono bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/20">
               <RefreshCw className="size-3.5" /> Check for New Runs
             </Button>
           </EmptyActions>
@@ -129,14 +146,14 @@ export const App: React.FC = () => {
   );
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col font-sans selection:bg-primary/20">
+    <div className="min-h-screen bg-[#080b11] text-foreground flex flex-col font-sans selection:bg-indigo-500/25">
       <Header
         data={activeData}
         loading={loading}
         onRefresh={() => fetchData()}
       />
 
-      <main className="max-w-[1400px] mx-auto w-full px-5 lg:px-8 py-6 flex-1 space-y-6">
+      <main className="max-w-[1440px] mx-auto w-full px-5 lg:px-8 py-6 flex-1 space-y-6">
         {renderError}
         {renderLoading}
         {renderEmpty}
@@ -144,15 +161,15 @@ export const App: React.FC = () => {
         {activeData && (activeData.is_demo_report || !activeData.cumulative?.has_measured_data) && (
           <div
             data-testid="demo-fixture-banner"
-            className="rounded-lg border border-warning/40 bg-warning/10 p-4 text-warning flex items-start gap-3"
+            className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-amber-200 flex items-start gap-3 backdrop-blur-md"
           >
-            <AlertTriangle className="size-5 shrink-0 mt-0.5" />
+            <AlertTriangle className="size-5 shrink-0 mt-0.5 text-amber-400" />
             <div className="flex-1 space-y-1">
-              <div className="font-semibold text-sm tracking-wide uppercase font-mono">
+              <div className="font-bold text-sm tracking-wide uppercase font-mono text-amber-300">
                 DEMO / FIXTURE DATA (Empirical Headlines Suppressed)
               </div>
-              <div className="text-xs text-warning/90 leading-relaxed font-sans">
-                This dashboard is displaying synthetic fixtures or dry-run replayed telemetry. Empirical headline metrics and savings claims are suppressed until verified live benchmark telemetry is recorded.
+              <div className="text-xs text-amber-200/90 leading-relaxed font-sans">
+                This dashboard snapshot was generated from synthetic fixture replays. Headline claims are suppressed until verified live runs are recorded.
               </div>
             </div>
           </div>
@@ -160,57 +177,241 @@ export const App: React.FC = () => {
 
         {data && hasAnyData && (
           <div className="flex flex-col gap-6">
-            {/* 1. Hero Headline & Big Impact Stat Tiles */}
-            <HeroStats
-              headline={activeData?.headline}
-              totalRuns={activeData?.cumulative?.total_runs || 0}
-            />
+            {/* Top Interactive Tab Bar */}
+            <div className="flex items-center justify-between border-b border-white/10 pb-3 flex-wrap gap-3">
+              <nav className="flex items-center gap-1.5 p-1 rounded-xl bg-[#0e1422] border border-white/10 backdrop-blur">
+                <button
+                  onClick={() => setActiveTab('overview')}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-mono font-medium transition-all ${
+                    activeTab === 'overview'
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <LayoutDashboard className="size-3.5" />
+                  <span>Overview &amp; Impact</span>
+                </button>
 
-            {/* 2. Honest Operational Tradeoff Callout */}
-            {activeData && <TradeoffCallout data={activeData} />}
+                <button
+                  onClick={() => setActiveTab('tasks')}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-mono font-medium transition-all ${
+                    activeTab === 'tasks'
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <Layers className="size-3.5" />
+                  <span>Task Breakdown</span>
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/40 text-gray-300 border border-white/10">
+                    {activeData?.tasks?.length || 0}
+                  </span>
+                </button>
 
-            {/* 3. Primary Cost Comparison Chart */}
-            {activeData && activeData.tasks && (
-              <TaskComparison tasks={activeData.tasks} />
-            )}
+                <button
+                  onClick={() => setActiveTab('simulator')}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-mono font-medium transition-all ${
+                    activeTab === 'simulator'
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <Cpu className="size-3.5" />
+                  <span>Frontier Spend Cascade</span>
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    Multi-Model
+                  </span>
+                </button>
 
-            {/* 4. Task-by-Task Telemetry & Quality Table */}
-            {activeData && activeData.tasks && (
-              <TaskTable tasks={activeData.tasks} />
-            )}
+                <button
+                  onClick={() => setActiveTab('sandboxes')}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-mono font-medium transition-all ${
+                    activeTab === 'sandboxes'
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <Monitor className="size-3.5" />
+                  <span>Output Sandboxes</span>
+                </button>
 
-            {/* 5. See the Output: Interactive Sandbox Viewer */}
-            <div className="pt-2">
-              <div className="mb-3">
-                <h3 className="text-sm font-semibold text-white font-mono">
-                  Verified Generated Output
-                </h3>
-                <p className="text-xs text-muted-foreground font-mono">
-                  Side-by-side verification artifacts and interactive sandboxes built by benchmark arms.
-                </p>
+                <button
+                  onClick={() => setActiveTab('audit')}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-mono font-medium transition-all ${
+                    activeTab === 'audit'
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <Database className="size-3.5" />
+                  <span>Audit Ledger</span>
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/40 text-gray-300 border border-white/10">
+                    {activeData?.runs?.length || 0}
+                  </span>
+                </button>
+              </nav>
+
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-mono text-gray-400">Model Scope:</span>
+                <span className="text-xs font-mono font-semibold text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-lg">
+                  {selectedModel === 'recorded' ? 'Recorded Live CLI' : selectedModel}
+                </span>
               </div>
-              <SandboxViewer />
             </div>
 
-            {/* 6. Collapsible Methodology & SQLite Audit Ledger Drawer */}
-            {activeData && (
-              <MethodologyDrawer
-                data={activeData}
-                selectedModel={selectedModel}
-                onModelChange={setSelectedModel}
-              />
+            {/* TAB CONTENT: 1. OVERVIEW */}
+            {activeTab === 'overview' && (
+              <div className="flex flex-col gap-6 animate-in fade-in duration-300">
+                <HeroStats
+                  headline={activeData?.headline}
+                  totalRuns={activeData?.cumulative?.total_runs || 0}
+                />
+
+                {activeData && <TradeoffCallout data={activeData} />}
+
+                {activeData && activeData.tasks && (
+                  <TaskComparison tasks={activeData.tasks} />
+                )}
+
+                {/* Quick preview of Frontier Model Economics */}
+                {activeData?.cascade && activeData.cascade.length > 0 && (
+                  <div className="pt-2">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h3 className="text-sm font-bold text-white font-mono">
+                          Frontier Model Economic Simulation
+                        </h3>
+                        <p className="text-xs text-gray-400 font-mono">
+                          Repriced token workloads across major foundation model rate cards.
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setActiveTab('simulator')}
+                        className="text-xs font-mono text-indigo-300 border-indigo-500/30 hover:bg-indigo-500/10 gap-1.5"
+                      >
+                        Explore Full Simulator <ArrowUpRight className="size-3.5" />
+                      </Button>
+                    </div>
+                    <SpendCascadeComparison
+                      cascade={activeData.cascade}
+                      selectedModel={selectedModel}
+                      onSelectModel={setSelectedModel}
+                      scaleMode={scaleMode}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB CONTENT: 2. TASKS */}
+            {activeTab === 'tasks' && activeData?.tasks && (
+              <div className="flex flex-col gap-6 animate-in fade-in duration-300">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-base font-bold text-white font-mono">
+                      Empirical Task Matrix &amp; Quality Metrics
+                    </h2>
+                    <p className="text-xs text-gray-400 font-mono">
+                      Per-task token consumption, cache hit ratios, execution duration, and defect assertions.
+                    </p>
+                  </div>
+                </div>
+                <TaskTable tasks={activeData.tasks} />
+              </div>
+            )}
+
+            {/* TAB CONTENT: 3. FRONTIER SIMULATOR */}
+            {activeTab === 'simulator' && activeData && (
+              <div className="flex flex-col gap-6 animate-in fade-in duration-300">
+                <ModelSelector
+                  selectedModel={selectedModel}
+                  onModelChange={setSelectedModel}
+                  pricing={activeData.pricing || []}
+                />
+
+                {/* Scale Multiplier Controls */}
+                <div className="p-4 rounded-xl glass-panel border-white/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div>
+                    <h4 className="text-xs font-mono font-semibold uppercase tracking-wider text-gray-300">
+                      Token Volume Scale Multiplier
+                    </h4>
+                    <p className="text-xs text-gray-400 font-mono mt-0.5">
+                      Project fleet-wide cost reductions from single task runs up to 100M token engineering fleets.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-black/40 p-1 rounded-lg border border-white/10 font-mono text-xs">
+                    {(['1x', '1m', '10m', '100m'] as ScaleMode[]).map((mode) => (
+                      <button
+                        key={mode}
+                        onClick={() => setScaleMode(mode)}
+                        className={`px-3 py-1 rounded-md transition-all ${
+                          scaleMode === mode
+                            ? 'bg-indigo-600 text-white font-bold shadow'
+                            : 'text-gray-400 hover:text-white'
+                        }`}
+                      >
+                        {mode.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {activeData.cascade && (
+                  <SpendCascadeComparison
+                    cascade={activeData.cascade}
+                    selectedModel={selectedModel}
+                    onSelectModel={setSelectedModel}
+                    scaleMode={scaleMode}
+                  />
+                )}
+              </div>
+            )}
+
+            {/* TAB CONTENT: 4. SANDBOXES */}
+            {activeTab === 'sandboxes' && (
+              <div className="flex flex-col gap-6 animate-in fade-in duration-300">
+                <div>
+                  <h2 className="text-base font-bold text-white font-mono">
+                    Interactive Verification Sandboxes &amp; Playwright Test Runs
+                  </h2>
+                  <p className="text-xs text-gray-400 font-mono">
+                    Inspect actual artifacts and visual sandboxes generated by governed vs unconstrained agents.
+                  </p>
+                </div>
+                <SandboxViewer />
+              </div>
+            )}
+
+            {/* TAB CONTENT: 5. AUDIT LEDGER */}
+            {activeTab === 'audit' && activeData?.runs && (
+              <div className="flex flex-col gap-6 animate-in fade-in duration-300">
+                <div>
+                  <h2 className="text-base font-bold text-white font-mono">
+                    Cryptographic Provenance Ledger
+                  </h2>
+                  <p className="text-xs text-gray-400 font-mono">
+                    All individual runs recorded in SQLite with byte-exact SHA-256 evidence digests.
+                  </p>
+                </div>
+                <RawLedgerTable
+                  runs={activeData.runs}
+                  generatedAt={activeData.generated_at}
+                  buildIdentity={activeData.build_identity}
+                />
+              </div>
             )}
           </div>
         )}
       </main>
 
-      <footer className="border-t border-surface-border bg-background px-5 lg:px-8 py-4 mt-8">
-        <div className="max-w-[1400px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground font-mono">
-          <div className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-primary" />
-            <span>Antigravity Interpretable Context Methodology (ICM) Measurement Layer</span>
+      <footer className="border-t border-white/10 bg-[#06080d] px-5 lg:px-8 py-5 mt-10">
+        <div className="max-w-[1440px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-gray-400 font-mono">
+          <div className="flex items-center gap-2.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+            <span className="text-gray-300">Antigravity Interpretable Context Methodology (ICM) Measurement Layer</span>
           </div>
-          <div>Auditable Cache Economics • Provenance Hashed • OKF v0.2</div>
+          <div className="text-gray-500">Auditable Cache Economics • Provenance Hashed • OKF v0.2</div>
         </div>
       </footer>
     </div>
