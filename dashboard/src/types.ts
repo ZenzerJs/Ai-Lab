@@ -41,6 +41,8 @@ export interface OperationalBenchmark {
   }[];
 }
 
+export type ScaleMode = '1x' | '1m' | '10m' | '100m';
+
 export interface RunRecord {
   id: number;
   task_id: string;
@@ -245,6 +247,25 @@ export interface ModelCascadeItem {
   source_url: string;
 }
 
+export interface HeadlineStat {
+  id: string;
+  label: string;
+  value: number | string;
+  unit: string;
+  baseline: string;
+  icm: string;
+  n_baseline: number;
+  n_icm: number;
+  n_tasks: number;
+  source: string;
+  ci95?: [number, number] | null;
+}
+
+export interface HeadlineBlock {
+  sentence: string | null;
+  stats: HeadlineStat[];
+}
+
 export interface DashboardPayload {
   operational?: OperationalBenchmark;
   generated_at: string;
@@ -252,6 +273,7 @@ export interface DashboardPayload {
   has_data: boolean;
   is_demo_report?: boolean;
   is_simulation?: boolean;
+  headline?: HeadlineBlock | null;
   campaign?: any;
   cumulative: CumulativeSummary;
   tasks: TaskSummaryItem[];

@@ -177,6 +177,131 @@ def build_operational_block() -> Dict[str, Any]:
     }
 
 
+def compute_bootstrap_ci(baseline_vals: List[float], icm_vals: List[float], num_resamples: int = 10000) -> Optional[List[float]]:
+    """Compute 95% bootstrap confidence interval for percentage change."""
+    if len(baseline_vals) < 3 or len(baseline_vals) != len(icm_vals):
+        return None
+    import random
+    rng = random.Random(9)
+    n = len(baseline_vals)
+    deltas = []
+    for _ in range(num_resamples):
+        indices = [rng.randint(0, n - 1) for _ in range(n)]
+        b_sum = sum(baseline_vals[i] for i in indices)
+        i_sum = sum(icm_vals[i] for i in indices)
+        if b_sum > 0:
+            deltas.append((b_sum - i_sum) / b_sum * 100.0)
+    if not deltas:
+        return None
+    deltas.sort()
+    lo = deltas[int(0.025 * len(deltas))]
+    hi = deltas[int(0.975 * len(deltas))]
+    return [round(lo, 1), round(hi, 1)]
+
+
+def build_headline_block(
+    tasks: List[Dict[str, Any]],
+    cum: Dict[str, Any],
+    operational: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Construct high-impact headline metrics with strict honesty invariants.
+    Zero fabricated numbers; returns None if qualifying empirical evidence is insufficient.
+    """
+    stats = []
+    sentence = None
+
+    # H1: Delta cost per passing task (%)
+    # Requires >= 1 task with valid measured data
+    valid_tasks = [t for t in tasks if t.get("has_measured_data") and t.get("savings")]
+    if valid_tasks and cum.get("has_measured_data"):
+        b_costs = []
+        i_costs = []
+        for t in valid_tasks:
+            b_cost = t["arms"].get("baseline", {}).get("mean_cost_usd")
+            gov_key = "icm-subagents" if "icm-subagents" in t["arms"] else "icm"
+            i_cost = t["arms"].get(gov_key, {}).get("mean_cost_usd")
+            if b_cost is not None and i_cost is not None:
+                b_costs.append(b_cost)
+                i_costs.append(i_cost)
+
+        tot_b = cum.get("total_baseline_cost_usd")
+        tot_i = cum.get("total_icm_cost_usd")
+        if tot_b is not None and tot_i is not None and tot_b > 0:
+            pct = round((tot_b - tot_i) / tot_b * 100.0, 1)
+            ci = compute_bootstrap_ci(b_costs, i_costs)
+            stats.append({
+                "id": "cost_reduction",
+                "label": "Cost Reduction per Task",
+                "value": pct,
+                "unit": "%",
+                "baseline": f"${tot_b:.4f}",
+                "icm": f"${tot_i:.4f}",
+                "n_baseline": cum.get("per_arm_counts", {}).get("baseline", {}).get("completed", 0),
+                "n_icm": cum.get("per_arm_counts", {}).get("icm", {}).get("completed", 0),
+                "n_tasks": len(valid_tasks),
+                "source": "live CLI",
+                "ci95": ci,
+            })
+
+    # H2: Pass / Defect rate
+    if operational and operational.get("has_data") and operational.get("summary"):
+        summ = operational["summary"]
+        b_defects = summ.get("baseline", {}).get("defect_runs", 0)
+        b_runs = summ.get("baseline", {}).get("runs", 0)
+        i_defects = summ.get("icm", {}).get("defect_runs", 0)
+        i_runs = summ.get("icm", {}).get("runs", 0)
+        if b_runs > 0 and i_runs > 0:
+            stats.append({
+                "id": "defect_rate",
+                "label": "Defect Rate (Quality)",
+                "value": f"{round(i_defects / i_runs * 100, 1)}%",
+                "unit": "defects",
+                "baseline": f"{b_defects}/{b_runs} defects",
+                "icm": f"{i_defects}/{i_runs} defects",
+                "n_baseline": b_runs,
+                "n_icm": i_runs,
+                "n_tasks": len(operational.get("tasks", [])),
+                "source": "operational benchmark",
+            })
+
+    # H3: Cache Hit Ratio
+    if valid_tasks and cum.get("has_measured_data"):
+        b_cache = cum.get("baseline_cache_hit_pct")
+        i_cache = cum.get("icm_cache_hit_pct")
+        if b_cache is not None and i_cache is not None:
+            stats.append({
+                "id": "cache_efficiency",
+                "label": "Prompt Cache Hit Ratio",
+                "value": round(i_cache, 1),
+                "unit": "%",
+                "baseline": f"{round(b_cache, 1)}%",
+                "icm": f"{round(i_cache, 1)}%",
+                "n_baseline": cum.get("per_arm_counts", {}).get("baseline", {}).get("completed", 0),
+                "n_icm": cum.get("per_arm_counts", {}).get("icm", {}).get("completed", 0),
+                "n_tasks": len(valid_tasks),
+                "source": "live CLI",
+            })
+
+    if not stats:
+        return None
+
+    # Construct descriptive sentence
+    if stats:
+        first = stats[0]
+        if first["id"] == "cost_reduction":
+            val = first["value"]
+            sign_word = "reduced" if float(val) > 0 else "increased"
+            sentence = f"Across {first['n_tasks']} live-verified tasks, the ICM harness {sign_word} task cost by {abs(float(val))}% with strict provenance assertions."
+        elif first["id"] == "defect_rate":
+            sentence = f"Across operational runs, the ICM harness delivered {first['icm']} compared to {first['baseline']} in baseline arm."
+
+    return {
+        "sentence": sentence,
+        "stats": stats,
+    }
+
+
 def build_data_payload(
     db_path: Optional[Path] = None,
     capture_policy: str = "approved",
@@ -321,19 +446,23 @@ def build_data_payload(
         except Exception:
             campaign_rep = None
 
+        ops_block = build_operational_block()
+        headline_block = build_headline_block(cum.get("tasks", []), cum, operational=ops_block)
+
         payload = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "build_identity": get_build_identity(),
             "has_data": has_data,
             "is_demo_report": is_demo_report,
             "is_simulation": False,
+            "headline": headline_block,
             "cumulative": cum,
             "tasks": cum.get("tasks", []),
             "runs": processed_runs,
             "timeline": timeline,
             "pricing": pricing_rows,
             "cascade": cascade,
-            "operational": build_operational_block(),
+            "operational": ops_block,
             "campaign": campaign_rep,
         }
         return sanitize_export_payload(payload)

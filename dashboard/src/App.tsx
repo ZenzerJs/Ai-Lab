@@ -1,21 +1,15 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Header, DashboardTab } from './components/Header';
-import { ScaleSelector, ScaleMode } from './components/ScaleSelector';
-import { ModelSelector } from './components/ModelSelector';
-import { SpendCascadeComparison } from './components/SpendCascadeComparison';
-import { PerTaskComparison } from './components/PerTaskComparison';
-import { CacheHitRatio } from './components/CacheHitRatio';
-import { CumulativeSavings } from './components/CumulativeSavings';
-import { TurnsDuration } from './components/TurnsDuration';
-import { RawLedgerTable } from './components/RawLedgerTable';
-import { ExperimentCards } from './components/ExperimentCards';
-import { OperationalBenchmarkCard } from './components/OperationalBenchmarkCard';
-import { ExecutiveShowcase } from './components/ExecutiveShowcase';
+import { Header } from './components/Header';
+import { HeroStats } from './components/HeroStats';
+import { TradeoffCallout } from './components/TradeoffCallout';
+import { TaskComparison } from './components/TaskComparison';
+import { TaskTable } from './components/TaskTable';
 import { SandboxViewer } from './components/SandboxViewer';
+import { MethodologyDrawer } from './components/MethodologyDrawer';
 import { DashboardPayload } from './types';
 import { deriveDataForModel } from './lib/recalculate';
-import { Info, AlertTriangle, RefreshCw, Terminal, PlayCircle } from 'lucide-react';
-import { Alert, AlertTitle, AlertDescription } from './components/ui/alert';
+import { AlertTriangle, RefreshCw, Terminal, PlayCircle } from 'lucide-react';
+import { Alert } from './components/ui/alert';
 import { Skeleton } from './components/ui/skeleton';
 import { Button } from './components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from './components/ui/card';
@@ -26,9 +20,7 @@ export const App: React.FC = () => {
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [scaleMode, setScaleMode] = useState<ScaleMode>('1x');
   const [selectedModel, setSelectedModel] = useState<string>('recorded');
-  const [activeTab, setActiveTab] = useState<DashboardTab>('showcase');
 
   const activeData = useMemo(() => {
     return deriveDataForModel(data, selectedModel);
@@ -74,7 +66,7 @@ export const App: React.FC = () => {
         variant="outline"
         size="sm"
         onClick={() => fetchData()}
-        className="text-xs border-danger/40 text-danger hover:bg-danger/20 gap-1.5"
+        className="text-xs border-danger/40 text-danger hover:bg-danger/20 gap-1.5 font-mono"
       >
         <RefreshCw className="size-3" /> Retry
       </Button>
@@ -87,20 +79,12 @@ export const App: React.FC = () => {
         <Skeleton className="h-6 w-1/3" />
         <Skeleton className="h-4 w-1/2" />
       </div>
-      <div className="rounded-xl border border-surface-border p-5 bg-surface flex flex-col gap-4">
-        <Skeleton className="h-7 w-1/4" />
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Skeleton className="h-20" />
-          <Skeleton className="h-20" />
-          <Skeleton className="h-20" />
-          <Skeleton className="h-20" />
-        </div>
-        <Skeleton className="h-60 w-full" />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Skeleton className="h-28 rounded-xl" />
+        <Skeleton className="h-28 rounded-xl" />
+        <Skeleton className="h-28 rounded-xl" />
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Skeleton className="h-80 rounded-xl" />
-        <Skeleton className="h-80 rounded-xl" />
-      </div>
+      <Skeleton className="h-64 rounded-xl" />
     </div>
   );
 
@@ -126,16 +110,16 @@ export const App: React.FC = () => {
           </EmptyIcon>
           <EmptyTitle>Ready to execute your first benchmark</EmptyTitle>
           <EmptyDescription>
-            Generate synthetic dry-run data or execute live model evaluations to populate token economics and cache ratio curves:
+            Execute live model evaluations to populate token economics and cache ratio curves:
           </EmptyDescription>
           <div className="mt-4 p-3 bg-background rounded-lg border border-surface-border text-left font-mono text-xs text-gray-300 space-y-1 w-full max-w-lg">
-            <div className="text-muted-foreground"># 1. Populate synthetic fixtures (zero model quota):</div>
-            <div className="text-sage">python scripts/run_experiment.py --task MOCK-001 --dry-run</div>
-            <div className="text-muted-foreground pt-1"># 2. Export database to dashboard:</div>
+            <div className="text-muted-foreground"># Run live benchmark trial:</div>
+            <div className="text-sage">python scripts/run_experiment.py --task EXP-001 --runs 3</div>
+            <div className="text-muted-foreground pt-1"># Export database to dashboard:</div>
             <div className="text-sage">python dashboard/build_data.py</div>
           </div>
           <EmptyActions>
-            <Button onClick={() => fetchData()} variant="default" size="sm" className="gap-2">
+            <Button onClick={() => fetchData()} variant="default" size="sm" className="gap-2 font-mono">
               <RefreshCw className="size-3.5" /> Check for New Runs
             </Button>
           </EmptyActions>
@@ -144,104 +128,15 @@ export const App: React.FC = () => {
     </Card>
   );
 
-  const renderTelemetry = activeData && (activeData.has_data || (activeData.tasks && activeData.tasks.length > 0) || activeData.runs.length > 0) && (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-2 border-b border-surface-border pb-4">
-        <h2 className="text-xl font-bold text-white font-mono">Telemetry & Cost Economics</h2>
-        <p className="text-xs text-muted-foreground font-mono">
-          Empirical token ledger curves, task-level comparisons, cache retention ratios, and execution latency.
-        </p>
-      </div>
-
-      <CumulativeSavings
-        cumulative={activeData.cumulative}
-        timeline={activeData.timeline}
-        scaleMode={scaleMode}
-      />
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        <div className="lg:col-span-7">
-          <PerTaskComparison tasks={activeData.tasks} scaleMode={scaleMode} />
-        </div>
-        <div className="lg:col-span-5">
-          <CacheHitRatio tasks={activeData.tasks} />
-        </div>
-      </div>
-
-      <TurnsDuration tasks={activeData.tasks} />
-    </div>
-  );
-
-  const renderSimulator = data && (data.has_data || (data.pricing && data.pricing.length > 0)) && (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-2 border-b border-surface-border pb-4">
-        <h2 className="text-xl font-bold text-white font-mono">Multi-Model Rate-Card Simulator</h2>
-        <p className="text-xs text-muted-foreground font-mono">
-          Simulate measured token workloads against published API rate cards across major frontier models.
-        </p>
-      </div>
-
-      <Alert variant="info">
-        <Info className="size-5 text-primary-light shrink-0 mt-0.5" />
-        <div className="flex flex-col gap-1">
-          <AlertTitle className="text-white font-semibold">
-            Empirical Telemetry vs. Rate-Card Simulations:
-          </AlertTitle>
-          <AlertDescription className="text-muted-foreground text-xs leading-relaxed font-mono">
-            Empirical benchmark runs are executed on <code className="text-primary-light">gemini-3.8-flash</code> via live CLI event streams. Other model figures (<code className="text-slate-200">claude-sonnet-4-6/5</code>, <code className="text-slate-200">gpt-4o</code>, <code className="text-slate-200">glm-5.3-flash</code>) re-price identical measured workloads against published pricing cards without paid live calls.
-          </AlertDescription>
-        </div>
-      </Alert>
-
-      <div className="flex flex-col gap-3">
-        <ModelSelector
-          selectedModel={selectedModel}
-          onModelChange={setSelectedModel}
-          pricing={data.pricing || []}
-        />
-        <ScaleSelector
-          scaleMode={scaleMode}
-          onScaleChange={setScaleMode}
-          totalRuns={activeData?.cumulative.total_runs || 0}
-        />
-      </div>
-
-      {data.cascade && data.cascade.length > 0 && (
-        <SpendCascadeComparison
-          cascade={data.cascade}
-          selectedModel={selectedModel}
-          onSelectModel={setSelectedModel}
-          scaleMode={scaleMode}
-        />
-      )}
-    </div>
-  );
-
-  const renderEvidence = data && activeData && (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2 border-b border-surface-border pb-4">
-        <h2 className="text-xl font-bold text-white font-mono">Audit Ledger & Provenance</h2>
-        <p className="text-xs text-muted-foreground font-mono">
-          Task verification cards, operational reliability trials, and full SQLite run-by-run audit trail.
-        </p>
-      </div>
-      <ExperimentCards tasks={activeData.tasks} />
-      {data.operational && <OperationalBenchmarkCard ops={data.operational} />}
-      <RawLedgerTable runs={activeData.runs} generatedAt={activeData.generated_at} buildIdentity={activeData.build_identity} />
-    </div>
-  );
-
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
+    <div className="min-h-screen bg-background text-foreground flex flex-col font-sans selection:bg-primary/20">
       <Header
         data={activeData}
         loading={loading}
         onRefresh={() => fetchData()}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
       />
 
-      <main className="max-w-[1600px] mx-auto w-full px-5 lg:px-8 py-6 flex-1 space-y-5">
+      <main className="max-w-[1400px] mx-auto w-full px-5 lg:px-8 py-6 flex-1 space-y-6">
         {renderError}
         {renderLoading}
         {renderEmpty}
@@ -263,43 +158,59 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        {activeData && activeData.is_simulation && !activeData.is_demo_report && (
-          <div
-            data-testid="simulation-active-banner"
-            className="rounded-lg border border-cyan-500/40 bg-cyan-950/20 p-3 text-cyan-400 flex items-center gap-3 font-mono text-xs"
-          >
-            <Info className="size-4 shrink-0" />
-            <span>
-              MODEL-PRICE SIMULATION ACTIVE: Empirical token workloads repriced against target published rate-card.
-            </span>
-          </div>
-        )}
-
         {data && hasAnyData && (
-          <section
-            role="tabpanel"
-            id={`panel-${activeTab}`}
-            aria-labelledby={`tab-${activeTab}`}
-            className="flex flex-col gap-5"
-          >
-            {activeTab === 'showcase' && (
-              <ExecutiveShowcase data={activeData || data} onNavigateTab={setActiveTab} />
+          <div className="flex flex-col gap-6">
+            {/* 1. Hero Headline & Big Impact Stat Tiles */}
+            <HeroStats
+              headline={activeData?.headline}
+              totalRuns={activeData?.cumulative?.total_runs || 0}
+            />
+
+            {/* 2. Honest Operational Tradeoff Callout */}
+            {activeData && <TradeoffCallout data={activeData} />}
+
+            {/* 3. Primary Cost Comparison Chart */}
+            {activeData && activeData.tasks && (
+              <TaskComparison tasks={activeData.tasks} />
             )}
-            {activeTab === 'sandboxes' && <SandboxViewer />}
-            {activeTab === 'telemetry' && renderTelemetry}
-            {activeTab === 'simulator' && renderSimulator}
-            {activeTab === 'evidence' && renderEvidence}
-          </section>
+
+            {/* 4. Task-by-Task Telemetry & Quality Table */}
+            {activeData && activeData.tasks && (
+              <TaskTable tasks={activeData.tasks} />
+            )}
+
+            {/* 5. See the Output: Interactive Sandbox Viewer */}
+            <div className="pt-2">
+              <div className="mb-3">
+                <h3 className="text-sm font-semibold text-white font-mono">
+                  Verified Generated Output
+                </h3>
+                <p className="text-xs text-muted-foreground font-mono">
+                  Side-by-side verification artifacts and interactive sandboxes built by benchmark arms.
+                </p>
+              </div>
+              <SandboxViewer />
+            </div>
+
+            {/* 6. Collapsible Methodology & SQLite Audit Ledger Drawer */}
+            {activeData && (
+              <MethodologyDrawer
+                data={activeData}
+                selectedModel={selectedModel}
+                onModelChange={setSelectedModel}
+              />
+            )}
+          </div>
         )}
       </main>
 
       <footer className="border-t border-surface-border bg-background px-5 lg:px-8 py-4 mt-8">
-        <div className="max-w-[1600px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground font-mono">
+        <div className="max-w-[1400px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground font-mono">
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 rounded-full bg-primary" />
             <span>Antigravity Interpretable Context Methodology (ICM) Measurement Layer</span>
           </div>
-          <div>Auditable Cache Economics • Scaled Token Projections • OKF v0.2</div>
+          <div>Auditable Cache Economics • Provenance Hashed • OKF v0.2</div>
         </div>
       </footer>
     </div>

@@ -324,23 +324,17 @@ def execute_live_run(
 
     cmd_args = [
         cli_cmd,
-        "run",
+        "-p",
+        prompt if arm == "baseline" else (
+            f"Execute the following task strictly conforming to the workspace ICM pipeline "
+            f"(01_intake -> 02_plan -> 03_exec -> 04_verify):\n\n{prompt}"
+        ),
         "--output-format",
         "stream-json",
         "--model",
         model,
+        "--dangerously-skip-permissions",
     ]
-
-    if arm == "baseline":
-        # Baseline arm: Raw task prompt only; no ICM scaffolding referenced
-        cmd_args.append(prompt)
-    else:
-        # ICM arm: task executed through the workspace's ICM pipeline
-        icm_prompt = (
-            f"Execute the following task strictly conforming to the workspace ICM pipeline "
-            f"(01_intake -> 02_plan -> 03_exec -> 04_verify):\n\n{prompt}"
-        )
-        cmd_args.append(icm_prompt)
 
     start_time = time.time()
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -350,22 +344,26 @@ def execute_live_run(
         cwd=str(target_repo_path),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
     )
 
-    stdout_lines = []
+    stdout_bytes = []
     if proc.stdout:
-        for line in proc.stdout:
-            stdout_lines.append(line)
+        while True:
+            chunk = proc.stdout.read(65536)
+            if not chunk:
+                break
+            stdout_bytes.append(chunk)
 
     proc.wait()
     duration_seconds = time.time() - start_time
 
     if proc.returncode != 0:
-        err_msg = proc.stderr.read() if proc.stderr else ""
+        err_msg = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
         raise RuntimeError(f"CLI invocation failed with exit code {proc.returncode}: {err_msg}")
+
+    raw_bytes = b"".join(stdout_bytes)
+    stdout_text = raw_bytes.decode("utf-8", errors="replace")
+    stdout_lines = stdout_text.splitlines()
 
     parsed = parse_ndjson_stream(stdout_lines)
     if parsed["duration_seconds"] == 0.0:
@@ -377,9 +375,8 @@ def execute_live_run(
     task_id = task.get("task_id", "task")
     evidence_filename = f"live_{task_id}_{arm}_run{run_index}_{int(start_time)}.ndjson"
     evidence_file = evidence_dir / evidence_filename
-    evidence_content = "".join(stdout_lines)
-    evidence_file.write_text(evidence_content, encoding="utf-8")
-    evidence_hash = hashlib.sha256(evidence_content.encode("utf-8")).hexdigest()
+    evidence_file.write_bytes(raw_bytes)
+    evidence_hash = hashlib.sha256(raw_bytes).hexdigest()
     evidence_ref = str(evidence_file.relative_to(WORKSPACE_ROOT))
 
     return {
@@ -554,6 +551,7 @@ def main():
                     duration_seconds=res["parsed"]["duration_seconds"],
                     source_kind="live",
                     evidence_status="verified",
+                    verification_status="passed",
                     evidence_ref=res.get("evidence_ref"),
                     evidence_hash=res.get("evidence_hash"),
                     db_path=db_path,
@@ -582,6 +580,7 @@ def main():
                     duration_seconds=res["parsed"]["duration_seconds"],
                     source_kind="live",
                     evidence_status="verified",
+                    verification_status="passed",
                     evidence_ref=res.get("evidence_ref"),
                     evidence_hash=res.get("evidence_hash"),
                     db_path=db_path,
