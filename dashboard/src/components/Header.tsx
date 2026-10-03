@@ -120,11 +120,18 @@ export const Header: React.FC<HeaderProps> = ({
 
         <div className="flex items-center gap-3 self-end md:self-auto">
           {data && (
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface border border-surface-border text-xs font-mono text-muted-foreground">
-              <Database className="size-3.5" />
-              <span className="text-foreground">{data.cumulative.tasks_evaluated} Tasks</span>
+            <div
+              title="Recorded Rows: total ledger rows. Evaluated Tasks: distinct tasks with valid evaluations. Measured Comparisons: strictly paired runs with verified empirical telemetry."
+              className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface border border-surface-border text-xs font-mono text-muted-foreground"
+            >
+              <Database className="size-3.5 text-primary" />
+              <span className="text-foreground">{data.runs.length} Rows</span>
               <span className="text-surface-border">•</span>
-              <span>{data.runs.length} Total Runs</span>
+              <span>{data.cumulative.tasks_evaluated} Tasks</span>
+              <span className="text-surface-border">•</span>
+              <span className={data.cumulative.has_measured_data ? 'text-sage font-medium' : 'text-amber-400'}>
+                {data.cumulative.comparison_eligible_runs_count || 0} Measured
+              </span>
             </div>
           )}
           <a
@@ -207,7 +214,12 @@ export const Header: React.FC<HeaderProps> = ({
         ))}
       </nav>
       <span className="sr-only">
-        <ShieldCheck /> Benchmark data sourced from measured ledger actuals.
+        <ShieldCheck />
+        {data?.is_demo_report || !data?.cumulative?.has_measured_data
+          ? 'Dashboard displaying synthetic fixtures or dry-run replayed telemetry. Empirical headline metrics are suppressed.'
+          : data?.is_simulation
+          ? 'Simulation active with rate-card model projections.'
+          : 'Benchmark data sourced from measured ledger actuals.'}
       </span>
     </header>
   );

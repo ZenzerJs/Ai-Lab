@@ -196,6 +196,7 @@ export interface CumulativeSummary {
   projected_savings_10m?: number | null;
   projected_savings_100m?: number | null;
   tasks: TaskSummaryItem[];
+  thinking_tokens_saved_percent?: number | null;
 }
 
 export interface TimelinePoint {
@@ -224,6 +225,8 @@ export interface PricingRecord {
 
 export interface ModelCascadeItem {
   model: string;
+  is_simulation?: boolean;
+  counter_semantics_qualification?: string | null;
   input_usd_per_mtok: number;
   cache_read_usd_per_mtok: number;
   output_usd_per_mtok: number;
@@ -245,6 +248,7 @@ export interface ModelCascadeItem {
 export interface DashboardPayload {
   operational?: OperationalBenchmark;
   generated_at: string;
+  build_identity?: string;
   has_data: boolean;
   is_demo_report?: boolean;
   is_simulation?: boolean;

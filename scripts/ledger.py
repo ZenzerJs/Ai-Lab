@@ -2043,6 +2043,10 @@ def cumulative_savings(
     result = {
         "has_measured_data": has_measured_pairs,
         "is_simulation": is_sim,
+        "counter_semantics_qualification": (
+            "Token counts represent source model tokenizer outputs; cross-model repricing is an indicative rate-card simulation that does not adjust for target model tokenization ratios, cache threshold semantics, or thinking token billing differences."
+            if is_sim else None
+        ),
         "is_demo_report": is_demo,
         "tasks_evaluated": len([t for t in task_summaries if t.get("has_measured_data")]),
         "total_tasks": len(task_summaries),

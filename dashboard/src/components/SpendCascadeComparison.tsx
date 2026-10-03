@@ -39,8 +39,14 @@ export const SpendCascadeComparison: React.FC<SpendCascadeComparisonProps> = ({
             </Badge>
           </div>
           <CardDescription className="text-xs text-muted-foreground mt-1">
-            Rate-card simulation: re-prices empirical token telemetry (EXP-001–004 on gemini-3.8-flash) across published rate cards without live commercial API calls.
+            Rate-card simulation: re-prices token telemetry across published rate cards without live commercial API calls.
           </CardDescription>
+          <div className="flex items-start gap-2 mt-2 p-2 rounded bg-amber-500/10 border border-amber-500/20 text-[11px] font-mono text-amber-300/90 leading-relaxed">
+            <Info className="size-3.5 shrink-0 mt-0.5 text-amber-400" />
+            <span>
+              <strong>Counter Semantics Qualification:</strong> Token counts represent source model outputs. Cross-model repricing is an indicative rate-card simulation that does not adjust for target model tokenization ratios, cache window thresholds, or thinking token billing differences.
+            </span>
+          </div>
         </div>
 
         <span className="text-xs font-mono text-muted-foreground">
