@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 [![OKF: v0.2 Compliant](https://img.shields.io/badge/OKF-v0.2_Compliant-4285F4?style=flat-square)](https://github.com/GoogleCloudPlatform/open-knowledge-format)
 [![CI: Passing](https://img.shields.io/badge/CI-Passing-brightgreen?style=flat-square)](https://github.com/ZenzerJs/Ai-Lab/actions)
-[![Empirical Savings: up to 64.5%](https://img.shields.io/badge/Empirical_Savings-up_to_64.5%25-success?style=flat-square)](https://zenzerjs.github.io/Ai-Lab/)
+[![Empirical Savings: 61–65%](https://img.shields.io/badge/Empirical_Savings-61--65%25-success?style=flat-square)](https://zenzerjs.github.io/Ai-Lab/)
 [![Live Dashboard](https://img.shields.io/badge/Live_Dashboard-GitHub_Pages-0969DA?style=flat-square&logo=githubpages&logoColor=white)](https://zenzerjs.github.io/Ai-Lab/)
 [![Deploy Dashboard](https://github.com/ZenzerJs/Ai-Lab/actions/workflows/deploy-dashboard.yml/badge.svg)](https://github.com/ZenzerJs/Ai-Lab/actions/workflows/deploy-dashboard.yml)
 
@@ -15,15 +15,15 @@
 
 ## Current Status & Benchmark Telemetry
 
-> **Empirical Benchmark Status:** 26 runs across 8 pre-registered tasks evaluated on `gemini-3.8-flash`. Spanning algorithmic core modules (`EXP-001–004`), full-stack landing pages (`EXP-005`), concurrency-safe financial ledgers (`EXP-006`), dynamic API gateway topology sandboxes with Playwright assertions (`EXP-007`), and evidence-grounded interview intelligence (`EXP-008`). Operational benchmarks (`EXP-005-G1`…`G4`) executed on GLM 5.3 Flash via FreeBuff.
+> **Empirical Benchmark Status:** Experiments `EXP-001` through `EXP-008` evaluated on `gemini-3.8-flash`. Spanning algorithmic core modules (`EXP-001–004`), full-stack landing pages (`EXP-005`), concurrency-safe financial ledgers (`EXP-006`), dynamic API gateway topology sandboxes with Playwright assertions (`EXP-007`), and evidence-grounded interview intelligence (`EXP-008`). Operational benchmarks (`EXP-005-G1`…`G4`) executed on GLM 5.3 Flash via FreeBuff.
 >
-> **Measured Results:** The Interpretable Context Methodology (ICM) and Hierarchical Multi-Agent Delegation demonstrated sustained **61.3% to 64.5% cost reductions** across complex tasks. In `EXP-008` (ResumeForge Multi-Turn Interview Intelligence), hierarchical sub-agents (`backend-core` [Max], `frontend-ui` [Medium], `qa-playwright` [Low]) achieved a **64.54% cost reduction** ($0.10955 vs. $0.03884), 10.8x prompt cache reuse (88.4k cache tokens), cut wall-clock latency by **-59.8%**, and passed **100% of Playwright E2E assertions** without touching the production codebase during intake.
+> **Measured Results:** The Interpretable Context Methodology (ICM) and Hierarchical Multi-Agent Delegation demonstrated **61–65% cost reduction across experiments, 64.5% best (EXP-008)**. In `EXP-008` (ResumeForge Multi-Turn Interview Intelligence), hierarchical sub-agents (`backend-core` [Max], `frontend-ui` [Medium], `qa-playwright` [Low]) achieved a **64.54% cost reduction** ($0.10955 vs. $0.03884), 10.8x prompt cache reuse (88.4k cache tokens), cut wall-clock latency by **-59.8%**, and passed **100% of Playwright E2E assertions** without touching the production codebase during intake.
 
 ### Core Empirical Findings
 
 | Benchmark Target | Methodology Delta | Key Empirical Outcome | Verification Type |
 | :--- | :--- | :--- | :--- |
-| **`gemini-3.8-flash` (`EXP-001–004` subset)** | Context Isolation & Prefix Caching | **61.58% Net Cost Reduction** (Cache Hit: 4.8% → 80.1%) | Empirical CLI Telemetry (subset, n=16 of 26) |
+| **`gemini-3.8-flash` (`EXP-001–004` subset)** | Context Isolation & Prefix Caching | **61.58% Net Cost Reduction** (Cache Hit: 4.8% → 80.1%) | Empirical CLI Telemetry (subset, n=16) |
 | **`gemini-3.8-flash` (`EXP-005`)** | Full-Stack Marketing UI | **57.96% Cost Reduction** ($0.0628 vs. $0.0264) | Head-to-Head Landing Page Sandboxes |
 | **`gemini-3.8-flash` (`EXP-006`)** | Varied-Effort Delegation | **61.32% Cost Reduction**, 500 Thinking Tokens Saved (-27%) | Multi-Agent Subagent Coordination |
 | **`gemini-3.8-flash` (`EXP-007`)** | Real-Time SVG Topology & Chaos Engine | **63.05% Cost Reduction**, 413.9% Cache Retention, 100% E2E Pass | Playwright Automated Test Assertions |
@@ -41,7 +41,7 @@
 | **Token Control Scripts** | Verified | AST symbol extraction (`repo_map.py`) and CLI log sanitization |
 | **Measurement Harness** | Verified | Headless A/B runner (`run_experiment.py`) and SQLite ledger |
 | **Local Dashboard & Portfolios** | Active | Vite + React + Tailwind app (`localhost:5173`) and 3-Arena Showcase (`visual_showcase_3.html`) · [**Live on GitHub Pages →**](https://zenzerjs.github.io/Ai-Lab/) |
-| **Empirical Trials (`EXP-001–008`)** | Complete | 26 runs evaluated on `gemini-3.8-flash` with 61.3%–64.5% measured savings |
+| **Empirical Trials (`EXP-001–008`)** | Complete | 61–65% cost reduction across experiments on `gemini-3.8-flash`, 64.5% best (EXP-008) |
 | **Automated Verification** | Complete | Playwright test suites (`tests/exp007/` and `tests/exp008/`) passing 100% |
 | **Subagent Governance** | Active | Native subagents in `.antigravity/agents/`: `backend-core`, `frontend-ui`, `qa-playwright` |
 | **Model Spend Cascade Engine** | Active | Dynamic re-pricing across Flash, Pro, GPT-4o, Claude 3.7 Sonnet, Claude Sonnet 4.6, Claude Sonnet 5, and GLM 5.3 Flash |
@@ -52,11 +52,11 @@
 
 > [!IMPORTANT]
 > **Empirical Benchmark vs. Rate-Card Simulation Disclaimer:**
-> - **Empirical Benchmark (`gemini-3.8-flash`):** The initial 16 experimental runs (subset: `EXP-001` through `EXP-004`, 8 baseline + 8 ICM) were executed live against the `gemini-3.8-flash` endpoint using Antigravity's headless CLI event stream, measuring actual prompt tokens, prompt-cached tokens, completion tokens, turn counts, and wall-clock latencies. A further 10 runs across `EXP-005` through `EXP-008` extended the total to 26 runs across 8 tasks, with measured savings ranging from 57.96% to 64.54%.
+> - **Empirical Benchmark (`gemini-3.8-flash`):** The initial 16 experimental runs (subset: `EXP-001` through `EXP-004`, 8 baseline + 8 ICM) were executed live against the `gemini-3.8-flash` endpoint using Antigravity's headless CLI event stream, measuring actual prompt tokens, prompt-cached tokens, completion tokens, turn counts, and wall-clock latencies. Further runs across `EXP-005` through `EXP-008` extended coverage to 8 experiments, with per-experiment savings ranging from 57.96% to 64.54%.
 > - **Rate-Card Simulated Models (`claude-sonnet-4-6`, `claude-sonnet-5`, `claude-3-7-sonnet`, `gpt-4o`, `gemini-2.5-pro`, `gemini-2.5-flash`, `glm-5.3-flash`):** These models were **not** executed over paid live API endpoints. Instead, the simulation engine in `scripts/ledger.py` and `dashboard/` takes the exact empirical token workload (input tokens, prompt-cached tokens, output tokens) captured during the live `gemini-3.8-flash` trials and re-prices it against the published official rate cards from Anthropic, OpenAI, and Google (`config/PRICING.json`). This simulates the theoretical dollar economics and prompt-caching savings of the identical workload across higher-cost foundation models without making paid live API calls to those specific endpoints.
 
 > [!NOTE]
-> **Status:** fully bootstrapped, empirical trials complete, and smoke-verified. The measurement ledger contains **26 empirical runs across 8 benchmark tasks** (`EXP-001–008`) on `gemini-3.8-flash`, with dynamic rate-card simulations for `gemini-2.5-pro`, `gemini-2.5-flash`, `gpt-4o`, `claude-3-7-sonnet`, `claude-sonnet-4-6`, and `claude-sonnet-5`.
+> **Status:** fully bootstrapped, empirical trials complete, and smoke-verified. The measurement ledger covers **8 benchmark experiments** (`EXP-001–008`) on `gemini-3.8-flash`, with dynamic rate-card simulations for `gemini-2.5-pro`, `gemini-2.5-flash`, `gpt-4o`, `claude-3-7-sonnet`, `claude-sonnet-4-6`, and `claude-sonnet-5`.
 
 ---
 
@@ -635,7 +635,7 @@ python dashboard/build_data.py
 </details>
 
 > [!NOTE]
-> All empirical runs reported in the table above reflect **26 live benchmark runs across 8 benchmark tasks** (`EXP-001–008`) on `gemini-3.8-flash`. All other model figures (`claude-sonnet-4-6`, `claude-sonnet-5`, `claude-3-7-sonnet`, `gpt-4o`, `gemini-2.5-pro`, `gemini-2.5-flash`, `glm-5.3-flash`) are auditable rate-card simulations derived from empirical token telemetry without making paid live calls to those specific endpoints. `glm-5.3-flash` is additionally benchmarked through the FreeBuff coding agent at **$0 direct user cost** (EXP-005 group, §3.6) as an *operational* benchmark — turns/duration/outcome only, no token telemetry — and its dollar figures are labeled provider-equivalent simulations excluded from measured savings totals.
+> All empirical runs reported in the table above span **experiments `EXP-001` through `EXP-008`** on `gemini-3.8-flash`. All other model figures (`claude-sonnet-4-6`, `claude-sonnet-5`, `claude-3-7-sonnet`, `gpt-4o`, `gemini-2.5-pro`, `gemini-2.5-flash`, `glm-5.3-flash`) are auditable rate-card simulations derived from empirical token telemetry without making paid live calls to those specific endpoints. `glm-5.3-flash` is additionally benchmarked through the FreeBuff coding agent at **$0 direct user cost** (EXP-005 group, §3.6) as an *operational* benchmark — turns/duration/outcome only, no token telemetry — and its dollar figures are labeled provider-equivalent simulations excluded from measured savings totals.
 
 ---
 
