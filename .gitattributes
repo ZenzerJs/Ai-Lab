@@ -1,0 +1,2 @@
+# Evidence telemetry artifacts must remain byte-exact LF files
+experiments/evidence/*.ndjson -text

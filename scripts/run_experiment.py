@@ -83,6 +83,8 @@ def parse_task_file(task_path: Path) -> Dict[str, Any]:
     prompt_baseline = frontmatter.get("prompt_baseline", prompt)
     prompt_icm = frontmatter.get("prompt_icm", prompt)
 
+    verify_cmd = frontmatter.get("verify_cmd")
+
     return {
         "task_id": task_id,
         "prompt": prompt,
@@ -93,6 +95,7 @@ def parse_task_file(task_path: Path) -> Dict[str, Any]:
         "model_icm": model_icm,
         "target_repo": target_repo,
         "runs_per_arm": runs_per_arm,
+        "verify_cmd": verify_cmd,
         "path": task_path,
         "frontmatter": frontmatter,
     }
@@ -303,6 +306,45 @@ def execute_dry_run(
     return recorded_run_ids
 
 
+def execute_verification(verify_cmd: Optional[str], target_repo_path: Path) -> str:
+    """
+    Execute dynamic automated verification command and evaluate honest pass/fail status.
+    Returns 'passed', 'failed', or 'not_run'.
+    """
+    if not verify_cmd or not str(verify_cmd).strip():
+        return "not_run"
+    try:
+        proc = subprocess.run(
+            verify_cmd,
+            shell=True,
+            cwd=str(target_repo_path),
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+        )
+        return "passed" if proc.returncode == 0 else "failed"
+    except Exception:
+        return "failed"
+
+
+def get_next_run_index(task_id: str, arm: str, db_path: Optional[Path] = None) -> int:
+    """
+    Query highest existing run_index for task and arm to append rather than overwrite.
+    """
+    conn = ledger.get_connection(db_path=db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT MAX(run_index) FROM runs WHERE task_id = ? AND arm = ?",
+            (task_id, arm),
+        )
+        row = cursor.fetchone()
+        current_max = row[0] if row and row[0] is not None else 0
+        return current_max + 1
+    finally:
+        conn.close()
+
+
 def execute_live_run(
     task: Dict[str, Any],
     arm: str,
@@ -313,7 +355,7 @@ def execute_live_run(
     """
     Execute a single live headless run using Antigravity CLI.
     Enforces starting workspace cleanliness via git checkout + clean.
-    Captures NDJSON output stream and duration.
+    Captures NDJSON output stream, duration, prompt hash, and verification status.
     """
     # Invariant: starting workspace state reset
     print(f"[*] Resetting workspace state in '{target_repo_path}' before {arm} run {run_index}...")
@@ -322,13 +364,16 @@ def execute_live_run(
     prompt = task["prompt"]
     model = task["model"]
 
+    effective_prompt = prompt if arm == "baseline" else (
+        f"Execute the following task strictly conforming to the workspace ICM pipeline "
+        f"(01_intake -> 02_plan -> 03_exec -> 04_verify):\n\n{prompt}"
+    )
+    prompt_hash = hashlib.sha256(effective_prompt.encode("utf-8")).hexdigest()
+
     cmd_args = [
         cli_cmd,
         "-p",
-        prompt if arm == "baseline" else (
-            f"Execute the following task strictly conforming to the workspace ICM pipeline "
-            f"(01_intake -> 02_plan -> 03_exec -> 04_verify):\n\n{prompt}"
-        ),
+        effective_prompt,
         "--output-format",
         "stream-json",
         "--model",
@@ -369,6 +414,11 @@ def execute_live_run(
     if parsed["duration_seconds"] == 0.0:
         parsed["duration_seconds"] = duration_seconds
 
+    # Execute dynamic automated verification if verify_cmd configured
+    verify_cmd = task.get("verify_cmd")
+    verification_status = execute_verification(verify_cmd, target_repo_path)
+    print(f"    Automated verification outcome: {verification_status.upper()}")
+
     # Save raw stdout NDJSON stream to evidence file and compute SHA-256 (Finding 1)
     evidence_dir = WORKSPACE_ROOT / "experiments" / "evidence"
     evidence_dir.mkdir(parents=True, exist_ok=True)
@@ -384,6 +434,8 @@ def execute_live_run(
         "run_index": run_index,
         "timestamp": timestamp,
         "parsed": parsed,
+        "verification_status": verification_status,
+        "prompt_hash": prompt_hash,
         "evidence_ref": evidence_ref,
         "evidence_hash": evidence_hash,
     }
@@ -437,15 +489,14 @@ def main():
         help="Arm to execute: 'baseline', 'icm', 'icm-subagents', or 'both' (default: both)",
     )
     parser.add_argument(
-        "--output",
-        "-o",
-        default=None,
-        help="Output file path for generated code artifact (e.g., sandbox/vanilla/index.html)",
+        "--clear",
+        action="store_true",
+        help="Clear existing runs for this task prior to execution (default: append runs)",
     )
     parser.add_argument(
         "--skills",
         default=None,
-        help="Comma-separated active skills for ICM arm (e.g., 'ui-ux-pro-max,shadcn,ai-lab,caveman,pony tail')",
+        help="Comma-separated active skills for ICM arm (e.g., 'ui-ux-pro-max,shadcn,ai-lab,caveman,ponytail')",
     )
     parser.add_argument(
         "--subagents",
@@ -508,8 +559,6 @@ def main():
         print(f"  Active Skills:  {args.skills}")
     if args.subagents:
         print(f"  Subagents:      {args.subagents}")
-    if args.output:
-        print(f"  Target Output:  {args.output}")
     print(f"  Runs Per Arm:   {runs_per_arm}")
     print(f"  Dry-Run Mode:   {'YES (fixtures only)' if args.dry_run else 'NO (live headless CLI)'}")
     print("=" * 72)
@@ -520,6 +569,8 @@ def main():
     if args.dry_run or not cli_executable:
         if not args.dry_run and not cli_executable:
             print(f"[*] Live CLI not detected on PATH. Executing simulated telemetry runner for task '{task_id}'...")
+        if args.clear:
+            ledger.clear_task_runs(task_id, db_path=db_path, arm=arm_to_run if arm_to_run != "both" else None)
         execute_dry_run(
             task_id=task_id,
             fixtures_path=Path(args.fixtures),
@@ -532,16 +583,18 @@ def main():
 
         if arm_to_run in ("baseline", "both"):
             print(f"\n[*] Starting Baseline Arm ({runs_per_arm} runs)...")
-            ledger.clear_task_runs(task_id, db_path=db_path, arm="baseline" if arm_to_run != "both" else None)
+            if args.clear:
+                ledger.clear_task_runs(task_id, db_path=db_path, arm="baseline" if arm_to_run != "both" else None)
             for i in range(1, runs_per_arm + 1):
-                print(f"  → Running Baseline Arm #{i}...")
-                res = execute_live_run(task, "baseline", i, cli_executable, target_repo_path)
+                run_idx = get_next_run_index(task_id, "baseline", db_path=db_path)
+                print(f"  → Running Baseline Arm #{run_idx}...")
+                res = execute_live_run(task, "baseline", run_idx, cli_executable, target_repo_path)
                 u = res["parsed"]["usage"]
                 ledger.record_run(
                     task_id=task_id,
                     arm="baseline",
                     model=task["model"],
-                    run_index=i,
+                    run_index=run_idx,
                     timestamp=res["timestamp"],
                     input_tokens=u["input_tokens"],
                     output_tokens=u["output_tokens"],
@@ -552,25 +605,28 @@ def main():
                     duration_seconds=res["parsed"]["duration_seconds"],
                     source_kind="live",
                     evidence_status="verified",
-                    verification_status="passed",
+                    verification_status=res.get("verification_status", "not_run"),
                     evidence_ref=res.get("evidence_ref"),
                     evidence_hash=res.get("evidence_hash"),
+                    notes=f"prompt_hash:{res.get('prompt_hash')}",
                     db_path=db_path,
                 )
 
         if arm_to_run in ("icm", "icm-subagents", "both"):
             target_gov_arm = "icm" if arm_to_run == "both" else arm_to_run
             print(f"\n[*] Starting {target_gov_arm.upper()} Arm ({runs_per_arm} runs)...")
-            ledger.clear_task_runs(task_id, db_path=db_path, arm=target_gov_arm)
+            if args.clear:
+                ledger.clear_task_runs(task_id, db_path=db_path, arm=target_gov_arm)
             for i in range(1, runs_per_arm + 1):
-                print(f"  → Running {target_gov_arm.upper()} Arm #{i}...")
-                res = execute_live_run(task, target_gov_arm, i, cli_executable, target_repo_path)
+                run_idx = get_next_run_index(task_id, target_gov_arm, db_path=db_path)
+                print(f"  → Running {target_gov_arm.upper()} Arm #{run_idx}...")
+                res = execute_live_run(task, target_gov_arm, run_idx, cli_executable, target_repo_path)
                 u = res["parsed"]["usage"]
                 ledger.record_run(
                     task_id=task_id,
                     arm=target_gov_arm,
                     model=task["model"],
-                    run_index=i,
+                    run_index=run_idx,
                     timestamp=res["timestamp"],
                     input_tokens=u["input_tokens"],
                     output_tokens=u["output_tokens"],
@@ -581,27 +637,12 @@ def main():
                     duration_seconds=res["parsed"]["duration_seconds"],
                     source_kind="live",
                     evidence_status="verified",
-                    verification_status="passed",
+                    verification_status=res.get("verification_status", "not_run"),
                     evidence_ref=res.get("evidence_ref"),
                     evidence_hash=res.get("evidence_hash"),
+                    notes=f"prompt_hash:{res.get('prompt_hash')}",
                     db_path=db_path,
                 )
-
-    if args.output:
-        out_path = Path(args.output)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            import html_generator
-            if "008" in task_id or "exp008" in str(out_path).lower():
-                content = html_generator.get_exp008_vanilla_html() if arm_to_run == "baseline" else html_generator.get_exp008_governed_html()
-            elif "007" in task_id or "exp007" in str(out_path).lower():
-                content = html_generator.get_exp007_vanilla_html() if arm_to_run == "baseline" else html_generator.get_exp007_governed_html()
-            else:
-                content = html_generator.get_vanilla_html() if arm_to_run == "baseline" else html_generator.get_governed_html()
-            out_path.write_text(content, encoding="utf-8")
-            print(f"\n  ✓ Code artifact successfully written to: {out_path} ({len(content):,} bytes)")
-        except ImportError:
-            pass
 
     print("\n✓ Experiment step completed. Ledger updated successfully.\n")
     ledger.print_summary(task_id, db_path=db_path)

@@ -10,7 +10,9 @@ Enforces an internal target of **1,800 tokens** to account for tokenizer varianc
 
 ### Command Line
 ```bash
-python scripts/repo_map.py [--target <path>] [--root <path>] [--max-tokens <int>]
+# Target must be passed via --target (positional arguments are not supported)
+python scripts/repo_map.py --target scripts/ledger.py
+python scripts/repo_map.py --target src/
 ```
 
 ### PowerShell Shim (Windows)

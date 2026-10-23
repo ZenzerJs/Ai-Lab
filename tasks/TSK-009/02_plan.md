@@ -3,7 +3,7 @@
 ## Task Metadata
 - **Task ID:** TSK-009
 - **Title:** GitHub Pages Dashboard — Real Data, Few Impactful Statistics
-- **Status:** IN_REVIEW (awaiting user sign-off → `03_exec.md`)
+- **Status:** COMPLETE
 - **Prerequisite:** `01_intake.md` (see §0 for decision resolutions)
 - **Executor:** Gemini (Antigravity agent). Read §6 "Executor Guardrails" before touching anything.
 
