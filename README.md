@@ -4,8 +4,6 @@
 
 **Context, considered.**
 
-An open research workspace for **deterministic agent workflows, context engineering, and evidence-based cost/quality evaluation**.
-
 [![CI](https://github.com/ZenzerJs/Ai-Lab/actions/workflows/ci.yml/badge.svg)](https://github.com/ZenzerJs/Ai-Lab/actions/workflows/ci.yml)
 [![Dashboard](https://img.shields.io/badge/Dashboard-Live_on_GitHub_Pages-8B73E6?logo=githubpages&logoColor=white)](https://zenzerjs.github.io/Ai-Lab/)
 [![Python](https://img.shields.io/badge/Python-Research_Tooling-3776AB?logo=python&logoColor=white)](requirements.txt)
@@ -13,9 +11,11 @@ An open research workspace for **deterministic agent workflows, context engineer
 [![OKF](https://img.shields.io/badge/Knowledge-OKF_v0.2-8672DA)](docs/SPEC-VERSIONS.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-5470A6)](LICENSE)
 
-*Better context. Measurable impact. Including when the result is inconvenient.*
+**[Open live project](https://zenzerjs.github.io/Ai-Lab/)**
 
-**[Explore the interactive dashboard](https://zenzerjs.github.io/Ai-Lab/)**
+<img src="docs/images/screenshot.jpg" alt="Ai-Lab interface" width="900" />
+
+<sub>Live dashboard showing the published research snapshot.</sub>
 
 </div>
 
@@ -23,19 +23,19 @@ An open research workspace for **deterministic agent workflows, context engineer
 
 ## 📋 Contents
 
-- [Why Ai-Lab](#-why-ai-lab)
+- [Overview](#-overview)
 - [What the Evidence Says](#-what-the-evidence-says)
 - [Key Capabilities](#-key-capabilities)
 - [Architecture](#-architecture)
-- [How Experiments Are Evaluated](#-how-experiments-are-evaluated)
 - [Tech Stack](#-tech-stack)
 - [Getting Started](#-getting-started)
 - [Repository Layout](#-repository-layout)
+- [How Experiments Are Evaluated](#-how-experiments-are-evaluated)
 - [Claims, Limits & Next Steps](#-claims-limits--next-steps)
 
 ---
 
-## 💡 Why Ai-Lab
+## 💡 Overview
 
 More context does not automatically mean better agent performance. Structure can reduce mistakes, but planning, re-reading, verification, and tool overhead all cost time and tokens.
 
@@ -141,24 +141,6 @@ See [architecture overview](docs/concepts/architecture-overview.md), [knowledge 
 
 ---
 
-## 🔒 How Experiments Are Evaluated
-
-The framework is designed around **same-task, same-model, same-prompt** comparisons, with run provenance and explicit exclusions:
-
-1. **Prompt/model parity:** both arms should receive the same task instructions and model.
-2. **Worktree isolation:** each trial starts from a known repository state.
-3. **Outcome evidence:** usage, duration, completion, and evaluator results are stored with source classification.
-4. **Separate accounting:** recorded token counts determine measured-workload estimates; alternate model pricing is an explicitly labelled simulation.
-5. **Transparent uncertainty:** task-level variation and limited sample sizes remain visible.
-
-> [!WARNING]
-> **Replication matters.** The experiment protocol documents a minimum of two runs per arm, but the currently published dashboard snapshot represents **one run per arm across seven tasks**. Do not describe that snapshot as a replicated multi-run A/B campaign. Future reports should reconcile the protocol and actual included run counts before claiming statistical confidence.
-
-> [!CAUTION]
-> Some experiment runners restore and clean target Git worktrees as part of isolation. **Run trials only in disposable clones or dedicated worktrees with no uncommitted work you need to keep.** Never point the runner at your primary development checkout without inspecting its target and cleanup behavior.
-
----
-
 ## 🧱 Tech Stack
 
 | Layer | Technology |
@@ -238,6 +220,24 @@ Ai-Lab/
 ├── config/PRICING.json         # Rate cards with provenance
 └── .github/workflows/          # CI and dashboard deployment
 ```
+
+---
+
+## 🔒 How Experiments Are Evaluated
+
+The framework is designed around **same-task, same-model, same-prompt** comparisons, with run provenance and explicit exclusions:
+
+1. **Prompt/model parity:** both arms should receive the same task instructions and model.
+2. **Worktree isolation:** each trial starts from a known repository state.
+3. **Outcome evidence:** usage, duration, completion, and evaluator results are stored with source classification.
+4. **Separate accounting:** recorded token counts determine measured-workload estimates; alternate model pricing is an explicitly labelled simulation.
+5. **Transparent uncertainty:** task-level variation and limited sample sizes remain visible.
+
+> [!WARNING]
+> **Replication matters.** The experiment protocol documents a minimum of two runs per arm, but the currently published dashboard snapshot represents **one run per arm across seven tasks**. Do not describe that snapshot as a replicated multi-run A/B campaign. Future reports should reconcile the protocol and actual included run counts before claiming statistical confidence.
+
+> [!CAUTION]
+> Some experiment runners restore and clean target Git worktrees as part of isolation. **Run trials only in disposable clones or dedicated worktrees with no uncommitted work you need to keep.** Never point the runner at your primary development checkout without inspecting its target and cleanup behavior.
 
 ---
 
