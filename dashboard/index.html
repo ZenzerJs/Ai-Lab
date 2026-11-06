@@ -1,12 +1,50 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232ea043' stroke-width='2'><path d='M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6'/></svg>" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='11' fill='%23182137'/%3E%3Cg fill='none' stroke='%23c6baf7' stroke-width='1.8'%3E%3Cellipse cx='20' cy='20' rx='14' ry='6' transform='rotate(-35 20 20)'/%3E%3Cellipse cx='20' cy='20' rx='14' ry='6' transform='rotate(55 20 20)'/%3E%3C/g%3E%3Ccircle cx='20' cy='20' r='2.3' fill='white'/%3E%3C/svg%3E"
+    />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Antigravity Savings Dashboard — ICM vs. Baseline</title>
+    <meta name="theme-color" content="#182137" />
+    <script>
+      (() => {
+        let saved;
+        try {
+          saved = localStorage.getItem("ai-lab.theme.v1");
+        } catch {}
+        const theme =
+          saved === "light" || saved === "dark"
+            ? saved
+            : window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+        document
+          .querySelector('meta[name="theme-color"]')
+          .setAttribute("content", theme === "dark" ? "#131116" : "#f5f6fa");
+      })();
+    </script>
+    <meta
+      name="description"
+      content="AI-Lab is an open research workspace for agent context economics. Compare measured costs, explore model pricing, and inspect the evidence behind every run."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <title>AI-Lab — Context, considered.</title>
   </head>
-  <body class="bg-background text-gray-100 min-h-screen font-sans antialiased">
+  <body>
+    <noscript
+      >AI-Lab needs JavaScript to explore benchmark results. Read source records
+      and methodology at github.com/ZenzerJs/Ai-Lab.</noscript
+    >
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

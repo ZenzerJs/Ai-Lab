@@ -1,0 +1,593 @@
+:root {
+  --motion-enter: 220ms;
+  --motion-quick: 180ms;
+  --ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-move: cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+/* Preserve provider geometry; monochrome marks adapt to each surface. */
+.provider-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: 4px;
+}
+.provider-mark {
+  background: var(--canvas);
+  border: 1px solid var(--line);
+}
+.provider-icon img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+.table-scroll {
+  overflow-y: hidden;
+}
+.provider-icon[data-provider="OpenAI"] img {
+  width: 28px;
+  height: 28px;
+}
+.badge {
+  border-radius: 4px;
+  background: transparent;
+  border-color: var(--line);
+}
+.badge-green,
+.badge-purple,
+.badge-blue,
+.badge-amber,
+.badge-neutral {
+  background: transparent;
+}
+.badge-blue,
+.badge-purple {
+  color: var(--iris);
+}
+.badge-amber,
+.badge-neutral {
+  color: var(--muted);
+}
+.metric-tag {
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--iris);
+  border-radius: 3px;
+}
+.ledger-record {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ledger-record .provider-icon {
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
+}
+.ledger-record-text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.ledger-record-text strong {
+  display: block;
+  font-family: var(--body);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ledger-record-text .cell-subtitle {
+  display: block;
+  margin: 0;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.evidence-table th,
+.evidence-table td {
+  padding: 18px 24px;
+}
+.evidence-table :is(th, td):nth-child(4),
+.evidence-table :is(th, td):nth-child(5) {
+  text-align: right;
+}
+.evidence-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--body);
+  color: var(--muted);
+  font-size: 12px;
+}
+.evidence-status.is-verified {
+  color: var(--sea);
+}
+.ledger-summary .date-value {
+  padding-top: 0;
+}
+.provider-generic {
+  background: var(--iris-soft);
+  color: var(--iris);
+}
+.model-identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.model-identity strong {
+  font-family: var(--body);
+  font-size: 12px;
+  font-weight: 600;
+}
+.model-identity .cell-subtitle {
+  margin-top: 2px;
+}
+.model-select {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.model-select select {
+  min-width: 0;
+  flex: 1;
+}
+.simulation-result-title .model-identity {
+  color: var(--ink);
+}
+.simulation-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.theme-icon {
+  display: inline-flex;
+  animation: icon-enter var(--motion-quick) var(--ease-enter);
+}
+.theme-toggle[aria-pressed="true"] {
+  color: var(--iris);
+  background: var(--iris-soft);
+}
+
+/* Obsidian Violet: warm charcoal, quiet plum, and reserved amethyst. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #131116;
+  --paper: #24202b;
+  --ink: #f2eff5;
+  --muted: #b8afbf;
+  --subtle: #2c2734;
+  --line: #40364b;
+  --night: #1b1820;
+  --iris: #a78bfa;
+  --iris-dark: #d0c3ff;
+  --iris-soft: #342a46;
+  --sea: #67d2ae;
+  --sea-soft: #20352f;
+  --rust: #e4a4b6;
+  --amber: #e8c585;
+  --amber-soft: #382e1e;
+  --blue: #a78bfa;
+  --blue-soft: #2b2439;
+  --panel-soft: #211d28;
+  --panel-lavender: #2b2439;
+  --tinted-line: #40364b;
+  --shadow: 0 3px 16px rgb(0 0 0 / 10%);
+}
+[data-theme="dark"] ::selection {
+  background: #534575;
+  color: #fff;
+}
+[data-theme="dark"] .lab-topbar {
+  background: var(--night);
+}
+[data-theme="dark"] .provider-mark {
+  background: var(--canvas);
+  border-color: transparent;
+}
+[data-theme="dark"] .provider-monochrome img {
+  filter: brightness(0) invert(1);
+}
+[data-theme="dark"]
+  :is(.badge-green, .badge-purple, .badge-blue, .badge-amber, .badge-neutral) {
+  background: transparent;
+}
+[data-theme="dark"] .nav-item:not(.is-active),
+[data-theme="dark"] .nav-eyebrow,
+[data-theme="dark"] .brand-subtitle,
+[data-theme="dark"] .open-lab-note p {
+  color: var(--muted);
+}
+[data-theme="dark"] .lab-brand,
+[data-theme="dark"] .open-lab-note strong {
+  color: var(--ink);
+}
+[data-theme="dark"] .open-lab-note {
+  background: var(--paper);
+  border-color: var(--line);
+}
+[data-theme="dark"] .open-lab-note a,
+[data-theme="dark"] .sidebar-note-icon {
+  color: var(--iris);
+}
+[data-theme="dark"] .sidebar-foot {
+  border-color: var(--line);
+}
+[data-theme="dark"] .sidebar-foot > svg {
+  color: var(--iris);
+}
+[data-theme="dark"] .nav-item:hover,
+[data-theme="dark"] .sidebar-link:hover,
+[data-theme="dark"] .mobile-close:hover {
+  background: var(--subtle);
+}
+[data-theme="dark"] .nav-item.is-active {
+  background: #7355d3;
+  color: #fff;
+}
+[data-theme="dark"] .menu-scrim {
+  background: rgb(10 8 13 / 65%);
+}
+[data-theme="dark"] .button-primary {
+  background: #7355d3;
+  color: #fff;
+}
+[data-theme="dark"] .button-primary:hover {
+  background: #6e57c6;
+}
+[data-theme="dark"] .button-outline {
+  color: var(--ink);
+  border-color: var(--line);
+  box-shadow: none;
+}
+[data-theme="dark"] .button-outline:hover {
+  color: var(--iris);
+  background: var(--subtle);
+  border-color: #706091;
+}
+[data-theme="dark"] .badge-green {
+  border-color: #2b5145;
+}
+[data-theme="dark"] .badge-purple {
+  color: var(--iris);
+  border-color: var(--tinted-line);
+}
+[data-theme="dark"] .badge-amber {
+  border-color: #5b4a2d;
+}
+[data-theme="dark"] .badge-neutral {
+  color: var(--muted);
+  background: transparent;
+  border-color: var(--line);
+}
+[data-theme="dark"] .thesis-panel,
+[data-theme="dark"] .simulation-result {
+  background: var(--panel-lavender);
+  border-color: var(--tinted-line);
+}
+[data-theme="dark"] .reading-panel {
+  background: var(--panel-soft);
+  border-color: var(--line);
+}
+[data-theme="dark"] .explore-strip,
+[data-theme="dark"] .ledger-summary > div {
+  background: var(--paper);
+}
+[data-theme="dark"] .reading-icon,
+[data-theme="dark"] .experiment-glyph {
+  color: var(--iris);
+  background: var(--iris-soft);
+}
+[data-theme="dark"] .thesis-copy .eyebrow,
+[data-theme="dark"] .metric-top > svg,
+[data-theme="dark"] .reading-point > svg,
+[data-theme="dark"] .empty-state > svg,
+[data-theme="dark"] .sandbox-card-top,
+[data-theme="dark"] .sandbox-preview-heading > div:first-child {
+  color: var(--iris);
+}
+[data-theme="dark"] .thesis-copy p,
+[data-theme="dark"] .context-orbit > span,
+[data-theme="dark"] .metric-top,
+[data-theme="dark"] .bar-value,
+[data-theme="dark"] .reading-panel .eyebrow,
+[data-theme="dark"] .reading-panel > p,
+[data-theme="dark"] .reading-point p,
+[data-theme="dark"] .search-field > svg,
+[data-theme="dark"] .simulation-result-title > .mono,
+[data-theme="dark"] .simulation-values span {
+  color: var(--muted);
+}
+[data-theme="dark"] .metric-comparison strong,
+[data-theme="dark"] .chart-label {
+  color: var(--ink);
+}
+[data-theme="dark"] .middle-dot,
+[data-theme="dark"] .footer-divider {
+  color: var(--muted);
+}
+[data-theme="dark"] .metric-comparison,
+[data-theme="dark"] .chart-row,
+[data-theme="dark"] .reading-divider,
+[data-theme="dark"] .simulation-result .panel-note,
+[data-theme="dark"] .simulation-values > div:last-child,
+[data-theme="dark"] .data-table th,
+[data-theme="dark"] .data-table td {
+  border-color: var(--line);
+}
+[data-theme="dark"] .bar-line {
+  background-image: linear-gradient(
+    90deg,
+    transparent calc(100% - 1px),
+    var(--line) 1px
+  );
+}
+[data-theme="dark"] .bar-baseline,
+[data-theme="dark"] .legend-baseline {
+  background: #928899;
+}
+[data-theme="dark"] .bar-governed,
+[data-theme="dark"] .legend-governed {
+  background: #a78bfa;
+}
+[data-theme="dark"] .notice-amber {
+  border-color: #5b4a2d;
+}
+[data-theme="dark"] .notice-purple {
+  color: #d0c3ef;
+  border-color: var(--tinted-line);
+}
+[data-theme="dark"] .notice-error {
+  color: #f2b5a9;
+  background: #3b262b;
+  border-color: #70424b;
+}
+[data-theme="dark"] .data-table thead,
+[data-theme="dark"] .preview-address {
+  background: #201c25;
+  color: var(--muted);
+}
+[data-theme="dark"] .data-table tbody tr:hover {
+  background: var(--subtle);
+}
+[data-theme="dark"] .segmented-control button {
+  color: var(--muted);
+}
+[data-theme="dark"] .segmented-control button[aria-pressed="true"] {
+  color: var(--iris);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 18%);
+}
+[data-theme="dark"] .model-table .is-selected,
+[data-theme="dark"] .model-table .is-selected:hover,
+[data-theme="dark"] .sandbox-card.is-selected {
+  background: var(--iris-soft);
+}
+[data-theme="dark"] .sandbox-card.is-selected,
+[data-theme="dark"] .sandbox-card:hover {
+  border-color: #8871be;
+}
+[data-theme="dark"] .run-details dl {
+  background: var(--canvas);
+}
+[data-theme="dark"] .preview-dots i {
+  border-color: var(--muted);
+}
+[data-theme="dark"] .loading-title,
+[data-theme="dark"] .loading-cards > div {
+  background: var(--subtle);
+}
+[data-theme="dark"] .loading-hero {
+  background: var(--panel-lavender);
+}
+[data-theme="dark"] .context-orbit rect {
+  fill: var(--paper);
+  stroke: var(--tinted-line);
+}
+[data-theme="dark"] .context-orbit text {
+  fill: var(--ink);
+}
+[data-theme="dark"] .context-orbit ellipse:not([fill="none"]) {
+  fill: var(--iris-soft);
+}
+[data-theme="dark"] .context-orbit circle[r="42"] {
+  fill: #7355d3;
+}
+
+/* Short entrances and bounded stagger keep content usable throughout. */
+.workspace-page:not([hidden]) {
+  animation: page-enter var(--motion-enter) var(--ease-enter) both;
+}
+.workspace-page:not([hidden]) .experiment-card,
+.workspace-page:not([hidden]) .metric-card,
+.workspace-page:not([hidden]) .model-table tbody tr {
+  animation: row-enter var(--motion-quick) var(--ease-enter) both;
+  animation-delay: calc(var(--row-order, 0) * 30ms);
+}
+:is(.experiment-card, .metric-card, .model-table tbody tr):nth-child(2) {
+  --row-order: 1;
+}
+:is(.experiment-card, .metric-card, .model-table tbody tr):nth-child(3) {
+  --row-order: 2;
+}
+:is(.experiment-card, .metric-card, .model-table tbody tr):nth-child(4) {
+  --row-order: 3;
+}
+:is(.experiment-card, .metric-card, .model-table tbody tr):nth-child(5) {
+  --row-order: 4;
+}
+:is(.experiment-card, .metric-card, .model-table tbody tr):nth-child(6) {
+  --row-order: 5;
+}
+:is(.experiment-card, .metric-card, .model-table tbody tr):nth-child(n + 7) {
+  --row-order: 6;
+}
+.button,
+.icon-button,
+.segmented-control button,
+.sandbox-card {
+  transition:
+    transform 100ms ease-out,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease;
+}
+.button:active:not(:disabled),
+.icon-button:active:not(:disabled),
+.segmented-control button:active,
+.sandbox-card:active {
+  transform: scale(0.97);
+}
+.experiment-details summary > svg {
+  transition: transform var(--motion-quick) var(--ease-move);
+}
+.experiment-details[open] > .table-scroll,
+.run-details[open] > dl {
+  animation: details-enter var(--motion-quick) var(--ease-enter) both;
+}
+.export-button[data-exported="true"] > svg {
+  animation: confirm-once 260ms var(--ease-enter);
+}
+::view-transition {
+  pointer-events: none;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 180ms;
+  animation-timing-function: ease-out;
+}
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes details-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes icon-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes confirm-once {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+  45% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes drawer-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes scrim-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (max-width: 1023px) {
+  .lab-sidebar.is-open {
+    animation: drawer-enter 200ms var(--ease-enter) both;
+  }
+  .menu-scrim {
+    animation: scrim-enter 160ms ease-out both;
+  }
+}
+@media (max-width: 767px) {
+  .topbar-actions {
+    gap: 0;
+  }
+  .topbar-actions .icon-button {
+    width: 44px;
+    min-height: 44px;
+  }
+  .topbar-actions .export-button {
+    padding-inline: 10px;
+  }
+  .simulation-result-title .model-identity {
+    align-self: flex-start;
+  }
+}
+@media (max-width: 420px) {
+  .topbar-actions .export-button {
+    width: 44px;
+    min-width: 44px;
+    padding: 10px;
+  }
+  .topbar-actions .export-button > span {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    animation-delay: 0s !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+  .workspace-page,
+  .experiment-card,
+  .metric-card,
+  .model-table tbody tr,
+  .lab-sidebar.is-open,
+  .theme-icon,
+  .button,
+  .icon-button,
+  .segmented-control button,
+  .sandbox-card {
+    transform: none !important;
+  }
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none !important;
+  }
+}
