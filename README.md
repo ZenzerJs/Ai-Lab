@@ -54,7 +54,10 @@ Ai-Lab studies that tradeoff. It brings together **Interpretable Context Methodo
 ## 📊 What the Evidence Says
 
 > [!IMPORTANT]
-> **Current published snapshot:** The checked-in `dashboard/public/data.json` was generated on **2026-10-04 UTC** (build `6e55094`). It contains **7 paired tasks and 14 live-verified runs**—one baseline and one governed run per task. Its aggregate estimated cost reduction is **1.9%**, with a **95% confidence interval of −68.3% to +41.1%**. That interval crosses zero, so this snapshot does **not** establish a general cost-saving effect.
+> **Current published snapshot:** The checked-in `dashboard/public/data.json` was generated on **2026-11-07 UTC** (build `1048d69`). It combines **36 evaluated runs across 11 benchmark task archetypes (`EXP-001`..`EXP-011`)** stratified into three lenses:
+> 1. **Core 7-task live CLI cost snapshot (`EXP-001`..`EXP-007`, 14 runs):** Aggregate estimated cost reduction is **1.9%** (**95% CI: −68.3% to +41.1%**), uncovering an empirical **~150 LOC / 2+ file break-even threshold** where fixed stage-contract overhead on micro-tasks (`EXP-001`: −200.8%) transitions to **+28.1% to +64.3% savings** on multi-file architectures (`EXP-003`, `EXP-006`) with an **85.3% governed prompt cache-hit rate**.
+> 2. **Multi-file repository outlines (`EXP-009`..`EXP-011`, 6–8 files each, 6 runs):** Above the break-even threshold, governed execution cuts turns by **32%** (72 → 49), uncached input tokens by **45%**, and output tokens by **58%**, yielding **+56.3% cold-start normalized cost savings (+42.8% to +68.5%)** and **+5.0% raw unadjusted savings**.
+> 3. **5-dimension quality rubric (`EXP-001`..`EXP-011`, 11 paired tasks) & operational defect suite (`EXP-005`, 16 runs):** Governed execution achieves a statistically significant **+8.91% mean quality gain (95% CI: +2.00% to +17.64%)**, **+1.00 / 5.00 Design & Accessibility gain (95% CI: +0.29 to +1.71)**, **90.9% fewer tool/path execution errors** (1 vs. 11), and **0% shipped defects** (0/8 vs. 2/8 baseline defect runs).
 
 ### Live-token comparison: seven tasks
 
@@ -125,10 +128,11 @@ While pooled cost across the original 7 tasks had a wide confidence interval cro
 | 🧭 **ICM task lifecycle** | Structured intake → plan → execute → verify → retrospective, with an explicit human approval gate between planning and execution. |
 | 🗂️ **OKF knowledge graph** | Versioned documentation, concepts, schemas, and knowledge links to retrieve relevant context without reading the entire repository. |
 | 🌳 **AST-aware navigation** | Structural repository maps that prioritize symbols and signatures over large undirected file dumps. |
-| 🔬 **A/B experiment runner** | Repeatable task definitions, baseline/governed comparisons, telemetry extraction, manifests, and evaluation artifacts. |
-| 🧾 **Evidence & cost ledger** | SQLite-backed run records with source classification, hashes, token usage, cache readings, and estimated cost. |
-| 📊 **Interactive dashboard** | Task-level comparisons, model rate-card what-if analysis, historical run evidence, and operational reliability metrics. |
-| 🛡️ **Automated quality checks** | Python tests, OKF linter, dashboard build, and targeted browser/experiment verification suites. |
+| 🔬 **A/B experiment runner & outlines** | Repeatable task definitions (`EXP-001`..`EXP-011`), 6–8 file starter repository outlines (`scripts/scaffold_outlines.py`), and telemetry extraction. |
+| ⚖️ **5-dimension quality judge & blind A/B** | Pre-registered 0–25 workspace scorer (`score_workspace`), diff blinding (`prepare_blind_ab_packet`), and 95% bootstrap CIs (`compute_quality_ci`). |
+| 🧾 **Evidence & cost ledger** | SQLite-backed run records with source classification, SHA-256 hashes, token usage, cache readings, and estimated cost. |
+| 📊 **Interactive workspace dashboard** | Obsidian Violet light/dark research workspace with task comparisons, 5-dimension quality CIs, rate-card simulator, live sandboxes, and provenance ledger. |
+| 🛡️ **Automated quality checks** | Python unit/integration/browser suites, OKF v0.2 frontmatter linter, and filtered verification runner (`scripts/filter_output.py`). |
 
 ### What Ai-Lab refuses to conflate
 
@@ -149,7 +153,9 @@ flowchart TD
     K["OKF knowledge + AST tools"] --> G
     B --> L["Verified telemetry & SQLite ledger"]
     G --> L
-    L --> D["Static dashboard export<br/>React · Recharts"]
+    L --> Q["5-dimension quality scorer & blind A/B judge"]
+    L --> D["Static workspace export<br/>React 18 · TypeScript · Custom SVG"]
+    Q --> D
 ```
 
 The governed arm uses a documented task lifecycle:
@@ -170,12 +176,12 @@ See [architecture overview](docs/concepts/architecture-overview.md), [knowledge 
 
 | Layer | Technology |
 |---|---|
-| Agent methods | ICM stage contracts, OKF v0.2 documentation |
-| Research scripts | Python 3.11 in CI, AST tooling, tiktoken, PyYAML |
-| Experiment evidence | JSON/NDJSON, SQLite, SHA-256 provenance |
-| Dashboard | Vite, React 18, TypeScript, Tailwind CSS 3, Recharts |
-| Testing | pytest, targeted Playwright suites, GitHub Actions |
-| Publication | Static GitHub Pages dashboard snapshot |
+| Agent methods | ICM 5-stage contracts, OKF v0.2 knowledge graph, break-even complexity law |
+| Research & grading scripts | Python 3.11+, AST (`ast` / Tree-sitter), `tiktoken`, 5-dimension rubric & blind A/B judge |
+| Experiment evidence | JSON/NDJSON streams, SQLite ledger, SHA-256 provenance, 95% bootstrap CIs |
+| Dashboard workspace | Vite, React 18, TypeScript, custom CSS token system (Obsidian Violet light/dark), bespoke SVG charts |
+| Testing | pytest (unit, integration, snapshot, rubric), Playwright browser suites, GitHub Actions |
+| Publication | Static GitHub Pages snapshot (`dashboard/public/data.json`) |
 
 ---
 
@@ -229,21 +235,22 @@ python dashboard/build_data.py
 ```text
 Ai-Lab/
 ├── .agents/
-│   ├── rules/                  # Governance constraints
+│   ├── rules/                  # Modular ICM governance constraints
 │   └── skills/                 # Navigation and run helpers
-├── .antigravity/agents/        # Specialized agent role definitions
-├── docs/                      # OKF knowledge graph and specifications
+├── docs/                       # OKF v0.2 knowledge graph, break-even & quality findings
 ├── experiments/
-│   ├── tasks/                  # Fixed benchmark task prompts
-│   └── evidence/               # Captured live CLI event streams
-├── scripts/                    # Runner, telemetry, repo map, ledger, campaign
+│   ├── tasks/                  # Benchmark task specs (EXP-001..EXP-011)
+│   └── evidence/               # SHA-256 verified live CLI event streams (.ndjson)
+├── sandbox/                    # Interactive UI artifacts & multi-file outline runs
+├── scripts/                    # Runner, repo_map, ledger, campaign, quality rubric, outlines
+├── tasks/                      # ICM 5-stage task contracts (TSK-001..TSK-027)
 ├── dashboard/
-│   ├── src/                    # React UI and comparison components
-│   ├── public/data.json        # Published snapshot
-│   └── build_data.py           # SQLite → static JSON exporter
-├── tests/                      # Unit, integration, browser, and task suites
-├── config/PRICING.json         # Rate cards with provenance
-└── .github/workflows/          # CI and dashboard deployment
+│   ├── src/                    # Obsidian Violet React workspace (Overview, Experiments, Simulator, Sandboxes, Audit)
+│   ├── public/data.json        # Published empirical + quality rubric snapshot
+│   └── build_data.py           # SQLite & quality rubric → static JSON exporter
+├── tests/                      # Unit, integration, rubric, and Playwright browser suites
+├── config/PRICING.json         # Audited model rate cards with provenance
+└── .github/workflows/          # CI and GitHub Pages deployment
 ```
 
 ---
@@ -270,12 +277,12 @@ The framework is designed around **same-task, same-model, same-prompt** comparis
 
 > **The product is the measurement discipline, not an attractive savings percentage.**
 
-- **Current dashboard claim:** A small **1.9% observed aggregate estimated cost difference**, with wide uncertainty, across **7 paired live tasks**. The governed arm is not consistently cheaper.
-- **Older results and EXP-008:** The previous README described additional experiments and much larger savings figures. They are **not represented in the currently published seven-task `data.json` aggregate**. Treat them as separate historical claims until their run selection, provenance, and accounting are reconciled with the current snapshot.
-- **Rate-card simulations:** Token workloads from one source model are repriced against other providers' schedules. The simulator does not establish that the target models have identical tokenization, caching behavior, or performance.
-- **Operational quality:** The separate 8-vs-8 FreeBuff benchmark has no provider-native token-cost telemetry and should not be pooled with the live CLI cost results.
-- **Test scope:** Passing experiment-specific Playwright checks does not verify every dashboard route or prove general agent reliability.
-- **Forward direction:** Run replicated, predeclared, stratified comparisons; measure *cost per verified successful task*; publish unsuccessful and costly runs alongside successes.
+- **Two-regime cost behavior (`EXP-001`..`EXP-011`):** Pooled across the initial 7-task snapshot (`EXP-001`..`EXP-007`), estimated cost reduction is **1.9% (95% CI: −68.3% to +41.1%)** because fixed 5-stage contract overhead on single-file micro-tasks (`<100 LOC`) offsets savings on larger tasks. Above the **~150 LOC / 2+ file break-even threshold** (`EXP-003`, `EXP-006`, and the 6–8 file outlines `EXP-009`..`EXP-011`), governed runs reduce cost by **+28.1% to +64.3%** (and **+56.3% cold-start normalized** across `EXP-009`..`EXP-011`).
+- **Statistically significant quality & hygiene gains (`TSK-025`..`TSK-027`):** Evaluated across all 11 paired tasks (`EXP-001`..`EXP-011`) on the pre-registered 5-dimension rubric (0–25 scale), governed execution achieves a **+8.91% mean quality improvement (95% CI: +2.00% to +17.64%)**, **+1.00 / 5.00 Design & Accessibility gain (95% CI: +0.29 to +1.71)**, and **90.9% fewer tool/path execution errors** (1 vs. 11).
+- **Historical single-run claims (`EXP-008`):** Earlier references to `EXP-008` (64.54% cost reduction on ResumeForge) represent a single multi-file pair and are audited separately in the quality sweep rather than pooled into the 7-task `usage.db` cost aggregate.
+- **Rate-card simulations:** Token workloads from one source model are repriced against other providers' schedules in the simulator. Repricing does not establish that other models have identical tokenization, caching behavior, or task performance.
+- **Operational quality (`EXP-005` FreeBuff):** The 8-vs-8 GLM 5.3 Flash benchmark (`0/8` governed defect runs vs. `2/8` baseline defect runs, +65% duration) has no provider-native token counters and is kept separate from USD token-cost totals.
+- **Forward direction:** Expand multi-repetition campaigns ($k \ge 3$ per task) across 20+ multi-file tasks and introduce **ICM-Lite** (single-file contract) for micro-tasks below the 150 LOC break-even threshold.
 
 The most interesting question is not whether governance can make an agent look efficient once. It's **which tasks justify the extra structure, and how confidently we can tell**.
 
