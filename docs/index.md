@@ -13,6 +13,7 @@ Welcome to the **Antigravity Knowledge Bundle**. This catalog indexes core archi
 * [Measurement Layer](/concepts/measurement-layer.md) - A/B experiment harness, fairness invariants, and cache-aware pricing economics.
 * [Frontend Workspace](/concepts/frontend-workspace.md) - Dashboard design system, navigation, evidence semantics, and verification.
 * [Live Smoke Procedure](/concepts/live-smoke-procedure.md) - Standard operating procedure, authorization template, and safety invariants for live model runs.
+* [Quality Benchmark Findings](/concepts/quality-benchmark-findings.md) - Multi-dimensional rubric evaluation and 95% bootstrap CIs across EXP-001..EXP-011.
 
 ## Schemas & Contracts
 

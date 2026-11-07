@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Gateway Policy Console</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0b0f19; color: #e2e8f0; margin: 0; padding: 2rem; }
+    .panel { background: #1e293b; border-radius: 8px; padding: 1.5rem; border: 1px solid #334155; margin-bottom: 1.5rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 0.75rem; border-bottom: 1px solid #334155; }
+    th { color: #94a3b8; font-size: 0.875rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>API Gateway Policy Dashboard</h1>
+    <section class="panel" aria-label="Tenant Rate Limits">
+      <h2>Tenant Quotas</h2>
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Tenant ID</th>
+            <th scope="col">Tier</th>
+            <th scope="col">Sliding Window Requests</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>tenant_acme</td>
+            <td>Pro</td>
+            <td>1,420 / 100,000</td>
+            <td>Healthy</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

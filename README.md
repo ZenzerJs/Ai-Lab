@@ -89,7 +89,32 @@ A different **GLM 5.3 Flash / FreeBuff** operational evaluation reported:
 
 That sample shows a possible quality/reliability tradeoff alongside approximately **65% higher total duration**. The FreeBuff endpoint did **not** expose native token counters; these results are **not** combined with the live token-cost comparison above.
 
-**Explore the evidence:** [Dashboard](https://zenzerjs.github.io/Ai-Lab/) · [Published data snapshot](dashboard/public/data.json) · [Experiment guide](experiments/README.md) · [Measurement design](docs/concepts/measurement-layer.md)
+### Multi-File Repository Outlines (`EXP-009`..`EXP-011`) & 5-Dimension Quality Rubric
+
+To test the **~150 LOC / 2+ file break-even threshold** (`docs/concepts/icm-breakeven-analysis.md`) and evaluate work quality beyond token cost, we added three 6–8 file starter repository outlines (`EXP-009` event-driven job queue, `EXP-010` knowledge graph & BM25 search, `EXP-011` policy API gateway) and a pre-registered **5-dimension quality scorer** (`Correctness`, `Engineering Practices`, `Maintainability`, `Process Discipline`, `Design & UX`; 0–5 each in `scripts/campaign.py`).
+
+#### 1. Multi-File Outline Token & Pricing Results (`EXP-009`..`EXP-011`, `gemini-3.8-flash`)
+
+| Task (6–8 Files) | Baseline Turns & Cost | ICM Turns & Cost (Raw) | ICM Cost (Cold-Start Normalized) | Net Savings (Raw / Normalized) |
+|---|---|---:|---:|---:|
+| `EXP-009` — 7-file job queue & DAG | 37 turns · **$0.2769** | 28 turns · **$0.3580** | **$0.1585** | −29.3% / **+42.8%** |
+| `EXP-010` — 8-file knowledge graph & BM25 | 15 turns · **$0.1840** | 9 turns · **$0.1222** | **$0.0580** | **+33.6% / +68.5%** |
+| `EXP-011` — 6-file policy API gateway | 20 turns · **$0.2206** | 12 turns · **$0.1670** | **$0.0815** | **+24.3% / +63.0%** |
+| **3-Task Multi-File Total** | **72 turns · $0.6814** | **49 turns · $0.6472** | **$0.2981** | **+5.0% / +56.3%** |
+
+*Note:* Across `EXP-009`..`EXP-011`, governed execution used **32% fewer turns** (49 vs. 72), **45% fewer uncached input tokens** (`126.3k` vs. `229.5k`), and **58% fewer output tokens** (`14.7k` vs. `34.8k`). Raw ICM cost includes a ~95k prior-session cached prefix; cold-start normalized cost subtracts that shared prefix so both arms start at equal zero context.
+
+#### 2. 5-Dimension Quality Sweep (`EXP-001`..`EXP-011`, $n = 11$ Paired Tasks)
+
+While pooled cost across the original 7 tasks had a wide confidence interval crossing zero (−68.3% to +41.1%), the **5-dimension quality delta stays strictly positive**:
+
+| Dimension | Mean Delta ($\text{ICM} - \text{Baseline}$) | 95% Bootstrap CI | Finding |
+|---|---:|---:|---|
+| **Overall Quality (`normalized_pct`)** | **+8.91%** | **[+2.00%, +17.64%]** | Statistically significant (> 0); peak gain on `EXP-003` (+40%) and `EXP-006` (+32%) |
+| **Design & Accessibility (`0–5`, $n=7$ UI)** | **+1.00 pt** | **[+0.29, +1.71]** | Governed UIs consistently include semantic `<main>`, ARIA attributes, and richer state coverage |
+| **Process & Tool Hygiene (`0–5`)** | **+0.73 pt** | **[+0.00, +1.64]** | **91% fewer tool/path execution errors** in live NDJSON logs (1 ICM error vs. 11 baseline errors) |
+
+**Explore the evidence:** [Dashboard](https://zenzerjs.github.io/Ai-Lab/) · [Published data snapshot](dashboard/public/data.json) · [Quality findings](docs/concepts/quality-benchmark-findings.md) · [Break-even analysis](docs/concepts/icm-breakeven-analysis.md) · [Measurement design](docs/concepts/measurement-layer.md)
 
 ---
 

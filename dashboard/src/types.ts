@@ -266,8 +266,63 @@ export interface HeadlineBlock {
   stats: HeadlineStat[];
 }
 
+export interface QualityDimensionCI {
+  mean_delta: number | null;
+  ci_95: [number, number] | null;
+  n: number;
+}
+
+export interface QualityScoreRecord {
+  correctness: number;
+  engineering: number;
+  maintainability: number;
+  process: number;
+  design: number | null;
+  total: number;
+  max_possible: number;
+  normalized_pct: number;
+}
+
+export interface MultiFileOutlineItem {
+  task_id: string;
+  title: string;
+  files: number;
+  baseline_turns: number;
+  icm_turns: number;
+  baseline_cost_usd: number;
+  icm_cost_raw_usd: number;
+  icm_cost_normalized_usd: number;
+  raw_savings_percent: number;
+  normalized_savings_percent: number;
+}
+
+export interface QualityRubricBlock {
+  has_data: boolean;
+  tasks: {
+    task_id: string;
+    baseline: QualityScoreRecord;
+    governed: QualityScoreRecord;
+  }[];
+  quality_ci: {
+    correctness: QualityDimensionCI;
+    engineering: QualityDimensionCI;
+    maintainability: QualityDimensionCI;
+    process: QualityDimensionCI;
+    design: QualityDimensionCI;
+    normalized_pct: QualityDimensionCI;
+    sample_count: number;
+  };
+  multi_file_outlines?: MultiFileOutlineItem[];
+  tool_errors?: {
+    baseline: number;
+    icm: number;
+    reduction_percent: number;
+  };
+}
+
 export interface DashboardPayload {
   operational?: OperationalBenchmark;
+  quality_rubric?: QualityRubricBlock | null;
   generated_at: string;
   build_identity?: string;
   has_data: boolean;

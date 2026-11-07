@@ -16,6 +16,7 @@ Implements Phase 4 specifications:
 """
 
 import argparse
+import ast
 import copy
 import dataclasses
 from dataclasses import dataclass, field
@@ -28,6 +29,7 @@ from pathlib import Path
 import random
 import re
 import sqlite3
+import subprocess
 import sys
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -127,6 +129,7 @@ class CampaignSlot:
     evidence_hash: Optional[str] = None
     error_message: Optional[str] = None
     notes: Optional[str] = None
+    quality_scores: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if self.cache_condition and (not self.intended_cache_condition or self.intended_cache_condition == "cold"):
@@ -155,6 +158,8 @@ class CampaignSlot:
         }
         if self.notes:
             notes_dict["user_notes"] = self.notes
+        if self.quality_scores is not None:
+            notes_dict["quality_scores"] = self.quality_scores
 
         return {
             "task_id": self.task_id,
@@ -1106,6 +1111,7 @@ def generate_campaign_report(
             evidence_ref=r.get("evidence_ref"),
             evidence_hash=r.get("evidence_hash"),
             notes=r.get("notes"),
+            quality_scores=parsed_notes.get("quality_scores"),
         )
 
     # 3. Reconcile database runs into active_slots (Finding 4: require explicit slot IDs, flag duplicates/unscheduled)
@@ -1364,6 +1370,291 @@ def generate_campaign_report(
         "all_attempts": [s.to_dict() for s in active_slots],
         "reconciliation_issues": reconciliation_issues,
     }
+
+
+# ---------------------------------------------------------------------------
+# Multi-Dimensional Benchmark Scoring Rubric (TSK-025)
+# ---------------------------------------------------------------------------
+
+def score_workspace(
+    workspace_path: Path,
+    target_files: Optional[List[str]] = None,
+    test_passed: bool = False,
+    lint_errors: int = 0,
+    a11y_violations: Optional[int] = None,
+    modified_files: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Compute multi-dimensional benchmark quality scores (0-5 scale per dimension).
+
+    Dimensions:
+    - correctness (0-5): 5 if test_passed else 0
+    - engineering (0-5): max(0, 5 - min(5, max(0, lint_errors)))
+    - maintainability (0-5): AST analysis on .py files in target_files or workspace.
+      <=50 max function LOC -> 5, <=100 -> 3, >100 -> 1; SyntaxError -> 0.
+    - process (0-5): git diff modified files (or passed modified_files) vs target_files scope.
+      5 if all modified files are in target_files (or unconstrained), minus 1 per out-of-scope touch.
+    - design (Optional[int], 0-5): None if a11y_violations is None, else max(0, 5 - a11y_violations).
+    - total: sum of active dimension scores.
+    - max_possible: 20 (backend) or 25 (UI with design).
+    - normalized_pct: round(total / max_possible * 100, 1).
+    """
+    workspace_path = Path(workspace_path)
+
+    # 1. Correctness
+    correctness = 5 if test_passed else 0
+
+    # 2. Engineering Practices
+    lint_errs = max(0, int(lint_errors)) if lint_errors is not None else 0
+    engineering = max(0, 5 - min(5, lint_errs))
+
+    # 3. Maintainability (AST on .py files)
+    py_files: List[Path] = []
+    if target_files is not None:
+        for tf in target_files:
+            if tf.endswith(".py"):
+                p = Path(tf)
+                if not p.is_absolute():
+                    p = workspace_path / p
+                if p.is_file():
+                    py_files.append(p)
+    else:
+        if workspace_path.is_file() and workspace_path.suffix == ".py":
+            py_files.append(workspace_path)
+        elif workspace_path.is_dir():
+            for root, dirs, files in os.walk(workspace_path):
+                dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("node_modules", "__pycache__", "venv")]
+                for f in files:
+                    if f.endswith(".py"):
+                        py_files.append(Path(root) / f)
+
+    syntax_error = False
+    max_func_loc = 0
+    for py_file in py_files:
+        try:
+            content = py_file.read_text(encoding="utf-8", errors="replace")
+            tree = ast.parse(content, filename=str(py_file))
+        except SyntaxError:
+            syntax_error = True
+            break
+        except Exception:
+            continue
+
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                end = getattr(node, "end_lineno", node.lineno)
+                loc = max(1, end - node.lineno + 1)
+                if loc > max_func_loc:
+                    max_func_loc = loc
+
+    if syntax_error:
+        maintainability = 0
+    elif max_func_loc <= 50:
+        maintainability = 5
+    elif max_func_loc <= 100:
+        maintainability = 3
+    else:
+        maintainability = 1
+
+    # 4. Process Discipline
+    candidate_modified: List[str] = []
+    if modified_files is not None:
+        candidate_modified = list(modified_files)
+    elif (workspace_path / ".git").exists():
+        try:
+            res = subprocess.run(
+                ["git", "-C", str(workspace_path), "status", "--porcelain"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    line = line.strip()
+                    if line:
+                        fname = line[2:].strip()
+                        if " -> " in fname:
+                            fname = fname.split(" -> ")[-1].strip()
+                        candidate_modified.append(fname)
+        except Exception:
+            pass
+
+    if target_files is None:
+        process = 5
+    else:
+        def _norm_path(p_str: str) -> str:
+            p = Path(p_str)
+            if p.is_absolute():
+                try:
+                    p = p.relative_to(workspace_path)
+                except ValueError:
+                    pass
+            return p.as_posix().lstrip("./")
+
+        target_set = {_norm_path(t) for t in target_files}
+        out_of_scope = []
+        for m in candidate_modified:
+            m_norm = _norm_path(m)
+            if m_norm not in target_set:
+                out_of_scope.append(m_norm)
+
+        process = max(0, 5 - len(out_of_scope))
+
+    # 5. Design & UX (UI tasks only)
+    if a11y_violations is None:
+        design = None
+    else:
+        a11y_cnt = max(0, int(a11y_violations))
+        design = max(0, 5 - a11y_cnt)
+
+    # Aggregations
+    active_scores = [correctness, engineering, maintainability, process]
+    if design is not None:
+        active_scores.append(design)
+        max_possible = 25
+    else:
+        max_possible = 20
+
+    total = sum(active_scores)
+    normalized_pct = round((total / max_possible) * 100.0, 1)
+
+    return {
+        "correctness": correctness,
+        "engineering": engineering,
+        "maintainability": maintainability,
+        "process": process,
+        "design": design,
+        "total": total,
+        "max_possible": max_possible,
+        "normalized_pct": normalized_pct,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Blind A/B Judge & Quality CI (TSK-026)
+# ---------------------------------------------------------------------------
+
+def prepare_blind_ab_packet(
+    campaign_id: str,
+    task_id: str,
+    baseline_diff: str,
+    governed_diff: str,
+    seed: int = 42,
+) -> Dict[str, Any]:
+    """
+    Sanitize and blind diff pairs for blind A/B judge evaluation (TSK-026).
+
+    - Strips diff chunks modifying tasks/TSK-* or .agents/*
+    - Redacts case-insensitive tokens 'icm', 'baseline', 'governed'
+    - Deterministically assigns arms to Arm_Alpha and Arm_Beta based on seed
+    """
+    def _sanitize_diff(raw_diff: str) -> str:
+        lines = raw_diff.splitlines(keepends=True)
+        chunks: List[List[str]] = []
+        current_chunk: List[str] = []
+
+        for line in lines:
+            if line.startswith("diff --git ") or (not any(c and c[0].startswith("diff --git ") for c in chunks) and line.startswith("--- a/")):
+                if current_chunk:
+                    chunks.append(current_chunk)
+                current_chunk = [line]
+            else:
+                current_chunk.append(line)
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        filtered_chunks: List[str] = []
+        for chunk in chunks:
+            chunk_head = "".join(chunk[:6])
+            if any(p in chunk_head for p in ("tasks/TSK-", "tasks\\TSK-", ".agents/", ".agents\\")):
+                continue
+            chunk_text = "".join(chunk)
+            redacted = re.sub(r"(?i)\b(icm|baseline|governed)\b", "[ARM_REDACTED]", chunk_text)
+            filtered_chunks.append(redacted)
+
+        return "".join(filtered_chunks).strip()
+
+    clean_baseline = _sanitize_diff(baseline_diff)
+    clean_governed = _sanitize_diff(governed_diff)
+
+    rng = random.Random(f"{campaign_id}:{task_id}:{seed}")
+    if rng.choice([True, False]):
+        alpha_arm = "governed"
+        beta_arm = "baseline"
+        arm_alpha_diff = clean_governed
+        arm_beta_diff = clean_baseline
+    else:
+        alpha_arm = "baseline"
+        beta_arm = "governed"
+        arm_alpha_diff = clean_baseline
+        arm_beta_diff = clean_governed
+
+    return {
+        "campaign_id": campaign_id,
+        "task_id": task_id,
+        "blind_packet": {
+            "Arm_Alpha": arm_alpha_diff,
+            "Arm_Beta": arm_beta_diff,
+            "dimensions": ["correctness", "engineering", "maintainability", "process", "design"],
+        },
+        "sealed_key": {
+            "Arm_Alpha": alpha_arm,
+            "Arm_Beta": beta_arm,
+        },
+    }
+
+
+def compute_quality_ci(
+    paired_scores: List[Tuple[Dict[str, Any], Dict[str, Any]]],
+    seed: int = 42,
+    iterations: int = 1000,
+) -> Dict[str, Any]:
+    """
+    Compute mean paired delta (governed - baseline) and 95% bootstrap confidence interval
+    for each numeric rubric dimension across paired task runs (TSK-026).
+    """
+    dimensions = ["correctness", "engineering", "maintainability", "process", "design", "normalized_pct"]
+    results: Dict[str, Any] = {}
+    rng = random.Random(seed)
+
+    for dim in dimensions:
+        deltas: List[float] = []
+        for b_dict, g_dict in paired_scores:
+            b_val = b_dict.get(dim)
+            g_val = g_dict.get(dim)
+            if b_val is not None and g_val is not None:
+                deltas.append(float(g_val) - float(b_val))
+
+        n = len(deltas)
+        if n == 0:
+            results[dim] = {
+                "mean_delta": None,
+                "ci_95": None,
+                "n": 0,
+            }
+            continue
+
+        mean_delta = round(sum(deltas) / n, 3)
+        boot_means: List[float] = []
+        for _ in range(iterations):
+            sample = [rng.choice(deltas) for _ in range(n)]
+            boot_means.append(sum(sample) / n)
+        boot_means.sort()
+
+        low_idx = int(math.floor(0.025 * (iterations - 1)))
+        high_idx = int(math.ceil(0.975 * (iterations - 1)))
+        ci_low = round(boot_means[low_idx], 3)
+        ci_high = round(boot_means[high_idx], 3)
+
+        results[dim] = {
+            "mean_delta": mean_delta,
+            "ci_95": [ci_low, ci_high],
+            "n": n,
+        }
+
+    results["sample_count"] = len(paired_scores)
+    return results
 
 
 # ---------------------------------------------------------------------------

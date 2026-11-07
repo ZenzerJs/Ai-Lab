@@ -35,6 +35,9 @@ export const experimentNames: Record<string, string> = {
   "EXP-006": "Transactional ledger",
   "EXP-007": "API gateway topology",
   "EXP-008": "Interview intelligence",
+  "EXP-009": "Event-driven job queue",
+  "EXP-010": "Knowledge graph & BM25",
+  "EXP-011": "Policy API gateway",
 };
 
 export function finite(value: unknown): value is number {

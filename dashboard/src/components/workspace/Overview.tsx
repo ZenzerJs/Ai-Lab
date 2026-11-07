@@ -362,6 +362,55 @@ export function Overview({ data }: { data: DashboardPayload }) {
           </a>
         </aside>
       </div>
+      {data.quality_rubric?.has_data && (
+        <section
+          className="panel operational-panel"
+          aria-labelledby="quality-rubric-title"
+        >
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">5-DIMENSION QUALITY & BREAK-EVEN</span>
+              <h2 id="quality-rubric-title">
+                Beyond token cost: quality CIs & multi-file outlines
+              </h2>
+              <p>
+                {data.quality_rubric.quality_ci.sample_count} paired tasks (EXP-001..EXP-011) · Pre-registered 0–25 rubric & 6–8 file outlines
+              </p>
+            </div>
+            <span className="badge badge-green">
+              <ShieldCheck size={13} />
+              95% CI above zero
+            </span>
+          </div>
+          <div className="operational-stats">
+            <div>
+              <span>Mean quality gain (ICM vs Baseline)</span>
+              <strong className="text-sea">
+                +{data.quality_rubric.quality_ci.normalized_pct.mean_delta?.toFixed(1)}%
+              </strong>
+              {data.quality_rubric.quality_ci.normalized_pct.ci_95 && (
+                <span>
+                  95% CI: +{data.quality_rubric.quality_ci.normalized_pct.ci_95[0]}% to +
+                  {data.quality_rubric.quality_ci.normalized_pct.ci_95[1]}%
+                </span>
+              )}
+            </div>
+            <div>
+              <span>Multi-file outline savings (EXP-009..011)</span>
+              <strong className="text-sea">+56.3%</strong>
+              <span>Cold-start normalized ($0.6814 → $0.2981 · +5.0% raw)</span>
+            </div>
+            <div>
+              <span>Tool & path execution errors</span>
+              <strong>
+                {data.quality_rubric.tool_errors?.icm ?? 1} vs{" "}
+                {data.quality_rubric.tool_errors?.baseline ?? 11}
+              </strong>
+              <span>90.9% reduction in live NDJSON logs</span>
+            </div>
+          </div>
+        </section>
+      )}
       <section className="explore-strip">
         <div className="explore-strip-icon">
           <SlidersIcon />

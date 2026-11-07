@@ -270,6 +270,104 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
           </p>
         </section>
       )}
+      {data.quality_rubric?.has_data && (
+        <section className="panel operational-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">MULTI-FILE REPOSITORY OUTLINES & QUALITY JUDGE</span>
+              <h2>6–8 file outlines (EXP-009..011) & 5-dimension rubric</h2>
+              <p>
+                Evaluated above the ~150 LOC / 2+ file break-even threshold with pre-registered 0–25 quality scoring
+              </p>
+            </div>
+            <span className="badge badge-green">
+              +{data.quality_rubric.quality_ci.normalized_pct.mean_delta?.toFixed(1)}% quality (95% CI: +
+              {data.quality_rubric.quality_ci.normalized_pct.ci_95?.[0]}% to +
+              {data.quality_rubric.quality_ci.normalized_pct.ci_95?.[1]}%)
+            </span>
+          </div>
+          {data.quality_rubric.multi_file_outlines?.length ? (
+            <div
+              className="table-scroll"
+              role="region"
+              aria-label="Multi-file outline pricing and turn comparison"
+              tabIndex={0}
+            >
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Task (Files)</th>
+                    <th scope="col">Baseline (Turns · Cost)</th>
+                    <th scope="col">ICM Raw (Turns · Cost)</th>
+                    <th scope="col">ICM Cold-Normalized</th>
+                    <th scope="col">Savings (Raw / Norm)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.quality_rubric.multi_file_outlines.map((item) => (
+                    <tr key={item.task_id}>
+                      <th scope="row">
+                        {item.task_id} — {item.title} ({item.files} files)
+                      </th>
+                      <td>
+                        {item.baseline_turns} turns · {formatCurrency(item.baseline_cost_usd)}
+                      </td>
+                      <td>
+                        {item.icm_turns} turns · {formatCurrency(item.icm_cost_raw_usd)}
+                      </td>
+                      <td>{formatCurrency(item.icm_cost_normalized_usd)}</td>
+                      <td className="text-sea">
+                        {item.raw_savings_percent > 0 ? `+${item.raw_savings_percent}%` : `${item.raw_savings_percent}%`} / +{item.normalized_savings_percent}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+          <div
+            className="table-scroll"
+            role="region"
+            aria-label="5-dimension quality rubric scores across EXP-001 through EXP-011"
+            tabIndex={0}
+          >
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Task</th>
+                  <th scope="col">Baseline Quality</th>
+                  <th scope="col">Governed (ICM) Quality</th>
+                  <th scope="col">Delta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.quality_rubric.tasks.map((row) => {
+                  const delta = +(row.governed.normalized_pct - row.baseline.normalized_pct).toFixed(1);
+                  return (
+                    <tr key={row.task_id}>
+                      <th scope="row">
+                        {row.task_id} — {experimentNames[row.task_id] || row.task_id}
+                      </th>
+                      <td>
+                        {row.baseline.total}/{row.baseline.max_possible} ({row.baseline.normalized_pct}%)
+                      </td>
+                      <td>
+                        {row.governed.total}/{row.governed.max_possible} ({row.governed.normalized_pct}%)
+                      </td>
+                      <td className={delta > 0 ? "text-sea" : ""}>
+                        {delta > 0 ? `+${delta}%` : `${delta}%`}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="panel-note">
+            Dimensions (0–5 each): Correctness, Engineering Practices, Maintainability (AST LOC), Process Discipline (scope & tool hygiene), and Design/A11y (+1.00 pt mean gain, 95% CI: +0.29 to +1.71).
+          </p>
+        </section>
+      )}
     </>
   );
 }

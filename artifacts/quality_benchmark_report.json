@@ -1,0 +1,309 @@
+{
+  "tasks": [
+    {
+      "task_id": "EXP-001",
+      "baseline": {
+        "correctness": 5,
+        "engineering": 4,
+        "maintainability": 5,
+        "process": 4,
+        "design": null,
+        "total": 18,
+        "max_possible": 20,
+        "normalized_pct": 90.0
+      },
+      "governed": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 5,
+        "process": 5,
+        "design": null,
+        "total": 20,
+        "max_possible": 20,
+        "normalized_pct": 100.0
+      }
+    },
+    {
+      "task_id": "EXP-002",
+      "baseline": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 5,
+        "process": 5,
+        "design": null,
+        "total": 20,
+        "max_possible": 20,
+        "normalized_pct": 100.0
+      },
+      "governed": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 5,
+        "process": 5,
+        "design": null,
+        "total": 20,
+        "max_possible": 20,
+        "normalized_pct": 100.0
+      }
+    },
+    {
+      "task_id": "EXP-003",
+      "baseline": {
+        "correctness": 5,
+        "engineering": 1,
+        "maintainability": 1,
+        "process": 1,
+        "design": null,
+        "total": 8,
+        "max_possible": 20,
+        "normalized_pct": 40.0
+      },
+      "governed": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 1,
+        "process": 5,
+        "design": null,
+        "total": 16,
+        "max_possible": 20,
+        "normalized_pct": 80.0
+      }
+    },
+    {
+      "task_id": "EXP-004",
+      "baseline": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 5,
+        "process": 5,
+        "design": null,
+        "total": 20,
+        "max_possible": 20,
+        "normalized_pct": 100.0
+      },
+      "governed": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 5,
+        "process": 5,
+        "design": null,
+        "total": 20,
+        "max_possible": 20,
+        "normalized_pct": 100.0
+      }
+    },
+    {
+      "task_id": "EXP-005",
+      "baseline": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 5,
+        "process": 5,
+        "design": 3,
+        "total": 23,
+        "max_possible": 25,
+        "normalized_pct": 92.0
+      },
+      "governed": {
+        "correctness": 5,
+        "engineering": 4,
+        "maintainability": 5,
+        "process": 5,
+        "design": 5,
+        "total": 24,
+        "max_possible": 25,
+        "normalized_pct": 96.0
+      }
+    },
+    {
+      "task_id": "EXP-006",
+      "baseline": {
+        "correctness": 5,
+        "engineering": 2,
+        "maintainability": 5,
+        "process": 2,
+        "design": 3,
+        "total": 17,
+        "max_possible": 25,
+        "normalized_pct": 68.0
+      },
+      "governed": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 5,
+        "process": 5,
+        "design": 5,
+        "total": 25,
+        "max_possible": 25,
+        "normalized_pct": 100.0
+      }
+    },
+    {
+      "task_id": "EXP-007",
+      "baseline": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 5,
+        "process": 5,
+        "design": 2,
+        "total": 22,
+        "max_possible": 25,
+        "normalized_pct": 88.0
+      },
+      "governed": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 5,
+        "process": 5,
+        "design": 4,
+        "total": 24,
+        "max_possible": 25,
+        "normalized_pct": 96.0
+      }
+    },
+    {
+      "task_id": "EXP-008",
+      "baseline": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 5,
+        "process": 5,
+        "design": 3,
+        "total": 23,
+        "max_possible": 25,
+        "normalized_pct": 92.0
+      },
+      "governed": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 5,
+        "process": 5,
+        "design": 4,
+        "total": 24,
+        "max_possible": 25,
+        "normalized_pct": 96.0
+      }
+    },
+    {
+      "task_id": "EXP-009",
+      "baseline": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 5,
+        "process": 5,
+        "design": 4,
+        "total": 24,
+        "max_possible": 25,
+        "normalized_pct": 96.0
+      },
+      "governed": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 5,
+        "process": 5,
+        "design": 4,
+        "total": 24,
+        "max_possible": 25,
+        "normalized_pct": 96.0
+      }
+    },
+    {
+      "task_id": "EXP-010",
+      "baseline": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 5,
+        "process": 5,
+        "design": 4,
+        "total": 24,
+        "max_possible": 25,
+        "normalized_pct": 96.0
+      },
+      "governed": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 5,
+        "process": 5,
+        "design": 4,
+        "total": 24,
+        "max_possible": 25,
+        "normalized_pct": 96.0
+      }
+    },
+    {
+      "task_id": "EXP-011",
+      "baseline": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 5,
+        "process": 5,
+        "design": 4,
+        "total": 24,
+        "max_possible": 25,
+        "normalized_pct": 96.0
+      },
+      "governed": {
+        "correctness": 5,
+        "engineering": 5,
+        "maintainability": 5,
+        "process": 5,
+        "design": 4,
+        "total": 24,
+        "max_possible": 25,
+        "normalized_pct": 96.0
+      }
+    }
+  ],
+  "quality_ci": {
+    "correctness": {
+      "mean_delta": 0.0,
+      "ci_95": [
+        0.0,
+        0.0
+      ],
+      "n": 11
+    },
+    "engineering": {
+      "mean_delta": 0.636,
+      "ci_95": [
+        -0.091,
+        1.545
+      ],
+      "n": 11
+    },
+    "maintainability": {
+      "mean_delta": 0.0,
+      "ci_95": [
+        0.0,
+        0.0
+      ],
+      "n": 11
+    },
+    "process": {
+      "mean_delta": 0.727,
+      "ci_95": [
+        0.0,
+        1.636
+      ],
+      "n": 11
+    },
+    "design": {
+      "mean_delta": 1.0,
+      "ci_95": [
+        0.286,
+        1.714
+      ],
+      "n": 7
+    },
+    "normalized_pct": {
+      "mean_delta": 8.909,
+      "ci_95": [
+        2.0,
+        17.636
+      ],
+      "n": 11
+    },
+    "sample_count": 11
+  },
+  "blind_packets_count": 3
+}
