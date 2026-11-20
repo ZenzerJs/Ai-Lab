@@ -16,6 +16,7 @@ import { ProviderIcon } from "./ProviderIcon";
 export default function Evidence({ data }: { data: DashboardPayload }) {
   const [query, setQuery] = useState("");
   const [task, setTask] = useState("all");
+  const [model, setModel] = useState("all");
   const [arm, setArm] = useState("all");
   const [source, setSource] = useState("all");
   const [evidence, setEvidence] = useState("all");
@@ -28,6 +29,7 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
         .filter(
           (run) =>
             (task === "all" || run.task_id === task) &&
+            (model === "all" || run.model === model) &&
             (arm === "all" || run.arm === arm) &&
             (source === "all" || (run.source_kind || "unknown") === source) &&
             (evidence === "all" ||
@@ -37,7 +39,7 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
               .includes(query.toLowerCase()),
         )
         .sort((a, b) => (ascending ? a.id - b.id : b.id - a.id)),
-    [data.runs, query, task, arm, source, evidence, ascending],
+    [data.runs, query, task, model, arm, source, evidence, ascending],
   );
   const pages = Math.max(1, Math.ceil(filtered.length / 10));
   const currentPage = Math.min(page, pages);
@@ -45,6 +47,7 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
   const reset = () => {
     setQuery("");
     setTask("all");
+    setModel("all");
     setArm("all");
     setSource("all");
     setEvidence("all");
@@ -112,7 +115,7 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
                 {
                   generated_at: data.generated_at,
                   build_identity: data.build_identity,
-                  filters: { query, task, arm, source, evidence },
+                  filters: { query, task, model, arm, source, evidence },
                   runs: filtered,
                 },
                 "ai-lab-evidence.json",
@@ -131,6 +134,14 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
               value: task,
               set: setTask,
               values: Array.from(new Set(data.runs.map((run) => run.task_id))),
+            },
+            {
+              label: "Model",
+              value: model,
+              set: setModel,
+              values: Array.from(
+                new Set(data.runs.map((run) => run.model).filter(Boolean)),
+              ),
             },
             {
               label: "Arm",

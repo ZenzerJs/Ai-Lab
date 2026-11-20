@@ -13,6 +13,22 @@ import { formatCurrency, formatTokens } from "../../lib/formatters";
 export default function Experiments({ data }: { data: DashboardPayload }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [model, setModel] = useState("all");
+  const models = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          (data.tasks || [])
+            .map((t) => t.model || t.arms.baseline?.model || governedArm(t)?.model || "")
+            .filter(Boolean),
+        ),
+      ).sort(),
+    [data.tasks],
+  );
+  const uniqueTaskCount = useMemo(
+    () => new Set((data.tasks || []).map((t) => t.task_id)).size,
+    [data.tasks],
+  );
   const tasks = useMemo(
     () =>
       (data.tasks || []).filter((task) => {
@@ -35,11 +51,12 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
           : tokDelta;
         return (
           matches &&
+          (model === "all" || mdl === model) &&
           (filter === "all" ||
             (finite(delta) && (filter === "savings" ? delta > 0 : delta < 0)))
         );
       }),
-    [data.tasks, query, filter],
+    [data.tasks, query, filter, model],
   );
   return (
     <>
@@ -53,7 +70,7 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
         </div>
         <span className="badge badge-purple">
           <FlaskConical size={14} />
-          {data.tasks?.length || 0} experiments
+          {data.tasks?.length || 0} series · {uniqueTaskCount} tasks
         </span>
       </div>
       <div className="toolbar">
@@ -65,6 +82,20 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search experiments…"
           />
+        </label>
+        <label className="select-field">
+          Model
+          <select
+            value={model}
+            onChange={(event) => setModel(event.target.value)}
+          >
+            <option value="all">All models</option>
+            {models.map((mdl) => (
+              <option key={mdl} value={mdl}>
+                {mdl}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="select-field">
           Show
@@ -331,6 +362,7 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
               onClick={() => {
                 setQuery("");
                 setFilter("all");
+                setModel("all");
               }}
             >
               Clear filters

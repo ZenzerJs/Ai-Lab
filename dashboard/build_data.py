@@ -272,6 +272,8 @@ def build_headline_block(
         if tot_b is not None and tot_i is not None and tot_b > 0:
             pct = round((tot_b - tot_i) / tot_b * 100.0, 1)
             ci = compute_bootstrap_ci(b_costs, i_costs)
+            b_pac = cum.get("per_arm_counts", {}).get("baseline", {})
+            i_pac = cum.get("per_arm_counts", {}).get("icm", {})
             stats.append({
                 "id": "cost_reduction",
                 "label": "Cost Reduction per Task",
@@ -279,8 +281,8 @@ def build_headline_block(
                 "unit": "%",
                 "baseline": f"${tot_b:.4f}",
                 "icm": f"${tot_i:.4f}",
-                "n_baseline": cum.get("per_arm_counts", {}).get("baseline", {}).get("completed", 0),
-                "n_icm": cum.get("per_arm_counts", {}).get("icm", {}).get("completed", 0),
+                "n_baseline": b_pac.get("cost_eligible") or b_pac.get("completed", 0),
+                "n_icm": i_pac.get("cost_eligible") or i_pac.get("completed", 0),
                 "n_tasks": len(valid_tasks),
                 "source": "live CLI",
                 "ci95": ci,
@@ -312,6 +314,8 @@ def build_headline_block(
         b_cache = cum.get("baseline_cache_hit_pct")
         i_cache = cum.get("icm_cache_hit_pct")
         if b_cache is not None and i_cache is not None:
+            b_pac = cum.get("per_arm_counts", {}).get("baseline", {})
+            i_pac = cum.get("per_arm_counts", {}).get("icm", {})
             stats.append({
                 "id": "cache_efficiency",
                 "label": "Prompt Cache Hit Ratio",
@@ -319,10 +323,38 @@ def build_headline_block(
                 "unit": "%",
                 "baseline": f"{round(b_cache, 1)}%",
                 "icm": f"{round(i_cache, 1)}%",
-                "n_baseline": cum.get("per_arm_counts", {}).get("baseline", {}).get("completed", 0),
-                "n_icm": cum.get("per_arm_counts", {}).get("icm", {}).get("completed", 0),
+                "n_baseline": b_pac.get("cost_eligible") or b_pac.get("completed", 0),
+                "n_icm": i_pac.get("cost_eligible") or i_pac.get("completed", 0),
                 "n_tasks": len(valid_tasks),
                 "source": "live CLI",
+            })
+
+    # H4: Cross-model Tokens per Passing Patch
+    if valid_tasks and cum.get("has_measured_data"):
+        b_pac = cum.get("per_arm_counts", {}).get("baseline", {})
+        i_pac = cum.get("per_arm_counts", {}).get("icm", {})
+        b_tpp = b_pac.get("tokens_per_passing_patch")
+        i_tpp = i_pac.get("tokens_per_passing_patch")
+        if (
+            isinstance(b_tpp, (int, float))
+            and isinstance(i_tpp, (int, float))
+            and not isinstance(b_tpp, bool)
+            and not isinstance(i_tpp, bool)
+            and b_tpp > 0
+        ):
+            pct = round((b_tpp - i_tpp) / b_tpp * 100.0, 1)
+            n_models = len({t.get("model") for t in tasks if t.get("model")})
+            stats.append({
+                "id": "tokens_per_pass",
+                "label": "Tokens per Passing Patch",
+                "value": pct,
+                "unit": "%",
+                "baseline": f"{int(round(b_tpp)):,}",
+                "icm": f"{int(round(i_tpp)):,}",
+                "n_baseline": b_pac.get("passed_count", 0),
+                "n_icm": i_pac.get("passed_count", 0),
+                "n_tasks": len(tasks),
+                "source": f"{n_models} models" if n_models else "live CLI",
             })
 
     if not stats:
