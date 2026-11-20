@@ -9,7 +9,7 @@ import {
   ShieldCheck,
   TrendingDown,
 } from "lucide-react";
-import { DashboardPayload, HeadlineStat } from "../../types";
+import { DashboardPayload, HeadlineStat, TaskSummaryItem } from "../../types";
 import { formatCurrency, formatTokens } from "../../lib/formatters";
 import { experimentNames, finite, governedArm } from "../../lib/workspace";
 
@@ -151,6 +151,15 @@ export function Overview({ data }: { data: DashboardPayload }) {
     !data.is_simulation &&
     Boolean(data.cumulative?.has_measured_data);
   const tasks = data.tasks || [];
+  const taskModel = (task: TaskSummaryItem) =>
+    task.model || task.arms.baseline?.model || governedArm(task)?.model || "";
+  const taskKey = (task: TaskSummaryItem) =>
+    task.series_id || `${task.task_id}::${taskModel(task)}`;
+  const multiModelTasks = new Set(
+    tasks
+      .filter((t) => tasks.filter((o) => o.task_id === t.task_id).length > 1)
+      .map((t) => t.task_id),
+  );
   const pricedTasks = tasks.filter(
     (task) =>
       finite(task.arms.baseline?.mean_cost_usd) ||
@@ -293,11 +302,17 @@ export function Overview({ data }: { data: DashboardPayload }) {
             {pricedTasks.map((task) => {
               const baseline = task.arms.baseline?.mean_cost_usd,
                 governed = governedArm(task)?.mean_cost_usd;
+              const mdl = taskModel(task);
               return (
-                <div className="chart-row" key={task.task_id}>
+                <div className="chart-row" key={taskKey(task)}>
                   <a href="#tasks" className="chart-label">
                     {task.task_id}
-                    <span>{experimentNames[task.task_id] || "Experiment"}</span>
+                    <span>
+                      {experimentNames[task.task_id] || "Experiment"}
+                      {multiModelTasks.has(task.task_id) && mdl
+                        ? ` · ${mdl}`
+                        : ""}
+                    </span>
                   </a>
                   <div className="chart-bars">
                     <div className="bar-line">
@@ -434,11 +449,17 @@ export function Overview({ data }: { data: DashboardPayload }) {
                 gArm?.verified_count != null && gDenom != null
                   ? ` (${gArm.verified_count}/${gDenom})`
                   : "";
+              const mdl = taskModel(task);
               return (
-                <div className="chart-row" key={task.task_id}>
+                <div className="chart-row" key={taskKey(task)}>
                   <a href="#tasks" className="chart-label">
                     {task.task_id}
-                    <span>{experimentNames[task.task_id] || "Benchmark"}</span>
+                    <span>
+                      {experimentNames[task.task_id] || "Benchmark"}
+                      {multiModelTasks.has(task.task_id) && mdl
+                        ? ` · ${mdl}`
+                        : ""}
+                    </span>
                   </a>
                   <div className="chart-bars">
                     <div className="bar-line">

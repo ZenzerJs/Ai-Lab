@@ -128,6 +128,8 @@ export interface TaskSavings {
 
 export interface TaskSummaryItem {
   task_id: string;
+  model?: string;
+  series_id?: string;
   total_runs: number;
   has_measured_data?: boolean;
   is_demo_report?: boolean;

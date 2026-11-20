@@ -913,8 +913,14 @@ def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
     """Connect to SQLite database and ensure schema exists."""
     path = Path(db_path) if db_path else DEFAULT_DB_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), timeout=30.0)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA busy_timeout = 30000")
+        if str(path) != ":memory:":
+            conn.execute("PRAGMA journal_mode = WAL")
+    except sqlite3.Error:
+        pass
     init_db(conn)
     return conn
 
@@ -1954,7 +1960,7 @@ def backfill_tool_metrics_from_evidence(
 
 
 _ORPHAN_EVIDENCE_RE = re.compile(
-    r"^live_(?P<task_id>.+?)_(?P<arm>baseline|icm|icm-subagents|delegation)_run(?P<run_idx>\d+)_(?P<epoch>\d+)\.ndjson$"
+    r"^live_(?P<task_id>[A-Za-z0-9-]+?)(?:_(?P<model_slug>[a-z0-9][a-z0-9._-]+))?_(?P<arm>baseline|icm|icm-subagents|delegation)_run(?P<run_idx>\d+)_(?P<epoch>\d+)\.ndjson$"
 )
 
 
@@ -2277,15 +2283,24 @@ def _compute_task_summary_with_rows(
     model_override: Optional[str] = None,
     include_all: bool = False,
     capture_policy: str = "approved",
+    model_filter: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     """Internal helper returning (task_summary_dict, enriched_rows)."""
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM runs WHERE task_id = ? ORDER BY arm, run_index", (task_id,))
+    if model_filter is not None:
+        cursor.execute(
+            "SELECT * FROM runs WHERE task_id = ? AND model = ? ORDER BY arm, run_index",
+            (task_id, model_filter),
+        )
+    else:
+        cursor.execute("SELECT * FROM runs WHERE task_id = ? ORDER BY arm, run_index", (task_id,))
     rows = [dict(r) for r in cursor.fetchall()]
 
     if not rows:
         return {
             "task_id": task_id,
+            "model": model_filter,
+            "series_id": f"{task_id}::{model_filter or ''}",
             "has_measured_data": False,
             "status": "empty",
             "total_runs": 0,
@@ -2376,8 +2391,11 @@ def _compute_task_summary_with_rows(
             if re_item not in task_exc_reasons:
                 task_exc_reasons.append(str(re_item))
 
+    series_model = model_filter or (rows[0]["model"] if rows else None)
     summary: Dict[str, Any] = {
         "task_id": task_id,
+        "model": series_model,
+        "series_id": f"{task_id}::{series_model or ''}",
         "has_measured_data": has_measured,
         "is_simulation": is_sim,
         "total_runs": len(rows),
@@ -2560,6 +2578,7 @@ def task_summary(
     model_override: Optional[str] = None,
     include_all: bool = False,
     capture_policy: str = "approved",
+    model_filter: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Calculate per-arm means, error bands, and savings metrics for a task."""
     should_close = False
@@ -2574,6 +2593,7 @@ def task_summary(
             model_override=model_override,
             include_all=include_all,
             capture_policy=capture_policy,
+            model_filter=model_filter,
         )
         return summary
     finally:
@@ -2595,8 +2615,8 @@ def cumulative_savings(
         should_close = True
 
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT task_id FROM runs ORDER BY task_id")
-    all_task_ids = [row["task_id"] for row in cursor.fetchall()]
+    cursor.execute("SELECT DISTINCT task_id, model FROM runs ORDER BY task_id, model")
+    all_task_models = [(row["task_id"], row["model"]) for row in cursor.fetchall()]
 
     is_sim = (model_override is not None)
 
@@ -2623,9 +2643,13 @@ def cumulative_savings(
 
     has_measured_pairs = False
 
-    for tid in all_task_ids:
+    for tid, model_name in all_task_models:
         s, enriched_rows = _compute_task_summary_with_rows(
-            tid, conn=conn, model_override=model_override, capture_policy=capture_policy
+            tid,
+            conn=conn,
+            model_override=model_override,
+            capture_policy=capture_policy,
+            model_filter=model_name,
         )
         task_summaries.append(s)
         all_enriched_rows.extend(enriched_rows)

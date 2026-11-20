@@ -14,7 +14,7 @@ import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # Add scripts directory to path to import ledger
 DASHBOARD_DIR = Path(__file__).resolve().parent
@@ -506,7 +506,7 @@ def build_data_payload(
         raw_runs = [dict(r) for r in cursor.fetchall()]
 
         # Process each run through shared eligibility and accounting
-        task_pairs: Dict[str, Dict[int, Dict[str, Any]]] = {}
+        task_pairs: Dict[Tuple[str, str], Dict[int, Dict[str, Any]]] = {}
         processed_runs: List[Dict[str, Any]] = []
 
         for r in raw_runs:
@@ -547,18 +547,24 @@ def build_data_payload(
             # Only pair eligible measured runs for timeline (requires comparison eligibility)
             if r.get("is_comparison_eligible") and not r.get("is_simulation") and r["cost_usd"] is not None:
                 tid = r["task_id"]
+                mdl = r["model"]
                 ridx = r["run_index"]
                 arm = r["arm"].lower()
-                task_pairs.setdefault(tid, {}).setdefault(ridx, {})[arm] = r
+                task_pairs.setdefault((tid, mdl), {}).setdefault(ridx, {})[arm] = r
+
+        models_per_tid: Dict[str, set] = {}
+        for tid, mdl in task_pairs:
+            models_per_tid.setdefault(tid, set()).add(mdl)
 
         # Build timeline for cumulative savings curve using only qualifying measured runs
         timeline: List[Dict[str, Any]] = []
         cumulative_saved = 0.0
         step = 1
 
-        for tid in sorted(task_pairs):
-            for ridx in sorted(task_pairs[tid]):
-                arms = task_pairs[tid][ridx]
+        for tid, mdl in sorted(task_pairs):
+            multi_mdl = len(models_per_tid.get(tid, set())) > 1
+            for ridx in sorted(task_pairs[(tid, mdl)]):
+                arms = task_pairs[(tid, mdl)][ridx]
                 gov_arm = "icm-subagents" if "icm-subagents" in arms else ("icm" if "icm" in arms else None)
                 if not gov_arm:
                     for k in arms:
@@ -572,8 +578,9 @@ def build_data_payload(
                     cumulative_saved += delta
                     timeline.append({
                         "step": step,
-                        "label": f"{tid} Run {ridx}",
+                        "label": f"{tid} ({mdl}) Run {ridx}" if multi_mdl else f"{tid} Run {ridx}",
                         "task_id": tid,
+                        "model": mdl,
                         "run_index": ridx,
                         "governed_arm": gov_arm,
                         "timestamp": arms[gov_arm]["timestamp"],

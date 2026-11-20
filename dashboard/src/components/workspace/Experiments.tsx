@@ -16,7 +16,12 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
   const tasks = useMemo(
     () =>
       (data.tasks || []).filter((task) => {
-        const matches = `${task.task_id} ${experimentNames[task.task_id] || ""}`
+        const mdl =
+          task.model ||
+          task.arms.baseline?.model ||
+          governedArm(task)?.model ||
+          "";
+        const matches = `${task.task_id} ${experimentNames[task.task_id] || ""} ${mdl}`
           .toLowerCase()
           .includes(query.toLowerCase());
         const bTok = task.arms.baseline?.tokens_per_passing_patch;
@@ -118,15 +123,21 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
             arm?.total_tool_calls != null
               ? `${arm.total_tool_calls} (${arm.total_tool_errors ?? 0} err)`
               : "—";
+          const cardModel =
+            task.model || baseline?.model || governed?.model || "";
+          const cardKey = task.series_id || `${task.task_id}::${cardModel}`;
           return (
-            <article key={task.task_id} className="panel experiment-card">
+            <article key={cardKey} className="panel experiment-card">
               <div className="experiment-card-heading">
                 <div className="experiment-identity">
                   <span className="experiment-glyph">
                     <FlaskConical size={22} strokeWidth={1.5} />
                   </span>
                   <div>
-                    <span className="eyebrow">{task.task_id}</span>
+                    <span className="eyebrow">
+                      {task.task_id}
+                      {cardModel ? ` · ${cardModel}` : ""}
+                    </span>
                     <h2>{experimentNames[task.task_id] || task.task_id}</h2>
                   </div>
                 </div>

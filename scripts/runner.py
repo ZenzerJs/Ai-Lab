@@ -1615,7 +1615,7 @@ def run_benchmark_live(
     prompt = _build_live_prompt(instructions_text, arm)
 
     evaluator = ProtectedEvaluator(evaluator_dir)
-    run_uid = f"live_{task_id}_{int(time.time() * 1000)}"
+    run_uid = f"live_{task_id}_{os.getpid()}_{int(time.time() * 1000)}"
     workspace = WorkspaceManager.prepare_arm_workspace(
         snapshot_dir=snapshot_dir,
         arm=arm,
@@ -1650,6 +1650,7 @@ def run_benchmark_live(
         start_ts = datetime.now(timezone.utc).isoformat()
         exclusion_reasons: List[str] = []
 
+        raw_stderr = b""
         try:
             proc = subprocess.run(
                 cmd,
@@ -1661,24 +1662,42 @@ def run_benchmark_live(
                 check=False,
             )
             raw_stdout = proc.stdout or b""
+            raw_stderr = proc.stderr or b""
             execution_status = "completed" if proc.returncode == 0 else "failed"
             if execution_status == "failed":
                 exclusion_reasons.append("execution_failed")
         except subprocess.TimeoutExpired as exc:
             raw_stdout = exc.stdout or b""
+            raw_stderr = exc.stderr or b""
             if isinstance(raw_stdout, str):
                 raw_stdout = raw_stdout.encode("utf-8", errors="replace")
+            if isinstance(raw_stderr, str):
+                raw_stderr = raw_stderr.encode("utf-8", errors="replace")
             execution_status = "timed_out"
             exclusion_reasons.extend(["timeout", "partial_telemetry"])
 
         wall_duration = time.time() - start_epoch
         if isinstance(raw_stdout, str):
             raw_stdout = raw_stdout.encode("utf-8", errors="replace")
+        if isinstance(raw_stderr, str):
+            raw_stderr = raw_stderr.encode("utf-8", errors="replace")
         clean_bytes = raw_stdout.replace(b"\r\n", b"\n")
+        stderr_text = raw_stderr.decode("utf-8", errors="replace")
+        combined_err = (stderr_text + "\n" + clean_bytes.decode("utf-8", errors="replace")).lower()
+        quota_exhausted = bool(
+            execution_status == "failed"
+            and any(
+                sig in combined_err
+                for sig in ("quota", "resource_exhausted", "rate limit", "rate_limit", "429", "exhausted", "capacity")
+            )
+        )
+        if quota_exhausted and "quota_exhausted" not in exclusion_reasons:
+            exclusion_reasons.append("quota_exhausted")
 
         evidence_dir = DEFAULT_EVIDENCE_DIR
         evidence_dir.mkdir(parents=True, exist_ok=True)
-        evidence_file = evidence_dir / f"live_{task_id}_{arm}_run{run_index}_{int(start_epoch)}.ndjson"
+        safe_model = re.sub(r"[^A-Za-z0-9._-]+", "-", model)
+        evidence_file = evidence_dir / f"live_{task_id}_{safe_model}_{arm}_run{run_index}_{int(start_epoch)}.ndjson"
         evidence_file.write_bytes(clean_bytes)
         evidence_hash = hashlib.sha256(clean_bytes).hexdigest()
         try:
@@ -1812,6 +1831,8 @@ def run_benchmark_live(
             "post_hash": post_hash,
             "restored_hash": restored_hash,
             "rolled_back": rolled_back,
+            "quota_exhausted": quota_exhausted,
+            "stderr_excerpt": stderr_text[:400],
         }
     finally:
         workspace.cleanup()
@@ -1855,6 +1876,9 @@ def main():
             db_path=db_path,
         )
         print(f"✓ Live benchmark finished: status={res['execution_status']} verify={res['verification_status']} cost_status={res['cost_status']} rolled_back={res['rolled_back']}")
+        if res.get("quota_exhausted"):
+            print("QUOTA_EXHAUSTED=1")
+            sys.exit(42)
         sys.exit(0)
 
     parser.print_help()
