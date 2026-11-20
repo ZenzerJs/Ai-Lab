@@ -21,7 +21,16 @@ import pytest
 import runner
 
 BENCHMARKS_DIR = runner.WORKSPACE_ROOT / "benchmarks"
-TASK_IDS = ["BENCH-001", "BENCH-002", "BENCH-003", "BENCH-004", "BENCH-005", "BENCH-006"]
+TASK_IDS = [
+    "BENCH-001",
+    "BENCH-002",
+    "BENCH-003",
+    "BENCH-004",
+    "BENCH-005",
+    "BENCH-006",
+    "BENCH-007",
+    "BENCH-008",
+]
 
 
 def _copy_tree_files(src_dir: Path, dst_dir: Path) -> None:

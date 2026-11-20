@@ -1,0 +1,7 @@
+{
+  "task_id": "BENCH-008",
+  "name": "Concurrent Worker Lease, Retry Jitter, and SQLite Rollback Regression",
+  "category": "concurrency_and_persistence",
+  "description": "Fix a 4-file job queue regression involving SQLite atomic lease claiming, single-transaction audit log and job status rollback, expired lease reclamation, DLQ routing after max_attempts, and seeded full-jitter retry backoff.",
+  "expected_broken_reason": "lease_race_or_partial_commit_leak"
+}

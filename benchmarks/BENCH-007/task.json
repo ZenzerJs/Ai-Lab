@@ -1,0 +1,7 @@
+{
+  "task_id": "BENCH-007",
+  "name": "Cross-File Cache Invalidation and Billing Rounding Regression",
+  "category": "cross_file_state_and_precision",
+  "description": "Fix a 4-file cache invalidation, mutable cache aliasing, and Decimal billing rounding regression across TenantStore, InvoiceCache, billing calculation, and BillingAPI.",
+  "expected_broken_reason": "stale_cache_or_billing_rounding_drift"
+}
