@@ -86,6 +86,10 @@ PUBLIC_RUN_KEYS = {
     "reporting_category",
     "evidence_ref",
     "notes",
+    "tool_calls_count",
+    "tool_errors_count",
+    "max_consecutive_tool_streak",
+    "loop_detected",
 }
 
 
@@ -170,6 +174,154 @@ def reconstruct_total_tokens(
     return None
 
 
+_TOOL_TARGET_PARAM_KEYS = (
+    "target_path",
+    "TargetFile",
+    "AbsolutePath",
+    "path",
+    "file_path",
+    "FilePath",
+    "DirectoryPath",
+    "SearchPath",
+    "SearchDirectory",
+    "NotebookPath",
+)
+
+
+def _iter_ndjson_lines(stream: Any) -> List[Any]:
+    """Normalize Path, str, bytes, file-like, or sequence into a list of raw lines/dicts."""
+    if stream is None:
+        return []
+    if isinstance(stream, (Path, os.PathLike)):
+        return Path(stream).read_text(encoding="utf-8", errors="replace").splitlines()
+    if isinstance(stream, bytes):
+        return stream.decode("utf-8", errors="replace").splitlines()
+    if isinstance(stream, str):
+        return stream.splitlines()
+    if hasattr(stream, "read"):
+        content = stream.read()
+        if isinstance(content, bytes):
+            content = content.decode("utf-8", errors="replace")
+        return content.splitlines()
+    if isinstance(stream, (list, tuple)):
+        return list(stream)
+    return list(stream)
+
+
+def _extract_target_path(step_update: Dict[str, Any]) -> Optional[str]:
+    """Extract target file or directory path from a step_update tool payload."""
+    if step_update.get("target_path"):
+        return str(step_update["target_path"])
+    tool_info = step_update.get("tool_info")
+    if isinstance(tool_info, dict):
+        params = tool_info.get("parameters")
+        if isinstance(params, dict):
+            for key in _TOOL_TARGET_PARAM_KEYS:
+                val = params.get(key)
+                if val:
+                    return str(val)
+    return None
+
+
+def extract_ndjson_tool_metrics(
+    stream: Any,
+    streak_threshold: int = 6,
+    error_threshold: int = 3,
+) -> Dict[str, Any]:
+    """
+    Parse agy stream-json NDJSON lines for tool calls, tool errors, and loop detection.
+    Deduplicates `step_update` records by `step_index`, keeping the final state per step,
+    and computes metrics over steps with `step_type == "tool"`.
+    """
+    raw_lines = _iter_ndjson_lines(stream)
+    steps_by_index: Dict[Tuple[int, int], Dict[str, Any]] = {}
+    anon_seq = 0
+
+    for item in raw_lines:
+        if isinstance(item, dict):
+            ev = item
+        else:
+            line = str(item).strip()
+            if not line:
+                continue
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(ev, dict):
+                continue
+
+        if ev.get("event") != "step_update":
+            continue
+
+        su = ev.get("step_update") if isinstance(ev.get("step_update"), dict) else ev
+        step_idx = su.get("step_index")
+        if step_idx is not None:
+            try:
+                key = (0, int(step_idx))
+            except (TypeError, ValueError):
+                anon_seq += 1
+                key = (1, anon_seq)
+        else:
+            anon_seq += 1
+            key = (1, anon_seq)
+        steps_by_index[key] = su
+
+    tool_steps = [
+        steps_by_index[k]
+        for k in sorted(steps_by_index.keys())
+        if steps_by_index[k].get("step_type") == "tool"
+    ]
+
+    tool_calls_count = len(tool_steps)
+    tool_errors_count = 0
+    max_streak = 0
+    cur_streak = 0
+    prev_tool: Optional[str] = None
+    events: List[Dict[str, Any]] = []
+
+    for seq, step in enumerate(tool_steps, start=1):
+        tool_info = step.get("tool_info") if isinstance(step.get("tool_info"), dict) else {}
+        tool_name = step.get("tool_name") or tool_info.get("name")
+        tool_name_str = str(tool_name) if tool_name else None
+        status = str(step.get("state") or step.get("status") or "UNKNOWN")
+
+        if status == "ERROR":
+            tool_errors_count += 1
+
+        if tool_name_str and tool_name_str == prev_tool:
+            cur_streak += 1
+        elif tool_name_str:
+            cur_streak = 1
+            prev_tool = tool_name_str
+        else:
+            cur_streak = 0
+            prev_tool = None
+
+        if cur_streak > max_streak:
+            max_streak = cur_streak
+
+        events.append({
+            "seq": seq,
+            "phase": str(step.get("phase") or "tool"),
+            "tool_name": tool_name_str,
+            "target_path": _extract_target_path(step),
+            "status": status,
+        })
+
+    loop_detected = bool(
+        max_streak >= streak_threshold or tool_errors_count >= error_threshold
+    )
+
+    return {
+        "tool_calls_count": tool_calls_count,
+        "tool_errors_count": tool_errors_count,
+        "max_consecutive_tool_streak": max_streak,
+        "loop_detected": loop_detected,
+        "events": events,
+    }
+
+
 def validate_and_parse_telemetry(
     stream: Any,
     adapter_name: Optional[str] = None,
@@ -231,6 +383,8 @@ def validate_and_parse_telemetry(
             arm = str(event["arm"])
         if "model" in event and event["model"]:
             model = str(event["model"])
+        elif model is None and isinstance(event.get("init"), dict) and event["init"].get("model"):
+            model = str(event["init"]["model"])
         if "timestamp" in event and event["timestamp"]:
             timestamp = str(event["timestamp"])
         if "adapter_name" in event and event["adapter_name"]:
@@ -501,6 +655,8 @@ def validate_and_parse_telemetry(
             "cache_read_tokens": False,
         }
 
+    tool_metrics = extract_ndjson_tool_metrics(lines)
+
     return {
         "task_id": task_id,
         "arm": arm,
@@ -517,6 +673,7 @@ def validate_and_parse_telemetry(
         "turns_with_usage_count": len(turns_with_usage),
         "adapter_name": resolved_adapter_name,
         "field_completeness": field_completeness,
+        "tool_metrics": tool_metrics,
     }
 
 
@@ -797,7 +954,24 @@ def init_db(conn: sqlite3.Connection) -> None:
                     execution_status TEXT NOT NULL DEFAULT 'completed',
                     verification_status TEXT NOT NULL DEFAULT 'not_run',
                     manifest_id TEXT,
-                    evaluator_hash TEXT
+                    evaluator_hash TEXT,
+                    tool_calls_count INTEGER,
+                    tool_errors_count INTEGER,
+                    max_consecutive_tool_streak INTEGER,
+                    loop_detected INTEGER
+                );
+
+                CREATE TABLE IF NOT EXISTS run_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id INTEGER NOT NULL,
+                    seq INTEGER NOT NULL,
+                    phase TEXT NOT NULL,
+                    tool_name TEXT,
+                    target_path TEXT,
+                    status TEXT NOT NULL,
+                    diff_hash TEXT,
+                    rollback_ref TEXT,
+                    timestamp TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS tasks (
@@ -823,9 +997,10 @@ def init_db(conn: sqlite3.Connection) -> None:
 
                 CREATE INDEX IF NOT EXISTS idx_runs_task_arm ON runs(task_id, arm);
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_import_id ON runs(import_id) WHERE import_id IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id, seq);
             """)
     else:
-        # Check if table already has provenance columns; if so, ensure Phase 2 runner columns exist
+        # Check if table already has provenance columns; if so, ensure Phase 2+ runner columns exist
         cursor.execute("PRAGMA table_info(runs)")
         cols = {row[1] for row in cursor.fetchall()}
         if "source_kind" in cols:
@@ -838,6 +1013,31 @@ def init_db(conn: sqlite3.Connection) -> None:
                     conn.execute("ALTER TABLE runs ADD COLUMN manifest_id TEXT")
                 if "evaluator_hash" not in cols:
                     conn.execute("ALTER TABLE runs ADD COLUMN evaluator_hash TEXT")
+                if "tool_calls_count" not in cols:
+                    conn.execute("ALTER TABLE runs ADD COLUMN tool_calls_count INTEGER")
+                if "tool_errors_count" not in cols:
+                    conn.execute("ALTER TABLE runs ADD COLUMN tool_errors_count INTEGER")
+                if "max_consecutive_tool_streak" not in cols:
+                    conn.execute("ALTER TABLE runs ADD COLUMN max_consecutive_tool_streak INTEGER")
+                if "loop_detected" not in cols:
+                    conn.execute("ALTER TABLE runs ADD COLUMN loop_detected INTEGER")
+
+        with conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS run_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id INTEGER NOT NULL,
+                    seq INTEGER NOT NULL,
+                    phase TEXT NOT NULL,
+                    tool_name TEXT,
+                    target_path TEXT,
+                    status TEXT NOT NULL,
+                    diff_hash TEXT,
+                    rollback_ref TEXT,
+                    timestamp TEXT NOT NULL
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id, seq)")
 
         # Ensure pricing columns exist on existing pricing tables
         cursor.execute("PRAGMA table_info(pricing)")
@@ -877,23 +1077,54 @@ def migrate_db(conn: sqlite3.Connection) -> bool:
         init_db(conn)
         return True
 
-    # MIG-02: Idempotent check & Phase 2 column upgrade
+    # MIG-02: Idempotent check & Phase 2+ column / run_events upgrade
     if "source_kind" in cols:
-        applied_phase2 = False
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='run_events'")
+        run_events_exists = bool(cursor.fetchone())
+        applied_upgrade = False
         with conn:
             if "execution_status" not in cols:
                 conn.execute("ALTER TABLE runs ADD COLUMN execution_status TEXT NOT NULL DEFAULT 'completed'")
-                applied_phase2 = True
+                applied_upgrade = True
             if "verification_status" not in cols:
                 conn.execute("ALTER TABLE runs ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'not_run'")
-                applied_phase2 = True
+                applied_upgrade = True
             if "manifest_id" not in cols:
                 conn.execute("ALTER TABLE runs ADD COLUMN manifest_id TEXT")
-                applied_phase2 = True
+                applied_upgrade = True
             if "evaluator_hash" not in cols:
                 conn.execute("ALTER TABLE runs ADD COLUMN evaluator_hash TEXT")
-                applied_phase2 = True
-        return applied_phase2
+                applied_upgrade = True
+            if "tool_calls_count" not in cols:
+                conn.execute("ALTER TABLE runs ADD COLUMN tool_calls_count INTEGER")
+                applied_upgrade = True
+            if "tool_errors_count" not in cols:
+                conn.execute("ALTER TABLE runs ADD COLUMN tool_errors_count INTEGER")
+                applied_upgrade = True
+            if "max_consecutive_tool_streak" not in cols:
+                conn.execute("ALTER TABLE runs ADD COLUMN max_consecutive_tool_streak INTEGER")
+                applied_upgrade = True
+            if "loop_detected" not in cols:
+                conn.execute("ALTER TABLE runs ADD COLUMN loop_detected INTEGER")
+                applied_upgrade = True
+            if not run_events_exists:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS run_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        run_id INTEGER NOT NULL,
+                        seq INTEGER NOT NULL,
+                        phase TEXT NOT NULL,
+                        tool_name TEXT,
+                        target_path TEXT,
+                        status TEXT NOT NULL,
+                        diff_hash TEXT,
+                        rollback_ref TEXT,
+                        timestamp TEXT NOT NULL
+                    )
+                """)
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id, seq)")
+                applied_upgrade = True
+        return applied_upgrade
 
     # MIG-03: Transactional migration with rollback safety
     if conn.in_transaction:
@@ -928,7 +1159,11 @@ def migrate_db(conn: sqlite3.Connection) -> bool:
                 execution_status TEXT NOT NULL DEFAULT 'completed',
                 verification_status TEXT NOT NULL DEFAULT 'not_run',
                 manifest_id TEXT,
-                evaluator_hash TEXT
+                evaluator_hash TEXT,
+                tool_calls_count INTEGER,
+                tool_errors_count INTEGER,
+                max_consecutive_tool_streak INTEGER,
+                loop_detected INTEGER
             )
         """)
 
@@ -975,6 +1210,22 @@ def migrate_db(conn: sqlite3.Connection) -> bool:
             conn.execute("ALTER TABLE pricing ADD COLUMN thinking_usd_per_mtok REAL")
         if "thinking_billed_as" not in pricing_columns:
             conn.execute("ALTER TABLE pricing ADD COLUMN thinking_billed_as TEXT")
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS run_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL,
+                seq INTEGER NOT NULL,
+                phase TEXT NOT NULL,
+                tool_name TEXT,
+                target_path TEXT,
+                status TEXT NOT NULL,
+                diff_hash TEXT,
+                rollback_ref TEXT,
+                timestamp TEXT NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id, seq)")
 
         conn.commit()
         return True
@@ -1240,9 +1491,22 @@ def clear_task_runs(task_id: str, conn: Optional[sqlite3.Connection] = None, db_
         should_close = True
 
     with conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='run_events'")
+        has_run_events = bool(cursor.fetchone())
         if arm:
+            if has_run_events:
+                conn.execute(
+                    "DELETE FROM run_events WHERE run_id IN (SELECT id FROM runs WHERE task_id = ? AND arm = ?)",
+                    (task_id, arm),
+                )
             cursor = conn.execute("DELETE FROM runs WHERE task_id = ? AND arm = ?", (task_id, arm))
         else:
+            if has_run_events:
+                conn.execute(
+                    "DELETE FROM run_events WHERE run_id IN (SELECT id FROM runs WHERE task_id = ?)",
+                    (task_id,),
+                )
             cursor = conn.execute("DELETE FROM runs WHERE task_id = ?", (task_id,))
         count = cursor.rowcount
 
@@ -1279,6 +1543,10 @@ def record_run(
     verification_status: str = "not_run",
     manifest_id: Optional[str] = None,
     evaluator_hash: Optional[str] = None,
+    tool_calls_count: Optional[int] = None,
+    tool_errors_count: Optional[int] = None,
+    max_consecutive_tool_streak: Optional[int] = None,
+    loop_detected: Optional[Any] = None,
     conn: Optional[sqlite3.Connection] = None,
     db_path: Optional[Path] = None,
 ) -> int:
@@ -1374,9 +1642,58 @@ def record_run(
     cursor.execute("PRAGMA table_info(runs)")
     cols = {row[1] for row in cursor.fetchall()}
 
+    loop_val = (1 if loop_detected else 0) if loop_detected is not None else None
+
     with conn:
         if "source_kind" in cols:
-            if "execution_status" in cols:
+            if "execution_status" in cols and "tool_calls_count" in cols:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO runs (
+                        task_id, arm, model, run_index, timestamp,
+                        input_tokens, output_tokens, thinking_tokens, cache_read_tokens,
+                        total_tokens, num_turns, duration_seconds,
+                        source_kind, evidence_status, exclusion_reasons,
+                        evidence_ref, evidence_hash, import_id,
+                        cost_status, cost_usd, is_simulation, notes,
+                        execution_status, verification_status, manifest_id, evaluator_hash,
+                        tool_calls_count, tool_errors_count, max_consecutive_tool_streak, loop_detected
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        task_id,
+                        arm,
+                        model,
+                        run_index,
+                        timestamp,
+                        input_tokens,
+                        output_tokens,
+                        thinking_tokens,
+                        cache_read_tokens,
+                        total_tokens,
+                        int(num_turns),
+                        float(duration_seconds),
+                        source_kind,
+                        evidence_status,
+                        reasons_json,
+                        evidence_ref,
+                        evidence_hash,
+                        import_id,
+                        cost_status,
+                        cost_usd,
+                        1 if is_simulation else 0,
+                        notes,
+                        execution_status,
+                        verification_status,
+                        manifest_id,
+                        evaluator_hash,
+                        tool_calls_count,
+                        tool_errors_count,
+                        max_consecutive_tool_streak,
+                        loop_val,
+                    ),
+                )
+            elif "execution_status" in cols:
                 cursor = conn.execute(
                     """
                     INSERT INTO runs (
@@ -1486,6 +1803,153 @@ def record_run(
         conn.close()
 
     return run_id
+
+
+def record_run_event(
+    run_id: int,
+    seq: int,
+    phase: str,
+    status: str,
+    tool_name: Optional[str] = None,
+    target_path: Optional[str] = None,
+    diff_hash: Optional[str] = None,
+    rollback_ref: Optional[str] = None,
+    timestamp: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+    db_path: Optional[Path] = None,
+) -> int:
+    """Persist a single provenance / state-transition event for a run in run_events."""
+    should_close = False
+    if conn is None:
+        conn = get_connection(db_path)
+        should_close = True
+
+    ts = timestamp or datetime.now(timezone.utc).isoformat()
+    with conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO run_events (
+                run_id, seq, phase, tool_name, target_path,
+                status, diff_hash, rollback_ref, timestamp
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(run_id),
+                int(seq),
+                str(phase),
+                tool_name,
+                target_path,
+                str(status),
+                diff_hash,
+                rollback_ref,
+                ts,
+            ),
+        )
+        event_id = int(cursor.lastrowid)
+
+    if should_close:
+        conn.close()
+
+    return event_id
+
+
+def get_run_events(
+    run_id: int,
+    conn: Optional[sqlite3.Connection] = None,
+    db_path: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """Retrieve ordered state-transition and tool events for a given run_id."""
+    should_close = False
+    if conn is None:
+        conn = get_connection(db_path)
+        should_close = True
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='run_events'")
+        if not cursor.fetchone():
+            return []
+        cursor.execute(
+            "SELECT * FROM run_events WHERE run_id = ? ORDER BY seq ASC, id ASC",
+            (int(run_id),),
+        )
+        return [dict(r) for r in cursor.fetchall()]
+    finally:
+        if should_close:
+            conn.close()
+
+
+def backfill_tool_metrics_from_evidence(
+    conn: Optional[sqlite3.Connection] = None,
+    db_path: Optional[Path] = None,
+) -> int:
+    """
+    Idempotently populate tool_calls_count, tool_errors_count,
+    max_consecutive_tool_streak, and loop_detected for runs rows whose
+    evidence_ref exists on disk and tool_calls_count IS NULL.
+    """
+    should_close = False
+    if conn is None:
+        conn = get_connection(db_path)
+        should_close = True
+
+    updated = 0
+    try:
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(runs)")
+        cols = {row[1] for row in cursor.fetchall()}
+        if "tool_calls_count" not in cols:
+            if "source_kind" in cols:
+                init_db(conn)
+            else:
+                return 0
+
+        cursor.execute(
+            """
+            SELECT id, evidence_ref FROM runs
+            WHERE tool_calls_count IS NULL
+              AND evidence_ref IS NOT NULL
+              AND evidence_ref != ''
+            """
+        )
+        candidates = cursor.fetchall()
+
+        with conn:
+            for row in candidates:
+                ev_ref = row["evidence_ref"]
+                p = Path(ev_ref)
+                if not p.is_file() and not p.is_absolute():
+                    candidate = DEFAULT_ROOT / p
+                    if candidate.is_file():
+                        p = candidate
+                if not p.is_file():
+                    continue
+                try:
+                    metrics = extract_ndjson_tool_metrics(p)
+                except Exception:
+                    continue
+                conn.execute(
+                    """
+                    UPDATE runs
+                    SET tool_calls_count = ?,
+                        tool_errors_count = ?,
+                        max_consecutive_tool_streak = ?,
+                        loop_detected = ?
+                    WHERE id = ? AND tool_calls_count IS NULL
+                    """,
+                    (
+                        metrics["tool_calls_count"],
+                        metrics["tool_errors_count"],
+                        metrics["max_consecutive_tool_streak"],
+                        1 if metrics["loop_detected"] else 0,
+                        row["id"],
+                    ),
+                )
+                updated += 1
+        return updated
+    finally:
+        if should_close:
+            conn.close()
 
 
 def import_run(
@@ -1628,33 +2092,61 @@ def import_run(
         verification_status=run_dict.get("verification_status") or "not_run",
         manifest_id=run_dict.get("manifest_id"),
         evaluator_hash=run_dict.get("evaluator_hash"),
+        tool_calls_count=run_dict.get("tool_calls_count"),
+        tool_errors_count=run_dict.get("tool_errors_count"),
+        max_consecutive_tool_streak=run_dict.get("max_consecutive_tool_streak"),
+        loop_detected=run_dict.get("loop_detected"),
         conn=conn,
         db_path=db_path,
     )
     return run_id
 
 
-def task_summary(
+def _compute_arm_efficiency_metrics(arm_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compute pass-rate, cost/tokens per passing patch, and tool/loop metrics over arm rows."""
+    verified_count = len([r for r in arm_rows if r.get("verification_status") == "passed"])
+    pass_rate = (verified_count / len(arm_rows)) if arm_rows else None
+    cost_per_passing_patch_usd = (
+        sum(r["cost_usd"] for r in arm_rows) / verified_count
+        if verified_count > 0 and arm_rows and all(r.get("cost_usd") is not None for r in arm_rows)
+        else None
+    )
+    tokens_per_passing_patch = (
+        sum(r["total_tokens"] for r in arm_rows) / verified_count
+        if verified_count > 0 and arm_rows and all(r.get("total_tokens") is not None for r in arm_rows)
+        else None
+    )
+    total_tool_calls = sum(
+        int(r["tool_calls_count"]) for r in arm_rows if r.get("tool_calls_count") is not None
+    )
+    total_tool_errors = sum(
+        int(r["tool_errors_count"]) for r in arm_rows if r.get("tool_errors_count") is not None
+    )
+    loop_runs_count = sum(1 for r in arm_rows if bool(r.get("loop_detected")))
+    return {
+        "passed_count": verified_count,
+        "pass_rate": pass_rate,
+        "cost_per_passing_patch_usd": cost_per_passing_patch_usd,
+        "tokens_per_passing_patch": tokens_per_passing_patch,
+        "total_tool_calls": total_tool_calls,
+        "total_tool_errors": total_tool_errors,
+        "loop_runs_count": loop_runs_count,
+    }
+
+
+def _compute_task_summary_with_rows(
     task_id: str,
-    conn: Optional[sqlite3.Connection] = None,
-    db_path: Optional[Path] = None,
+    conn: sqlite3.Connection,
     model_override: Optional[str] = None,
     include_all: bool = False,
     capture_policy: str = "approved",
-) -> Dict[str, Any]:
-    """Calculate per-arm means, error bands, and savings metrics for a task."""
-    should_close = False
-    if conn is None:
-        conn = get_connection(db_path)
-        should_close = True
-
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """Internal helper returning (task_summary_dict, enriched_rows)."""
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM runs WHERE task_id = ? ORDER BY arm, run_index", (task_id,))
     rows = [dict(r) for r in cursor.fetchall()]
 
     if not rows:
-        if should_close:
-            conn.close()
         return {
             "task_id": task_id,
             "has_measured_data": False,
@@ -1667,7 +2159,7 @@ def task_summary(
             "cost_incomplete_runs_count": 0,
             "arms": {},
             "savings": None,
-        }
+        }, []
 
     is_sim = (model_override is not None)
 
@@ -1816,13 +2308,21 @@ def task_summary(
 
         source_kinds = sorted(list({str(r.get("source_kind") or "unknown") for r in all_arm_rows}))
         evidence_statuses = sorted(list({str(r.get("evidence_status") or "unverified") for r in all_arm_rows}))
+        eff = _compute_arm_efficiency_metrics(all_arm_rows)
 
         summary["arms"][arm_name] = {
             "n": len(qualifying_runs),
             "cost_complete_n": len(valid_costs),
             "scheduled_count": len(all_arm_rows),
             "completed_count": len([r for r in all_arm_rows if r.get("execution_status") == "completed"]),
-            "verified_count": len([r for r in all_arm_rows if r.get("verification_status") == "passed"]),
+            "verified_count": eff["passed_count"],
+            "passed_count": eff["passed_count"],
+            "pass_rate": eff["pass_rate"],
+            "cost_per_passing_patch_usd": eff["cost_per_passing_patch_usd"],
+            "tokens_per_passing_patch": eff["tokens_per_passing_patch"],
+            "total_tool_calls": eff["total_tool_calls"],
+            "total_tool_errors": eff["total_tool_errors"],
+            "loop_runs_count": eff["loop_runs_count"],
             "failed_count": len([r for r in all_arm_rows if r.get("verification_status") in ("failed", "evaluator_error") or r.get("execution_status") == "failed"]),
             "excluded_count": len([r for r in all_arm_rows if not r.get("is_comparison_eligible")]),
             "cost_eligible_count": len([r for r in all_arm_rows if r.get("is_measurement_eligible") and r.get("cost_usd") is not None]),
@@ -1849,9 +2349,7 @@ def task_summary(
 
     if not active_runs or len(arms_data) == 0:
         summary["status"] = "no_eligible_measured_runs"
-        if should_close:
-            conn.close()
-        return summary
+        return summary, rows
 
     # Compare baseline vs governed arm
     gov_arm = None
@@ -1902,10 +2400,35 @@ def task_summary(
                 "projected_savings_100m": (savings_per_mtok * 100) if savings_per_mtok is not None else None,
             }
 
-    if should_close:
-        conn.close()
+    return summary, rows
 
-    return summary
+
+def task_summary(
+    task_id: str,
+    conn: Optional[sqlite3.Connection] = None,
+    db_path: Optional[Path] = None,
+    model_override: Optional[str] = None,
+    include_all: bool = False,
+    capture_policy: str = "approved",
+) -> Dict[str, Any]:
+    """Calculate per-arm means, error bands, and savings metrics for a task."""
+    should_close = False
+    if conn is None:
+        conn = get_connection(db_path)
+        should_close = True
+
+    try:
+        summary, _ = _compute_task_summary_with_rows(
+            task_id=task_id,
+            conn=conn,
+            model_override=model_override,
+            include_all=include_all,
+            capture_policy=capture_policy,
+        )
+        return summary
+    finally:
+        if should_close:
+            conn.close()
 
 
 def cumulative_savings(
@@ -1937,6 +2460,7 @@ def cumulative_savings(
     total_icm_input = 0
     total_measured_runs = 0
     task_summaries = []
+    all_enriched_rows: List[Dict[str, Any]] = []
 
     total_fixture_count = 0
     total_historical_count = 0
@@ -1950,8 +2474,11 @@ def cumulative_savings(
     has_measured_pairs = False
 
     for tid in all_task_ids:
-        s = task_summary(tid, conn=conn, model_override=model_override, capture_policy=capture_policy)
+        s, enriched_rows = _compute_task_summary_with_rows(
+            tid, conn=conn, model_override=model_override, capture_policy=capture_policy
+        )
         task_summaries.append(s)
+        all_enriched_rows.extend(enriched_rows)
 
         total_fixture_count += s.get("fixture_runs_count", 0)
         total_historical_count += s.get("historical_runs_count", 0)
@@ -2031,8 +2558,29 @@ def cumulative_savings(
             for re_item in arm_stat.get("exclusion_reasons", []):
                 per_arm_counts[arm_name]["exclusion_reasons"].add(re_item)
 
+    cumulative_arms: Dict[str, Dict[str, Any]] = {}
     for arm_name in per_arm_counts:
         per_arm_counts[arm_name]["exclusion_reasons"] = sorted(list(per_arm_counts[arm_name]["exclusion_reasons"]))
+        arm_rows = [r for r in all_enriched_rows if r["arm"].lower() == arm_name]
+        eff = _compute_arm_efficiency_metrics(arm_rows)
+        per_arm_counts[arm_name].update(eff)
+        cumulative_arms[arm_name] = dict(eff)
+
+    for required_arm in ("baseline", "icm"):
+        if required_arm not in cumulative_arms:
+            cumulative_arms[required_arm] = _compute_arm_efficiency_metrics([])
+
+    failed_rows = [
+        r for r in all_enriched_rows
+        if r.get("verification_status") in ("failed", "evaluator_error") or r.get("execution_status") == "failed"
+    ]
+    failed_inputs = [r["input_tokens"] for r in failed_rows if r.get("input_tokens") is not None]
+    failed_outputs = [r["output_tokens"] for r in failed_rows if r.get("output_tokens") is not None]
+    failed_costs = [r["cost_usd"] for r in failed_rows if r.get("cost_usd") is not None]
+
+    failed_avg_input_tokens = (sum(failed_inputs) / len(failed_inputs)) if failed_inputs else None
+    failed_avg_output_tokens = (sum(failed_outputs) / len(failed_outputs)) if failed_outputs else None
+    failed_avg_cost_usd = (sum(failed_costs) / len(failed_costs)) if failed_costs else None
 
     total_scheduled = sum(a["scheduled"] for a in per_arm_counts.values())
     total_completed = sum(a["completed"] for a in per_arm_counts.values())
@@ -2077,6 +2625,10 @@ def cumulative_savings(
         "failed_count": total_failed,
         "excluded_count": total_excluded,
         "per_arm_counts": per_arm_counts,
+        "arms": cumulative_arms,
+        "failed_avg_input_tokens": failed_avg_input_tokens,
+        "failed_avg_output_tokens": failed_avg_output_tokens,
+        "failed_avg_cost_usd": failed_avg_cost_usd,
         "source_kind_counts": source_kind_counts,
         "evidence_status_counts": evidence_status_counts,
         "fixture_runs_count": total_fixture_count,

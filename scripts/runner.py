@@ -49,6 +49,7 @@ import stat
 import ledger
 
 DEFAULT_FIXTURES_PATH = WORKSPACE_ROOT / "experiments" / "fixtures" / "mock_stream.ndjson"
+DEFAULT_EVIDENCE_DIR = WORKSPACE_ROOT / "experiments" / "evidence"
 
 SENSITIVE_ENV_PATTERNS = ("KEY", "TOKEN", "SECRET", "PASS", "CREDENTIAL", "AUTH")
 
@@ -311,6 +312,24 @@ def validate_manifest_configuration(
 # Disposable Workspace Isolation (RUN-01, RUN-02, RUN-03)
 # ---------------------------------------------------------------------------
 
+def _hash_directory_tree(root_dir: Path) -> str:
+    """Compute SHA-256 over sorted relative file paths and bytes, ignoring transient caches."""
+    if not root_dir.exists():
+        return ""
+    h = hashlib.sha256()
+    for p in sorted(root_dir.rglob("*")):
+        if not p.is_file():
+            continue
+        rel_path = p.relative_to(root_dir)
+        if "__pycache__" in rel_path.parts or ".pytest_cache" in rel_path.parts or p.suffix in (".pyc", ".pyo"):
+            continue
+        h.update(rel_path.as_posix().encode("utf-8"))
+        h.update(b"\x00")
+        h.update(p.read_bytes())
+        h.update(b"\x00")
+    return h.hexdigest()
+
+
 class DisposableWorkspace:
     """
     Isolated disposable workspace directory prepared from a pinned task snapshot.
@@ -325,26 +344,93 @@ class DisposableWorkspace:
         self.run_id = run_id
         self._is_cleaned = False
 
-    def cleanup(self) -> None:
-        """Safely destroy this disposable directory without touching any host files (RUN-03)."""
-        if self._is_cleaned:
-            return
-        if not self.path.exists():
-            self._is_cleaned = True
-            return
+    @property
+    def backup_dir(self) -> Path:
+        """Sibling hidden directory holding the initial pre-run backup."""
+        return self.path.parent / f".backup_{self.path.name}"
 
+    def _is_safe_host_target(self) -> bool:
+        """Return True iff self.path does not point at host repo files outside tmp/."""
         p_res = self.path.resolve()
-        snap_res = self.snapshot_dir.resolve()
         ws_res = WORKSPACE_ROOT.resolve()
-
-        # Invariant checks: never delete repo root or host files outside of tmp/
         if p_res == ws_res or ws_res in p_res.parents or p_res in ws_res.parents:
             tmp_dir = (WORKSPACE_ROOT / "tmp").resolve()
             try:
                 p_res.relative_to(tmp_dir)
+                return True
             except ValueError:
-                # Host safety violation: refuse to delete files in host repo outside of tmp/
-                return
+                return False
+        return True
+
+    def snapshot_tree_hash(self) -> str:
+        """Compute deterministic SHA-256 over workspace files, ignoring __pycache__/.pytest_cache."""
+        return _hash_directory_tree(self.path)
+
+    def capture_backup(self) -> Path:
+        """Copy initial workspace snapshot into sibling hidden .backup_<name> directory."""
+        if not self.path.exists():
+            raise FileNotFoundError(f"Workspace directory not found: {self.path}")
+        if not self._is_safe_host_target():
+            raise RuntimeError(f"Refusing to capture backup for unsafe host path: {self.path}")
+        bdir = self.backup_dir
+        if bdir.exists():
+            _safe_rmtree(bdir)
+        shutil.copytree(
+            self.path,
+            bdir,
+            ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc", "*.pyo"),
+            dirs_exist_ok=True,
+        )
+        return bdir
+
+    def rollback_to_backup(self) -> str:
+        """Restore workspace cleanly to exact initial backup files and return restored tree hash."""
+        bdir = self.backup_dir
+        if not bdir.exists():
+            raise FileNotFoundError(f"Backup directory not found for rollback: {bdir}")
+        if not self._is_safe_host_target():
+            raise RuntimeError(f"Refusing to roll back unsafe host path: {self.path}")
+
+        if self.path.exists():
+            for item in list(self.path.iterdir()):
+                if item.is_dir() and not item.is_symlink():
+                    _safe_rmtree(item)
+                else:
+                    try:
+                        os.chmod(item, stat.S_IWRITE)
+                    except OSError:
+                        pass
+                    item.unlink()
+        else:
+            self.path.mkdir(parents=True, exist_ok=True)
+
+        shutil.copytree(
+            bdir,
+            self.path,
+            ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc", "*.pyo"),
+            dirs_exist_ok=True,
+        )
+        return self.snapshot_tree_hash()
+
+    def cleanup(self) -> None:
+        """Safely destroy this disposable directory without touching any host files (RUN-03)."""
+        if self._is_cleaned:
+            return
+
+        bdir = self.backup_dir
+        p_res = self.path.resolve()
+        snap_res = self.snapshot_dir.resolve()
+
+        if not self._is_safe_host_target():
+            # Host safety violation: refuse to delete files in host repo outside of tmp/
+            return
+
+        if bdir.exists():
+            _safe_rmtree(bdir)
+
+        if not self.path.exists():
+            self._is_cleaned = True
+            return
 
         if p_res == snap_res or snap_res in p_res.parents or p_res in snap_res.parents:
             # Snapshot safety violation: refuse to delete snapshot directory
@@ -977,6 +1063,62 @@ class ManualExecutionAdapter:
 # Lifecycle Execution & Interruption/Resume Protocol (RUN-06, RUN-07)
 # ---------------------------------------------------------------------------
 
+def _persist_run_lifecycle_events(
+    conn: sqlite3.Connection,
+    run_id: int,
+    pre_hash: Optional[str],
+    post_hash: Optional[str],
+    verif_status: str,
+    tool_events: List[Dict[str, Any]],
+    rolled_back: bool,
+    restored_hash: Optional[str],
+    start_ts: Optional[str] = None,
+) -> None:
+    """Persist start, tool transitions, verify, and optional rollback events to SQLite."""
+    seq = 1
+    ledger.record_run_event(
+        run_id=run_id,
+        seq=seq,
+        phase="start",
+        status="started",
+        diff_hash=pre_hash,
+        timestamp=start_ts,
+        conn=conn,
+    )
+    for ev in tool_events:
+        seq += 1
+        ledger.record_run_event(
+            run_id=run_id,
+            seq=seq,
+            phase=str(ev.get("phase") or "tool"),
+            status=str(ev.get("status") or "DONE"),
+            tool_name=ev.get("tool_name"),
+            target_path=ev.get("target_path"),
+            conn=conn,
+        )
+    if verif_status != "not_run":
+        seq += 1
+        ledger.record_run_event(
+            run_id=run_id,
+            seq=seq,
+            phase="verify",
+            status=verif_status,
+            diff_hash=post_hash,
+            conn=conn,
+        )
+    if rolled_back:
+        seq += 1
+        ledger.record_run_event(
+            run_id=run_id,
+            seq=seq,
+            phase="rollback",
+            status="rolled_back",
+            diff_hash=restored_hash,
+            rollback_ref=pre_hash,
+            conn=conn,
+        )
+
+
 def execute_run_with_lifecycle(
     manifest: RunManifest,
     arm: str,
@@ -990,11 +1132,13 @@ def execute_run_with_lifecycle(
     simulate_failure: bool = False,
     db_path: Optional[Path] = None,
     conn: Optional[sqlite3.Connection] = None,
+    rollback_on_failure: bool = True,
 ) -> Dict[str, Any]:
     """
     Execute an arm run with lifecycle tracking:
     - RUN-06: Simulate timeout -> Timed-out attempt retained with partial evidence.
     - RUN-07: Simulate interruption -> Preserves original attempt without invented completion.
+    - Captures pre-run snapshot hash & backup, records run_events, and rolls back on failure.
     """
     arm_cfg = manifest.arms[arm]
     model = arm_cfg.model
@@ -1003,6 +1147,14 @@ def execute_run_with_lifecycle(
 
     if adapter is None:
         adapter = OfflineExecutionAdapter()
+
+    start_ts = datetime.now(timezone.utc).isoformat()
+    can_snapshot = workspace.path.exists() and workspace._is_safe_host_target()
+    pre_hash: Optional[str] = None
+    if can_snapshot:
+        if not workspace.backup_dir.exists():
+            workspace.capture_backup()
+        pre_hash = _hash_directory_tree(workspace.backup_dir)
 
     # Execute step via adapter
     exec_res = adapter.execute_mock(
@@ -1013,6 +1165,13 @@ def execute_run_with_lifecycle(
         simulate_interruption=simulate_interruption,
         simulate_failure=simulate_failure,
         timeout_seconds=timeout_seconds,
+    )
+
+    post_hash: Optional[str] = workspace.snapshot_tree_hash() if can_snapshot else None
+    tool_metrics = (
+        ledger.extract_ndjson_tool_metrics(exec_res.partial_events)
+        if exec_res.partial_events
+        else {"tool_calls_count": None, "tool_errors_count": None, "max_consecutive_tool_streak": None, "loop_detected": None, "events": []}
     )
 
     exclusion_reasons: List[str] = []
@@ -1054,6 +1213,17 @@ def execute_run_with_lifecycle(
         verif_status = "not_run"
         ev_hash = None
 
+    rolled_back = False
+    restored_hash: Optional[str] = None
+    if (
+        verif_status in ("failed", "evaluator_error")
+        and rollback_on_failure
+        and can_snapshot
+        and workspace.backup_dir.exists()
+    ):
+        restored_hash = workspace.rollback_to_backup()
+        rolled_back = True
+
     u = exec_res.usage or {
         "input_tokens": None,
         "output_tokens": None,
@@ -1062,30 +1232,57 @@ def execute_run_with_lifecycle(
         "total_tokens": None,
     }
 
-    run_id = ledger.record_run(
-        task_id=manifest.task_id,
-        arm=arm,
-        model=model,
-        run_index=run_index,
-        timestamp=datetime.now(timezone.utc).isoformat(),
-        input_tokens=u["input_tokens"],
-        output_tokens=u["output_tokens"],
-        thinking_tokens=u.get("thinking_tokens"),
-        cache_read_tokens=u.get("cache_read_tokens"),
-        total_tokens=u["total_tokens"],
-        num_turns=exec_res.num_turns,
-        duration_seconds=exec_res.duration_seconds,
-        source_kind="fixture",
-        evidence_status="unverified",
-        exclusion_reasons=exclusion_reasons,
-        evidence_ref=exec_res.evidence_ref,
-        execution_status=exec_res.execution_status,
-        verification_status=verif_status,
-        manifest_id=manifest.manifest_id,
-        evaluator_hash=ev_hash,
-        db_path=db_path,
-        conn=conn,
-    )
+    has_tool_events = bool(tool_metrics["events"])
+    should_close = False
+    active_conn = conn
+    if active_conn is None:
+        active_conn = ledger.get_connection(db_path)
+        should_close = True
+
+    try:
+        run_id = ledger.record_run(
+            task_id=manifest.task_id,
+            arm=arm,
+            model=model,
+            run_index=run_index,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            input_tokens=u["input_tokens"],
+            output_tokens=u["output_tokens"],
+            thinking_tokens=u.get("thinking_tokens"),
+            cache_read_tokens=u.get("cache_read_tokens"),
+            total_tokens=u["total_tokens"],
+            num_turns=exec_res.num_turns,
+            duration_seconds=exec_res.duration_seconds,
+            source_kind="fixture",
+            evidence_status="unverified",
+            exclusion_reasons=exclusion_reasons,
+            evidence_ref=exec_res.evidence_ref,
+            execution_status=exec_res.execution_status,
+            verification_status=verif_status,
+            manifest_id=manifest.manifest_id,
+            evaluator_hash=ev_hash,
+            tool_calls_count=tool_metrics["tool_calls_count"] if has_tool_events else None,
+            tool_errors_count=tool_metrics["tool_errors_count"] if has_tool_events else None,
+            max_consecutive_tool_streak=tool_metrics["max_consecutive_tool_streak"] if has_tool_events else None,
+            loop_detected=tool_metrics["loop_detected"] if has_tool_events else None,
+            db_path=db_path,
+            conn=active_conn,
+        )
+
+        _persist_run_lifecycle_events(
+            conn=active_conn,
+            run_id=run_id,
+            pre_hash=pre_hash,
+            post_hash=post_hash,
+            verif_status=verif_status,
+            tool_events=tool_metrics["events"],
+            rolled_back=rolled_back,
+            restored_hash=restored_hash,
+            start_ts=start_ts,
+        )
+    finally:
+        if should_close:
+            active_conn.close()
 
     return {
         "run_id": run_id,
@@ -1093,6 +1290,10 @@ def execute_run_with_lifecycle(
         "verification": verif,
         "execution_status": exec_res.execution_status,
         "verification_status": verif_status,
+        "pre_hash": pre_hash,
+        "post_hash": post_hash,
+        "restored_hash": restored_hash,
+        "rolled_back": rolled_back,
     }
 
 
@@ -1327,12 +1528,309 @@ print("ALL TESTS PASSED")
 
 
 # ---------------------------------------------------------------------------
+# Live Benchmark Adapter (LiveAgyAdapter / run_benchmark_live)
+# ---------------------------------------------------------------------------
+
+def _build_live_prompt(instructions_text: str, arm: str) -> str:
+    """Build baseline or 4-stage ICM contract prompt with exact INSTRUCTIONS.md appended."""
+    if arm.lower() == "baseline":
+        return instructions_text
+    return (
+        "Execute this task strictly following the 4-stage ICM contract:\n"
+        "1. INTAKE & SCOPE: Read only the target files named in the instructions; stay strictly within scope and do not alter unrelated or prohibited files.\n"
+        "2. PLAN: Design minimal, surgical changes before editing.\n"
+        "3. DIFF-ONLY EXEC: Apply minimal targeted edits only to the required files.\n"
+        "4. VERIFY: Run existing tests to verify all requirements pass before finishing.\n\n"
+        f"{instructions_text}"
+    )
+
+
+def _extract_partial_step_usage(lines: List[str]) -> Optional[Dict[str, Optional[int]]]:
+    """Sum per-step agent_response usages when a live stream lacks a final result event."""
+    steps: Dict[Any, Dict[str, Any]] = {}
+    for raw in lines:
+        s = raw.strip()
+        if not s:
+            continue
+        try:
+            ev = json.loads(s)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(ev, dict) and ev.get("event") == "step_update":
+            su = ev.get("step_update") if isinstance(ev.get("step_update"), dict) else ev
+            idx = su.get("step_index")
+            if idx is not None:
+                steps[idx] = su
+
+    ar_usages = [
+        su["usage"]
+        for _, su in sorted(steps.items(), key=lambda kv: str(kv[0]))
+        if su.get("step_type") == "agent_response" and isinstance(su.get("usage"), dict)
+    ]
+    if not ar_usages:
+        return None
+    inp = sum(int(u["input_tokens"]) for u in ar_usages if u.get("input_tokens") is not None)
+    out = sum(int(u["output_tokens"]) for u in ar_usages if u.get("output_tokens") is not None)
+    think = sum(int(u.get("thinking_tokens") or 0) for u in ar_usages)
+    cache = sum(int(u.get("cache_read_tokens") or 0) for u in ar_usages)
+    return {
+        "input_tokens": inp,
+        "output_tokens": out,
+        "thinking_tokens": think,
+        "cache_read_tokens": cache,
+        "total_tokens": inp + out + cache,
+    }
+
+
+def run_benchmark_live(
+    task_id: str,
+    arm: str,
+    run_index: int,
+    model: str = "gemini-4-hydrogen-low",
+    cli_cmd: str = "agy",
+    timeout_seconds: int = 180,
+    db_path: Optional[Path] = None,
+    workspace_root: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """
+    Execute a live benchmark task using the agy CLI in an isolated DisposableWorkspace.
+    Captures pre-run backup, raw NDJSON evidence + SHA-256, tool/loop metrics,
+    grades via ProtectedEvaluator, rolls back on failure, and persists run + run_events.
+    """
+    _validate_identifier(task_id, "task_id")
+    _validate_identifier(arm, "arm")
+
+    task_dir = WORKSPACE_ROOT / "benchmarks" / task_id
+    snapshot_dir = task_dir / "workspace"
+    evaluator_dir = task_dir / "evaluator"
+    if not snapshot_dir.is_dir():
+        raise FileNotFoundError(f"Benchmark workspace not found: {snapshot_dir}")
+    if not evaluator_dir.exists():
+        raise FileNotFoundError(f"Benchmark evaluator not found: {evaluator_dir}")
+
+    instructions_path = snapshot_dir / "INSTRUCTIONS.md"
+    if not instructions_path.is_file():
+        raise FileNotFoundError(f"INSTRUCTIONS.md not found in {snapshot_dir}")
+    instructions_text = instructions_path.read_text(encoding="utf-8")
+    prompt = _build_live_prompt(instructions_text, arm)
+
+    evaluator = ProtectedEvaluator(evaluator_dir)
+    run_uid = f"live_{task_id}_{int(time.time() * 1000)}"
+    workspace = WorkspaceManager.prepare_arm_workspace(
+        snapshot_dir=snapshot_dir,
+        arm=arm,
+        workspace_root=workspace_root,
+        run_id=run_uid,
+    )
+
+    try:
+        workspace.capture_backup()
+        pre_hash = workspace.snapshot_tree_hash()
+
+        cmd_bin = cli_cmd
+        if not shutil.which(cli_cmd) and cli_cmd == "agy":
+            default_agy = os.path.expandvars(r"%LOCALAPPDATA%\agy\bin\agy.exe")
+            if os.path.exists(default_agy):
+                cmd_bin = default_agy
+
+        cmd = [
+            cmd_bin,
+            "-p",
+            prompt,
+            "--output-format",
+            "stream-json",
+            "--model",
+            model,
+            "--dangerously-skip-permissions",
+            "--print-timeout",
+            f"{int(timeout_seconds)}s",
+        ]
+
+        start_epoch = time.time()
+        start_ts = datetime.now(timezone.utc).isoformat()
+        exclusion_reasons: List[str] = []
+
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(workspace.path),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=float(timeout_seconds) + 30.0,
+                check=False,
+            )
+            raw_stdout = proc.stdout or b""
+            execution_status = "completed" if proc.returncode == 0 else "failed"
+            if execution_status == "failed":
+                exclusion_reasons.append("execution_failed")
+        except subprocess.TimeoutExpired as exc:
+            raw_stdout = exc.stdout or b""
+            if isinstance(raw_stdout, str):
+                raw_stdout = raw_stdout.encode("utf-8", errors="replace")
+            execution_status = "timed_out"
+            exclusion_reasons.extend(["timeout", "partial_telemetry"])
+
+        wall_duration = time.time() - start_epoch
+        if isinstance(raw_stdout, str):
+            raw_stdout = raw_stdout.encode("utf-8", errors="replace")
+        clean_bytes = raw_stdout.replace(b"\r\n", b"\n")
+
+        evidence_dir = DEFAULT_EVIDENCE_DIR
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        evidence_file = evidence_dir / f"live_{task_id}_{arm}_run{run_index}_{int(start_epoch)}.ndjson"
+        evidence_file.write_bytes(clean_bytes)
+        evidence_hash = hashlib.sha256(clean_bytes).hexdigest()
+        try:
+            evidence_ref = evidence_file.resolve().relative_to(WORKSPACE_ROOT.resolve()).as_posix()
+        except ValueError:
+            evidence_ref = str(evidence_file)
+
+        stdout_lines = clean_bytes.decode("utf-8", errors="replace").splitlines()
+        cost_status: Optional[str] = None
+        try:
+            parsed = ledger.validate_and_parse_telemetry(stdout_lines)
+        except ledger.TelemetryValidationError:
+            valid_lines = []
+            for raw in stdout_lines:
+                s = raw.strip()
+                if not s:
+                    continue
+                try:
+                    obj = json.loads(s)
+                    if isinstance(obj, dict):
+                        valid_lines.append(s)
+                except json.JSONDecodeError:
+                    continue
+            parsed = ledger.validate_and_parse_telemetry(valid_lines)
+            if "partial_telemetry" not in exclusion_reasons:
+                exclusion_reasons.append("partial_telemetry")
+            cost_status = "incomplete"
+
+        usage = dict(parsed["usage"])
+        if not parsed["has_usage"] and execution_status in ("timed_out", "failed"):
+            partial_u = _extract_partial_step_usage(stdout_lines)
+            if partial_u is not None:
+                usage = partial_u
+                cost_status = "incomplete"
+                if "partial_telemetry" not in exclusion_reasons:
+                    exclusion_reasons.append("partial_telemetry")
+
+        tool_metrics = ledger.extract_ndjson_tool_metrics(stdout_lines)
+        duration_seconds = parsed["duration_seconds"] if parsed["duration_seconds"] > 0 else wall_duration
+        num_turns = parsed["num_turns"]
+
+        post_hash = workspace.snapshot_tree_hash()
+
+        verif: Optional[VerificationResult] = None
+        if execution_status == "completed":
+            verif = evaluator.evaluate_workspace(workspace.path)
+            verif_status = verif.verification_status
+            ev_hash = verif.evaluator_hash
+            for r in verif.reasons:
+                if r not in exclusion_reasons:
+                    exclusion_reasons.append(r)
+        else:
+            is_valid, ev_hash = evaluator.verify_hash()
+            if not is_valid:
+                verif_status = "evaluator_error"
+                for r in ("evaluator_hash_mismatch", "evaluator_tampered", "evaluator_error"):
+                    if r not in exclusion_reasons:
+                        exclusion_reasons.append(r)
+            else:
+                verif_status = "not_run"
+
+        rolled_back = False
+        restored_hash: Optional[str] = None
+        if verif_status in ("failed", "evaluator_error") or execution_status in ("failed", "timed_out"):
+            restored_hash = workspace.rollback_to_backup()
+            rolled_back = True
+
+        conn = ledger.get_connection(db_path)
+        try:
+            run_id = ledger.record_run(
+                task_id=task_id,
+                arm=arm,
+                model=model,
+                run_index=run_index,
+                timestamp=start_ts,
+                input_tokens=usage["input_tokens"],
+                output_tokens=usage["output_tokens"],
+                thinking_tokens=usage.get("thinking_tokens"),
+                cache_read_tokens=usage.get("cache_read_tokens"),
+                total_tokens=usage["total_tokens"],
+                num_turns=num_turns,
+                duration_seconds=duration_seconds,
+                source_kind="live",
+                evidence_status="verified",
+                exclusion_reasons=exclusion_reasons or None,
+                evidence_ref=evidence_ref,
+                evidence_hash=evidence_hash,
+                cost_status=cost_status,
+                execution_status=execution_status,
+                verification_status=verif_status,
+                evaluator_hash=ev_hash,
+                tool_calls_count=tool_metrics["tool_calls_count"],
+                tool_errors_count=tool_metrics["tool_errors_count"],
+                max_consecutive_tool_streak=tool_metrics["max_consecutive_tool_streak"],
+                loop_detected=tool_metrics["loop_detected"],
+                conn=conn,
+            )
+
+            _persist_run_lifecycle_events(
+                conn=conn,
+                run_id=run_id,
+                pre_hash=pre_hash,
+                post_hash=post_hash,
+                verif_status=verif_status,
+                tool_events=tool_metrics["events"],
+                rolled_back=rolled_back,
+                restored_hash=restored_hash,
+                start_ts=start_ts,
+            )
+
+            row = dict(conn.execute("SELECT cost_status, cost_usd FROM runs WHERE id = ?", (run_id,)).fetchone())
+        finally:
+            conn.close()
+
+        return {
+            "run_id": run_id,
+            "task_id": task_id,
+            "arm": arm,
+            "run_index": run_index,
+            "model": model,
+            "execution_status": execution_status,
+            "verification_status": verif_status,
+            "verification": verif,
+            "cost_status": row["cost_status"],
+            "cost_usd": row["cost_usd"],
+            "usage": usage,
+            "tool_metrics": tool_metrics,
+            "evidence_ref": evidence_ref,
+            "evidence_hash": evidence_hash,
+            "pre_hash": pre_hash,
+            "post_hash": post_hash,
+            "restored_hash": restored_hash,
+            "rolled_back": rolled_back,
+        }
+    finally:
+        workspace.cleanup()
+
+
+# ---------------------------------------------------------------------------
 # CLI Entrypoint
 # ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="Ai-Lab Phase 2 Runner & Disposable Workspace Harness")
     parser.add_argument("--smoke", action="store_true", help="Run fixture-only end-to-end smoke workflow")
+    parser.add_argument("--live-bench", nargs="?", const="BENCH-001", default=None, help="Run a live benchmark task (e.g., --live-bench --task BENCH-002)")
+    parser.add_argument("--task", default=None, help="Benchmark task ID for --live-bench (default: BENCH-001)")
+    parser.add_argument("--arm", default="baseline", help="Experiment arm for --live-bench (default: baseline)")
+    parser.add_argument("--run-index", type=int, default=1, help="Run index for --live-bench (default: 1)")
+    parser.add_argument("--model", default="gemini-4-hydrogen-low", help="Model ID for --live-bench")
+    parser.add_argument("--cli", default="agy", help="CLI executable for --live-bench (default: agy)")
+    parser.add_argument("--timeout", type=int, default=180, help="Timeout seconds for --live-bench (default: 180)")
     parser.add_argument("--db", default=None, help="Custom database path for smoke or runner execution")
     args = parser.parse_args()
 
@@ -1341,6 +1839,22 @@ def main():
         db_path = Path(args.db) if args.db else None
         res = run_fixture_smoke_flow(db_path=db_path)
         print(f"✓ Fixture smoke flow completed successfully: {res}")
+        sys.exit(0)
+
+    if args.live_bench is not None:
+        target_task = args.task or args.live_bench
+        db_path = Path(args.db) if args.db else None
+        print(f"[*] Running live benchmark {target_task} ({args.arm} #{args.run_index}, model={args.model})...")
+        res = run_benchmark_live(
+            task_id=target_task,
+            arm=args.arm,
+            run_index=args.run_index,
+            model=args.model,
+            cli_cmd=args.cli,
+            timeout_seconds=args.timeout,
+            db_path=db_path,
+        )
+        print(f"✓ Live benchmark finished: status={res['execution_status']} verify={res['verification_status']} cost_status={res['cost_status']} rolled_back={res['rolled_back']}")
         sys.exit(0)
 
     parser.print_help()
