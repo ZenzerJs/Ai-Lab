@@ -7,6 +7,7 @@ Enforces auditable rate seeding from config/PRICING.json.
 Provides analytical functions for per-task comparison and cumulative savings.
 """
 
+import ast
 import hashlib
 import json
 import math
@@ -1952,6 +1953,142 @@ def backfill_tool_metrics_from_evidence(
             conn.close()
 
 
+_ORPHAN_EVIDENCE_RE = re.compile(
+    r"^live_(?P<task_id>.+?)_(?P<arm>baseline|icm|icm-subagents|delegation)_run(?P<run_idx>\d+)_(?P<epoch>\d+)\.ndjson$"
+)
+
+
+def import_orphan_evidence_runs(
+    evidence_dir: Optional[Path] = None,
+    conn: Optional[sqlite3.Connection] = None,
+    db_path: Optional[Path] = None,
+) -> int:
+    """
+    Idempotently import unreferenced live_*.ndjson evidence files into runs
+    as source_kind='imported', evidence_status='verified', excluded from
+    measured cost/savings totals. Returns count of newly imported rows.
+    """
+    ev_dir = Path(evidence_dir) if evidence_dir is not None else DEFAULT_ROOT / "experiments" / "evidence"
+    if not ev_dir.is_dir():
+        return 0
+
+    should_close = False
+    if conn is None:
+        conn = get_connection(db_path)
+        should_close = True
+
+    imported = 0
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT evidence_ref, import_id FROM runs")
+        existing_basenames = set()
+        existing_imports = set()
+        for row in cursor.fetchall():
+            if row["evidence_ref"]:
+                existing_basenames.add(Path(str(row["evidence_ref"]).replace("\\", "/")).name)
+            if row["import_id"]:
+                existing_imports.add(str(row["import_id"]))
+
+        for p in sorted(ev_dir.glob("live_*.ndjson")):
+            import_id = f"orphan:{p.name}"
+            if p.name in existing_basenames or import_id in existing_imports:
+                continue
+
+            m = _ORPHAN_EVIDENCE_RE.match(p.name)
+            if not m:
+                continue
+            task_id = m.group("task_id")
+            arm = m.group("arm")
+            epoch = int(m.group("epoch"))
+
+            raw_bytes = p.read_bytes()
+            ev_hash = hashlib.sha256(raw_bytes).hexdigest()
+            lines = raw_bytes.decode("utf-8", errors="replace").splitlines()
+            if not lines:
+                continue
+
+            parsed = validate_and_parse_telemetry(lines)
+            tool_m = parsed.get("tool_metrics") or extract_ndjson_tool_metrics(lines)
+            u = parsed["usage"]
+
+            model = "gemini-3.8-flash-low"
+            resp_text = ""
+            for raw_line in lines:
+                s = raw_line.strip()
+                if not s:
+                    continue
+                try:
+                    ev_obj = json.loads(s)
+                except json.JSONDecodeError:
+                    continue
+                if ev_obj.get("event") == "init" and isinstance(ev_obj.get("init"), dict):
+                    if ev_obj["init"].get("model"):
+                        model = str(ev_obj["init"]["model"])
+                elif ev_obj.get("event") == "result":
+                    res = ev_obj.get("result")
+                    if isinstance(res, str):
+                        try:
+                            res = ast.literal_eval(res)
+                        except Exception:
+                            res = {}
+                    if isinstance(res, dict):
+                        resp_text = str(res.get("response") or "")
+
+            if arm == "baseline" and ("ICM" in resp_text or "TSK-" in resp_text):
+                reasons = ["superseded_or_contaminated_baseline"]
+            else:
+                reasons = ["superseded_prior_attempt"]
+
+            cursor.execute(
+                "SELECT COALESCE(MAX(run_index), 0) FROM runs WHERE task_id = ? AND arm = ?",
+                (task_id, arm),
+            )
+            next_run_idx = int(cursor.fetchone()[0]) + 1
+
+            try:
+                rel_ref = p.resolve().relative_to(DEFAULT_ROOT.resolve()).as_posix()
+            except ValueError:
+                rel_ref = str(p)
+
+            ts = datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
+            record_run(
+                task_id=task_id,
+                arm=arm,
+                model=model,
+                run_index=next_run_idx,
+                timestamp=ts,
+                input_tokens=u["input_tokens"],
+                output_tokens=u["output_tokens"],
+                thinking_tokens=u.get("thinking_tokens"),
+                cache_read_tokens=u.get("cache_read_tokens"),
+                total_tokens=u["total_tokens"],
+                num_turns=parsed["num_turns"],
+                duration_seconds=parsed["duration_seconds"],
+                source_kind="imported",
+                evidence_status="verified",
+                exclusion_reasons=reasons,
+                evidence_ref=rel_ref,
+                evidence_hash=ev_hash,
+                import_id=import_id,
+                notes="Archived prior live NDJSON attempt imported for provenance completeness; excluded from measured cost aggregates.",
+                execution_status="completed",
+                verification_status="not_run",
+                tool_calls_count=tool_m["tool_calls_count"],
+                tool_errors_count=tool_m["tool_errors_count"],
+                max_consecutive_tool_streak=tool_m["max_consecutive_tool_streak"],
+                loop_detected=tool_m["loop_detected"],
+                conn=conn,
+            )
+            existing_basenames.add(p.name)
+            existing_imports.add(import_id)
+            imported += 1
+
+        return imported
+    finally:
+        if should_close:
+            conn.close()
+
+
 def import_run(
     conn: sqlite3.Connection,
     run_dict: Dict[str, Any],
@@ -2319,12 +2456,14 @@ def _compute_task_summary_with_rows(
 
         source_kinds = sorted(list({str(r.get("source_kind") or "unknown") for r in all_arm_rows}))
         evidence_statuses = sorted(list({str(r.get("evidence_status") or "unverified") for r in all_arm_rows}))
-        eff = _compute_arm_efficiency_metrics(all_arm_rows)
+        active_eff_rows = [r for r in all_arm_rows if r.get("source_kind") != "imported"] or all_arm_rows
+        eff = _compute_arm_efficiency_metrics(active_eff_rows)
 
         summary["arms"][arm_name] = {
             "n": len(qualifying_runs),
             "cost_complete_n": len(valid_costs),
             "scheduled_count": len(all_arm_rows),
+            "evaluated_count": len(active_eff_rows),
             "completed_count": len([r for r in all_arm_rows if r.get("execution_status") == "completed"]),
             "verified_count": eff["passed_count"],
             "passed_count": eff["passed_count"],
@@ -2573,7 +2712,8 @@ def cumulative_savings(
     for arm_name in per_arm_counts:
         per_arm_counts[arm_name]["exclusion_reasons"] = sorted(list(per_arm_counts[arm_name]["exclusion_reasons"]))
         arm_rows = [r for r in all_enriched_rows if r["arm"].lower() == arm_name]
-        eff = _compute_arm_efficiency_metrics(arm_rows)
+        active_arm_rows = [r for r in arm_rows if r.get("source_kind") != "imported"] or arm_rows
+        eff = _compute_arm_efficiency_metrics(active_arm_rows)
         per_arm_counts[arm_name].update(eff)
         cumulative_arms[arm_name] = dict(eff)
 

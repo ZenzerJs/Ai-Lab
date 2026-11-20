@@ -108,10 +108,12 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
               return "—";
             return `${arm.mean_duration_seconds.toFixed(1)}s`;
           };
-          const fmtPass = (arm?: typeof baseline) =>
-            arm?.verified_count != null && arm?.scheduled_count != null
-              ? `${arm.verified_count}/${arm.scheduled_count}`
+          const fmtPass = (arm?: typeof baseline) => {
+            const denom = arm?.evaluated_count ?? arm?.scheduled_count;
+            return arm?.verified_count != null && denom != null
+              ? `${arm.verified_count}/${denom}`
               : "—";
+          };
           const fmtTools = (arm?: typeof baseline) =>
             arm?.total_tool_calls != null
               ? `${arm.total_tool_calls} (${arm.total_tool_errors ?? 0} err)`

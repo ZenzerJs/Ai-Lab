@@ -318,3 +318,74 @@ def test_unpriced_live_runs_preserve_token_and_duration_telemetry(tmp_path: Path
     assert task["arms"]["baseline"]["mean_duration_seconds"] == 42.5
     assert task["arms"]["icm"]["mean_input_tokens"] == 32_000.0
     assert task["arms"]["icm"]["mean_duration_seconds"] == 31.0
+
+
+def test_import_orphan_evidence_runs_idempotent_and_excluded(tmp_path: Path):
+    """Importing orphan live_*.ndjson logs archives them without altering measured savings or tool errors."""
+    import shutil
+
+    db_file = tmp_path / "orphan_import.db"
+    conn = ledger.get_connection(db_file)
+    ledger.seed_pricing(conn=conn)
+
+    ev_dir = tmp_path / "evidence"
+    ev_dir.mkdir()
+    src_active = ROOT / "experiments/evidence/live_EXP-001_baseline_run1_1791060060.ndjson"
+    src_icm = ROOT / "experiments/evidence/live_EXP-001_icm_run1_1791060101.ndjson"
+    src_orphan = ROOT / "experiments/evidence/live_EXP-001_baseline_run1_1791059906.ndjson"
+    for p in (src_active, src_icm, src_orphan):
+        shutil.copy2(p, ev_dir / p.name)
+
+    import hashlib
+    for arm, p in [("baseline", ev_dir / src_active.name), ("icm", ev_dir / src_icm.name)]:
+        parsed = ledger.validate_and_parse_telemetry(p.read_text(encoding="utf-8").splitlines())
+        u = parsed["usage"]
+        tm = parsed["tool_metrics"]
+        ledger.record_run(
+            task_id="EXP-001",
+            arm=arm,
+            model="gemini-3.8-flash-low",
+            run_index=1,
+            timestamp="2026-10-03T20:41:00+00:00",
+            input_tokens=u["input_tokens"],
+            output_tokens=u["output_tokens"],
+            thinking_tokens=u["thinking_tokens"],
+            cache_read_tokens=u["cache_read_tokens"],
+            total_tokens=u["total_tokens"],
+            num_turns=parsed["num_turns"],
+            duration_seconds=parsed["duration_seconds"],
+            source_kind="live",
+            evidence_status="verified",
+            evidence_ref=str(p),
+            evidence_hash=hashlib.sha256(p.read_bytes()).hexdigest(),
+            execution_status="completed",
+            verification_status="passed",
+            tool_calls_count=tm["tool_calls_count"],
+            tool_errors_count=tm["tool_errors_count"],
+            max_consecutive_tool_streak=tm["max_consecutive_tool_streak"],
+            loop_detected=tm["loop_detected"],
+            conn=conn,
+        )
+
+    before_cum = ledger.cumulative_savings(conn=conn)
+    before_payload = build_data.build_data_payload(db_path=db_file)
+
+    first = ledger.import_orphan_evidence_runs(evidence_dir=ev_dir, conn=conn)
+    second = ledger.import_orphan_evidence_runs(evidence_dir=ev_dir, conn=conn)
+    assert first == 1
+    assert second == 0
+
+    after_cum = ledger.cumulative_savings(conn=conn)
+    after_payload = build_data.build_data_payload(db_path=db_file)
+
+    assert after_cum["total_runs"] == before_cum["total_runs"] == 2
+    assert after_cum["scheduled_count"] == 3
+    assert after_cum["imported_runs_count"] == 1
+    assert after_cum["total_baseline_cost_usd"] == before_cum["total_baseline_cost_usd"]
+    assert after_cum["total_icm_cost_usd"] == before_cum["total_icm_cost_usd"]
+    assert after_payload["quality_rubric"]["tool_errors"] == before_payload["quality_rubric"]["tool_errors"]
+    imported_rows = [r for r in after_payload["runs"] if r["source_kind"] == "imported"]
+    assert len(imported_rows) == 1
+    assert imported_rows[0]["evidence_status"] == "verified"
+    assert imported_rows[0]["is_comparison_eligible"] is False
+    conn.close()

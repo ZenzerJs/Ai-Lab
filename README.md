@@ -54,10 +54,10 @@ Ai-Lab studies that tradeoff. It brings together **Interpretable Context Methodo
 ## 📊 What the Evidence Says
 
 > [!IMPORTANT]
-> **Current published snapshot:** The checked-in `dashboard/public/data.json` was generated on **2026-11-07 UTC** (build `1048d69`). It combines **36 evaluated runs across 11 benchmark task archetypes (`EXP-001`..`EXP-011`)** stratified into three lenses:
-> 1. **Core 7-task live CLI cost snapshot (`EXP-001`..`EXP-007`, 14 runs):** Aggregate estimated cost reduction is **1.9%** (**95% CI: −68.3% to +41.1%**), uncovering an empirical **~150 LOC / 2+ file break-even threshold** where fixed stage-contract overhead on micro-tasks (`EXP-001`: −200.8%) transitions to **+28.1% to +64.3% savings** on multi-file architectures (`EXP-003`, `EXP-006`) with an **85.3% governed prompt cache-hit rate**.
-> 2. **Multi-file repository outlines (`EXP-009`..`EXP-011`, 6–8 files each, 6 runs):** Above the break-even threshold, governed execution cuts turns by **32%** (72 → 49), uncached input tokens by **45%**, and output tokens by **58%**, yielding **+56.3% cold-start normalized cost savings (+42.8% to +68.5%)** and **+5.0% raw unadjusted savings**.
-> 3. **5-dimension quality rubric (`EXP-001`..`EXP-011`, 11 paired tasks) & operational defect suite (`EXP-005`, 16 runs):** Governed execution achieves a statistically significant **+8.91% mean quality gain (95% CI: +2.00% to +17.64%)**, **+1.00 / 5.00 Design & Accessibility gain (95% CI: +0.29 to +1.71)**, **90.9% fewer tool/path execution errors** (1 vs. 11), and **0% shipped defects** (0/8 vs. 2/8 baseline defect runs).
+> **Current published snapshot:** The checked-in `dashboard/public/data.json` combines **48 tracked runs across 11 tasks** (`14` measured live `EXP-001`..`EXP-007` runs + `10` archived superseded `EXP` NDJSON runs + `24` live multi-file `BENCH-002`/`003`/`007`/`008` runs on `gemini-4-hydrogen-low`), alongside `16` separate operational GLM runs (`ops_exp005.db`), `8` deterministic `BENCH-*` regression suites (`BENCH-001`..`BENCH-008`), and **167+ Tier-1 + 46 `src/` hermetic tests**:
+> 1. **Core 7-task live CLI cost snapshot (`EXP-001`..`EXP-007`, 14 measured runs on `gemini-3.8-flash-low`):** Aggregate estimated cost reduction is **1.9%** (**95% CI: −68.3% to +41.1%**), uncovering an empirical **~150 LOC / 2+ file break-even threshold** where fixed stage-contract overhead on micro-tasks (`EXP-001`: −200.8%) transitions to **+28.1% to +64.3% savings** on multi-file architectures (`EXP-003`, `EXP-006`) with an **85.3% governed prompt cache-hit rate**.
+> 2. **Multi-file regression variance suite (`BENCH-002`/`003`/`007`/`008`, 24 live runs on `gemini-4-hydrogen-low`, $n=3$/arm):** Baseline achieved **12/12 passing (100%)** at **49,861 avg tokens/passing patch**; ICM achieved **11/12 passing (91.7%; 11/11 completed, 1 startup error rolled back via `run_events`)** at **46,663 tokens/passing patch (−6.4%)** (`cost_status=unavailable`, unpriced model).
+> 3. **5-dimension quality rubric (`EXP-001`..`EXP-011`, 10 evaluated tasks):** Governed execution achieves a **+4.1% mean quality gain (95% CI: +1.2% to +8.1%)**, **+0.83 / 5.00 Design & Accessibility gain (95% CI: +0.17 to +1.50)**, and **87.5% fewer active live tool execution errors** (`1` ICM vs. `8` baseline).
 
 ### Live-token comparison: seven tasks
 
@@ -107,15 +107,15 @@ To test the **~150 LOC / 2+ file break-even threshold** (`docs/concepts/icm-brea
 
 *Note:* Across `EXP-009`..`EXP-011`, governed execution used **32% fewer turns** (49 vs. 72), **45% fewer uncached input tokens** (`126.3k` vs. `229.5k`), and **58% fewer output tokens** (`14.7k` vs. `34.8k`). Raw ICM cost includes a ~95k prior-session cached prefix; cold-start normalized cost subtracts that shared prefix so both arms start at equal zero context.
 
-#### 2. 5-Dimension Quality Sweep (`EXP-001`..`EXP-011`, $n = 11$ Paired Tasks)
+#### 2. 5-Dimension Quality Sweep (`EXP-001`..`EXP-011`, $n = 10$ Evaluated Tasks)
 
 While pooled cost across the original 7 tasks had a wide confidence interval crossing zero (−68.3% to +41.1%), the **5-dimension quality delta stays strictly positive**:
 
 | Dimension | Mean Delta ($\text{ICM} - \text{Baseline}$) | 95% Bootstrap CI | Finding |
 |---|---:|---:|---|
-| **Overall Quality (`normalized_pct`)** | **+8.91%** | **[+2.00%, +17.64%]** | Statistically significant (> 0); peak gain on `EXP-003` (+40%) and `EXP-006` (+32%) |
-| **Design & Accessibility (`0–5`, $n=7$ UI)** | **+1.00 pt** | **[+0.29, +1.71]** | Governed UIs consistently include semantic `<main>`, ARIA attributes, and richer state coverage |
-| **Process & Tool Hygiene (`0–5`)** | **+0.73 pt** | **[+0.00, +1.64]** | **91% fewer tool/path execution errors** in live NDJSON logs (1 ICM error vs. 11 baseline errors) |
+| **Overall Quality (`normalized_pct`)** | **+4.1%** | **[+1.2%, +8.1%]** | Statistically significant (> 0); peak gain on `EXP-003` (+20%) and `EXP-007` (+8%) |
+| **Design & Accessibility (`0–5`, $n=6$ UI)** | **+0.83 pt** | **[+0.17, +1.50]** | Governed UIs consistently include semantic `<main>`, ARIA attributes, and richer state coverage |
+| **Live Tool Execution Errors** | **1 vs. 8** | **−87.5%** | Active DB-linked live `EXP` + `BENCH` NDJSON logs record 1 ICM vs. 8 baseline tool errors |
 
 **Explore the evidence:** [Dashboard](https://zenzerjs.github.io/Ai-Lab/) · [Published data snapshot](dashboard/public/data.json) · [Quality findings](docs/concepts/quality-benchmark-findings.md) · [Break-even analysis](docs/concepts/icm-breakeven-analysis.md) · [Measurement design](docs/concepts/measurement-layer.md)
 
@@ -266,7 +266,7 @@ The framework is designed around **same-task, same-model, same-prompt** comparis
 5. **Transparent uncertainty:** task-level variation and limited sample sizes remain visible.
 
 > [!WARNING]
-> **Replication matters.** The experiment protocol documents a minimum of two runs per arm, but the currently published dashboard snapshot represents **one run per arm across seven tasks**. Do not describe that snapshot as a replicated multi-run A/B campaign. Future reports should reconcile the protocol and actual included run counts before claiming statistical confidence.
+> **Replication matters.** The experiment protocol documents a minimum of two runs per arm; the `EXP-001`..`EXP-007` live cost snapshot represents **one run per arm across seven tasks**, whereas `BENCH-002`/`003`/`007`/`008` run $n=3$ per arm on `gemini-4-hydrogen-low`. Do not describe the 7-task `EXP` slice as a replicated multi-run A/B campaign.
 
 > [!CAUTION]
 > Some experiment runners restore and clean target Git worktrees as part of isolation. **Run trials only in disposable clones or dedicated worktrees with no uncommitted work you need to keep.** Never point the runner at your primary development checkout without inspecting its target and cleanup behavior.
@@ -277,8 +277,8 @@ The framework is designed around **same-task, same-model, same-prompt** comparis
 
 > **The product is the measurement discipline, not an attractive savings percentage.**
 
-- **Two-regime cost behavior (`EXP-001`..`EXP-011`):** Pooled across the initial 7-task snapshot (`EXP-001`..`EXP-007`), estimated cost reduction is **1.9% (95% CI: −68.3% to +41.1%)** because fixed 5-stage contract overhead on single-file micro-tasks (`<100 LOC`) offsets savings on larger tasks. Above the **~150 LOC / 2+ file break-even threshold** (`EXP-003`, `EXP-006`, and the 6–8 file outlines `EXP-009`..`EXP-011`), governed runs reduce cost by **+28.1% to +64.3%** (and **+56.3% cold-start normalized** across `EXP-009`..`EXP-011`).
-- **Statistically significant quality & hygiene gains (`TSK-025`..`TSK-027`):** Evaluated across all 11 paired tasks (`EXP-001`..`EXP-011`) on the pre-registered 5-dimension rubric (0–25 scale), governed execution achieves a **+8.91% mean quality improvement (95% CI: +2.00% to +17.64%)**, **+1.00 / 5.00 Design & Accessibility gain (95% CI: +0.29 to +1.71)**, and **90.9% fewer tool/path execution errors** (1 vs. 11).
+- **Two-regime cost & token behavior (`EXP-001`..`EXP-011`, `BENCH-002`/`003`/`007`/`008`):** Pooled across the initial 7-task snapshot (`EXP-001`..`EXP-007`), estimated cost reduction is **1.9% (95% CI: −68.3% to +41.1%)** because fixed 5-stage contract overhead on single-file micro-tasks (`<100 LOC`) offsets savings on larger tasks. Above the **~150 LOC / 2+ file break-even threshold** (`EXP-003`, `EXP-006`, and multi-file `BENCH-*` regression suites on `gemini-4-hydrogen-low`), governed runs cut active live cost (`EXP-003`: −28.1%, `EXP-006`: −64.3%) and multi-file tokens/passing patch (**46,663 vs. 49,861**, −6.4%).
+- **Statistically significant quality & hygiene gains (`TSK-025`..`TSK-027`):** Evaluated across 10 paired tasks (`EXP-001`..`EXP-011`, excl. `EXP-006`) on the pre-registered 5-dimension rubric (0–25 scale), governed execution achieves a **+4.1% mean quality improvement (95% CI: +1.2% to +8.1%)**, **+0.83 / 5.00 Design & Accessibility gain (95% CI: +0.17 to +1.50)**, and **87.5% fewer active live tool execution errors** (`1` vs. `8`).
 - **Historical single-run claims (`EXP-008`):** Earlier references to `EXP-008` (64.54% cost reduction on ResumeForge) represent a single multi-file pair and are audited separately in the quality sweep rather than pooled into the 7-task `usage.db` cost aggregate.
 - **Rate-card simulations:** Token workloads from one source model are repriced against other providers' schedules in the simulator. Repricing does not establish that other models have identical tokenization, caching behavior, or task performance.
 - **Operational quality (`EXP-005` FreeBuff):** The 8-vs-8 GLM 5.3 Flash benchmark (`0/8` governed defect runs vs. `2/8` baseline defect runs, +65% duration) has no provider-native token counters and is kept separate from USD token-cost totals.

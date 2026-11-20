@@ -78,6 +78,7 @@ export interface RunRecord {
 export interface ArmStats {
   n: number;
   scheduled_count?: number;
+  evaluated_count?: number;
   completed_count?: number;
   verified_count?: number;
   passed_count?: number;

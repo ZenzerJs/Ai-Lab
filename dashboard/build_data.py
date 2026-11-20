@@ -403,7 +403,7 @@ def _compute_db_tool_errors(raw_runs: List[Dict[str, Any]]) -> Optional[Dict[str
     i_errors = 0
     telemetry_runs = 0
     for r in raw_runs:
-        if r.get("is_simulation"):
+        if r.get("is_simulation") or (r.get("source_kind") or "").lower() == "imported":
             continue
         arm_l = (r.get("arm") or "").lower()
         if arm_l == "baseline":
