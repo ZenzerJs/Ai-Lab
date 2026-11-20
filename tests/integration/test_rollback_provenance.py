@@ -292,7 +292,7 @@ def test_run_benchmark_live_with_mocked_agy_cli_and_unpriced_model(tmp_path: Pat
     assert res["tool_metrics"]["loop_detected"] is True
 
     # Evidence file saved with pure LF endings
-    ev_files = list(evidence_dir.glob("live_BENCH-002_icm_run1_*.ndjson"))
+    ev_files = list(evidence_dir.glob("live_BENCH-002_gemini-4-hydrogen-low_icm_run1_*.ndjson"))
     assert len(ev_files) == 1
     assert b"\r\n" not in ev_files[0].read_bytes()
 
