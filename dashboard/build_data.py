@@ -14,7 +14,7 @@ import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 # Add scripts directory to path to import ledger
 DASHBOARD_DIR = Path(__file__).resolve().parent
@@ -518,6 +518,30 @@ def _build_multi_file_outlines(cum_tasks: List[Dict[str, Any]]) -> List[Dict[str
     return items
 
 
+def _load_pricing_display_config() -> Tuple[List[str], Set[str], Set[str]]:
+    """Return ordered model ids, simulator-hidden ids, and conditional show-if-recorded ids."""
+    path = ledger.DEFAULT_PRICING_PATH
+    if not path.exists():
+        return [], set(), set()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return [], set(), set()
+    models = data.get("models") or {}
+    if not isinstance(models, dict):
+        return [], set(), set()
+    ordered = list(models.keys())
+    hidden = {
+        k for k, v in models.items()
+        if isinstance(v, dict) and v.get("simulator_hidden")
+    }
+    show_if_rec = {
+        k for k, v in models.items()
+        if isinstance(v, dict) and v.get("show_if_recorded")
+    }
+    return ordered, hidden, show_if_rec
+
+
 def build_data_payload(
     db_path: Optional[Path] = None,
     capture_policy: str = "approved",
@@ -536,6 +560,22 @@ def build_data_payload(
         # Fetch all runs without task-prefix bias
         cursor.execute("SELECT * FROM runs ORDER BY id ASC")
         raw_runs = [dict(r) for r in cursor.fetchall()]
+
+        ordered_models, hidden_models, show_if_recorded = _load_pricing_display_config()
+        order_index = {m: idx for idx, m in enumerate(ordered_models)}
+        recorded_models = {r["model"] for r in raw_runs if r.get("model")}
+        simulator_pricing_rows = [
+            p for p in pricing_rows
+            if p.get("model") not in hidden_models
+            or (p.get("model") in show_if_recorded and p.get("model") in recorded_models)
+        ]
+        simulator_pricing_rows.sort(
+            key=lambda p: (
+                0 if p.get("model") in order_index else 1,
+                order_index.get(p.get("model"), 0),
+                p.get("model", ""),
+            )
+        )
 
         # Process each run through shared eligibility and accounting
         task_pairs: Dict[Tuple[str, str], Dict[int, Dict[str, Any]]] = {}
@@ -625,7 +665,7 @@ def build_data_payload(
 
         # Multi-model cascade
         cascade: List[Dict[str, Any]] = []
-        for p in pricing_rows:
+        for p in simulator_pricing_rows:
             m = p["model"]
             m_cum = ledger.cumulative_savings(conn=conn, db_path=db_path, model_override=m, capture_policy=capture_policy)
             cascade.append({
@@ -702,7 +742,7 @@ def build_data_payload(
             "tasks": cum.get("tasks", []),
             "runs": processed_runs,
             "timeline": timeline,
-            "pricing": pricing_rows,
+            "pricing": simulator_pricing_rows,
             "cascade": cascade,
             "operational": ops_block,
             "quality_rubric": quality_block,

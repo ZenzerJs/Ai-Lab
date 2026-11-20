@@ -698,15 +698,15 @@ def test_ui_05_pricing_simulator_separation_and_accuracy(tmp_path: Path):
     emp_icm_cost = cum_actual["total_icm_cost_usd"]
     emp_savings = cum_actual["cumulative_savings_usd"]
 
-    # 2. Simulated re-pricing on claude-sonnet-4-6
-    cum_sim = ledger.cumulative_savings(conn=conn, model_override="claude-sonnet-4-6")
+    # 2. Simulated re-pricing on claude-sonnet-5-5
+    cum_sim = ledger.cumulative_savings(conn=conn, model_override="claude-sonnet-5-5")
     assert cum_sim["is_simulation"] is True
     assert cum_sim["total_baseline_cost_usd"] != emp_baseline_cost
     assert cum_sim["total_icm_cost_usd"] != emp_icm_cost
     assert cum_sim["cumulative_savings_usd"] != emp_savings
 
-    # Verify rates applied correctly from pricing config (claude-sonnet-4-6 uses subset cache accounting)
-    rates = ledger.get_pricing("claude-sonnet-4-6", conn=conn)
+    # Verify rates applied correctly from pricing config (claude-sonnet-5-5 uses subset cache accounting)
+    rates = ledger.get_pricing("claude-sonnet-5-5", conn=conn)
     uncached_b_in = max(0, 1_000_000 - 200_000)
     expected_b_cost = (
         uncached_b_in * rates["input_usd_per_mtok"]
@@ -726,10 +726,10 @@ def test_ui_05_pricing_simulator_separation_and_accuracy(tmp_path: Path):
     payload = build_data.build_data_payload(db_path=db_file)
     assert "cascade" in payload
     cascade_models = [c["model"] for c in payload["cascade"]]
-    assert "claude-sonnet-4-6" in cascade_models
+    assert "claude-sonnet-5-5" in cascade_models
     assert "gemini-2.5-pro" in cascade_models
 
-    claude_cascade = next(c for c in payload["cascade"] if c["model"] == "claude-sonnet-4-6")
+    claude_cascade = next(c for c in payload["cascade"] if c["model"] == "claude-sonnet-5-5")
     assert abs(claude_cascade["total_baseline_cost_usd"] - expected_b_cost) < 1e-4
 
     conn.close()
