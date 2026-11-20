@@ -1245,6 +1245,7 @@ def seed_pricing(
     pricing_path: Optional[Path] = None,
     conn: Optional[sqlite3.Connection] = None,
     db_path: Optional[Path] = None,
+    prune: bool = False,
 ) -> int:
     """Seed pricing table from config/PRICING.json. Never hardcodes rates in code."""
     path = Path(pricing_path) if pricing_path else DEFAULT_PRICING_PATH
@@ -1265,6 +1266,12 @@ def seed_pricing(
 
     count = 0
     with conn:
+        if prune:
+            placeholders = ",".join("?" for _ in models)
+            conn.execute(
+                f"DELETE FROM pricing WHERE model NOT IN ({placeholders})",
+                tuple(models.keys()),
+            )
         for model_id, rates in models.items():
             conn.execute(
                 """
@@ -3004,6 +3011,7 @@ def main():
     seed_p = subparsers.add_parser("seed-pricing", help="Seed pricing table from config/PRICING.json")
     seed_p.add_argument("--config", help="Custom path to PRICING.json")
     seed_p.add_argument("--db", default=None, help="Custom path to SQLite database")
+    seed_p.add_argument("--prune", action="store_true", help="Remove stale pricing rows absent from config")
 
     # summary
     sum_p = subparsers.add_parser("summary", help="Print summary of tasks and savings")
@@ -3037,7 +3045,7 @@ def main():
             print("✓ Database was already migrated (no changes needed).")
     elif args.command == "seed-pricing":
         p = Path(args.config) if args.config else None
-        count = seed_pricing(pricing_path=p, db_path=custom_db)
+        count = seed_pricing(pricing_path=p, db_path=custom_db, prune=args.prune)
         print(f"✓ Seeded pricing for {count} model(s) from config/PRICING.json.")
     elif args.command == "cascade":
         print_cascade(db_path=custom_db)

@@ -1,23 +1,109 @@
 {
   "models": {
-    "gemini-2.5-pro": {
-      "input_usd_per_mtok": 1.25,
-      "cache_read_usd_per_mtok": 0.125,
+    "claude-fable-5-2": {
+      "input_usd_per_mtok": 8.00,
+      "cache_read_usd_per_mtok": 0.20,
+      "output_usd_per_mtok": 40.00,
+      "cache_accounting": "subset",
+      "thinking_billed_as": "output",
+      "source_url": "https://www.anthropic.com/pricing",
+      "fetched_at": "2026-11-20T00:00:00Z"
+    },
+    "claude-opus-5-5": {
+      "input_usd_per_mtok": 4.00,
+      "cache_read_usd_per_mtok": 0.20,
+      "output_usd_per_mtok": 20.00,
+      "cache_accounting": "subset",
+      "thinking_billed_as": "output",
+      "source_url": "https://www.anthropic.com/pricing",
+      "fetched_at": "2026-11-20T00:00:00Z"
+    },
+    "claude-sonnet-5-5": {
+      "input_usd_per_mtok": 2.00,
+      "cache_read_usd_per_mtok": 0.10,
+      "output_usd_per_mtok": 10.00,
+      "cache_accounting": "subset",
+      "thinking_billed_as": "output",
+      "source_url": "https://www.anthropic.com/pricing",
+      "fetched_at": "2026-11-20T00:00:00Z"
+    },
+    "claude-haiku-5-5": {
+      "input_usd_per_mtok": 0.10,
+      "cache_read_usd_per_mtok": 0.01,
+      "output_usd_per_mtok": 0.50,
+      "cache_accounting": "subset",
+      "thinking_billed_as": "output",
+      "source_url": "https://www.anthropic.com/pricing",
+      "fetched_at": "2026-11-20T00:00:00Z",
+      "prompt_tier_note": "Rates apply to prompts <=100k tokens; prompts >100k tokens use $0.50/$0.05/$2.50 per 1M."
+    },
+    "gpt-6.2-astra": {
+      "input_usd_per_mtok": 8.00,
+      "cache_read_usd_per_mtok": 0.40,
+      "output_usd_per_mtok": 40.00,
+      "cache_accounting": "subset",
+      "thinking_billed_as": "output",
+      "source_url": "https://openai.com/api/pricing",
+      "fetched_at": "2026-11-20T00:00:00Z",
+      "prompt_tier_note": "Standard rates for prompts <=272k tokens."
+    },
+    "gpt-6.2-sol": {
+      "input_usd_per_mtok": 2.00,
+      "cache_read_usd_per_mtok": 0.10,
+      "output_usd_per_mtok": 10.00,
+      "cache_accounting": "subset",
+      "thinking_billed_as": "output",
+      "source_url": "https://openai.com/api/pricing",
+      "fetched_at": "2026-11-20T00:00:00Z",
+      "prompt_tier_note": "Standard rates for prompts <=272k tokens."
+    },
+    "gpt-6.1-terra": {
+      "input_usd_per_mtok": 1.00,
+      "cache_read_usd_per_mtok": 0.05,
+      "output_usd_per_mtok": 5.00,
+      "cache_accounting": "subset",
+      "thinking_billed_as": "output",
+      "source_url": "https://openai.com/api/pricing",
+      "fetched_at": "2026-11-20T00:00:00Z",
+      "prompt_tier_note": "Standard rates for prompts <=272k tokens."
+    },
+    "gpt-6-luna": {
+      "input_usd_per_mtok": 0.10,
+      "cache_read_usd_per_mtok": 0.01,
+      "output_usd_per_mtok": 0.50,
+      "cache_accounting": "subset",
+      "thinking_billed_as": "output",
+      "source_url": "https://openai.com/api/pricing",
+      "fetched_at": "2026-11-20T00:00:00Z",
+      "prompt_tier_note": "Standard rates for prompts <=272k tokens."
+    },
+    "gemini-4-neon": {
+      "input_usd_per_mtok": 3.00,
+      "cache_read_usd_per_mtok": 0.15,
+      "output_usd_per_mtok": 15.00,
+      "cache_accounting": "separate",
+      "thinking_billed_as": "output",
+      "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
+      "fetched_at": "2026-11-20T00:00:00Z"
+    },
+    "gemini-4-argon": {
+      "input_usd_per_mtok": 2.00,
+      "cache_read_usd_per_mtok": 0.10,
       "output_usd_per_mtok": 10.00,
       "cache_accounting": "separate",
       "thinking_billed_as": "output",
       "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-      "fetched_at": "2026-09-10T00:01:50Z",
-      "prompt_tier_note": "These rates apply to prompt requests <=200k tokens; prompt requests >200k tokens use higher provider pricing."
+      "fetched_at": "2026-11-20T00:00:00Z",
+      "prompt_tier_note": "Introductory rate through Nov 30, 2026 ($4.00/$0.20/$20.00 starting Dec 1, 2026)."
     },
-    "gemini-2.5-flash": {
-      "input_usd_per_mtok": 0.30,
-      "cache_read_usd_per_mtok": 0.03,
-      "output_usd_per_mtok": 2.50,
+    "gemini-4-hydrogen": {
+      "input_usd_per_mtok": 1.50,
+      "cache_read_usd_per_mtok": 0.075,
+      "output_usd_per_mtok": 7.50,
       "cache_accounting": "separate",
       "thinking_billed_as": "output",
       "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-      "fetched_at": "2026-09-10T00:01:50Z"
+      "fetched_at": "2026-11-20T00:00:00Z"
     },
     "gemini-3.8-flash": {
       "input_usd_per_mtok": 0.75,
@@ -26,7 +112,58 @@
       "cache_accounting": "separate",
       "thinking_billed_as": "output",
       "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-      "fetched_at": "2026-09-10T00:01:50Z"
+      "fetched_at": "2026-11-20T00:00:00Z",
+      "prompt_tier_note": "Introductory rate through Dec 31, 2026 ($1.50/$0.075/$7.50 starting Jan 1, 2027)."
+    },
+    "grok-4.7": {
+      "input_usd_per_mtok": 2.00,
+      "cache_read_usd_per_mtok": 0.50,
+      "output_usd_per_mtok": 6.00,
+      "cache_accounting": "subset",
+      "thinking_billed_as": "output",
+      "source_url": "https://docs.x.ai/docs/models",
+      "fetched_at": "2026-11-20T00:00:00Z",
+      "prompt_tier_note": "Standard tier for prompts <200k tokens."
+    },
+    "qwen3.8-max": {
+      "input_usd_per_mtok": 2.00,
+      "cache_read_usd_per_mtok": 0.20,
+      "output_usd_per_mtok": 6.00,
+      "cache_accounting": "separate",
+      "thinking_billed_as": "output",
+      "source_url": "https://www.alibabacloud.com/help/en/model-studio/models",
+      "fetched_at": "2026-11-20T00:00:00Z"
+    },
+    "deepseek-v4-pro": {
+      "input_usd_per_mtok": 0.66,
+      "cache_read_usd_per_mtok": 0.022,
+      "output_usd_per_mtok": 1.98,
+      "cache_accounting": "separate",
+      "thinking_billed_as": "output",
+      "source_url": "https://api-docs.deepseek.com/quick_start/pricing",
+      "fetched_at": "2026-11-20T00:00:00Z",
+      "prompt_tier_note": "Off-peak API rate; peak weekday UTC windows (01:00-04:00, 06:00-10:00) are 2x."
+    },
+    "deepseek-flash": {
+      "input_usd_per_mtok": 0.15,
+      "cache_read_usd_per_mtok": 0.003,
+      "output_usd_per_mtok": 0.60,
+      "cache_accounting": "separate",
+      "thinking_billed_as": "output",
+      "source_url": "https://api-docs.deepseek.com/quick_start/pricing",
+      "fetched_at": "2026-11-20T00:00:00Z",
+      "prompt_tier_note": "DeepSeek-V4.1-Flash off-peak API rate; peak weekday UTC windows are 2x."
+    },
+    "glm-5.3-flash": {
+      "input_usd_per_mtok": 0.075,
+      "cache_read_usd_per_mtok": 0.015,
+      "output_usd_per_mtok": 0.25,
+      "cache_accounting": "separate",
+      "thinking_billed_as": "output",
+      "source_url": "https://openrouter.ai/z-ai/glm-5.3-flash",
+      "fetched_at": "2026-09-09T00:00:00Z",
+      "pricing_mode": "provider-equivalent",
+      "provider_note": "Benchmarked through FreeBuff at $0 direct user cost. These values model public discounted API-equivalent pricing and are not FreeBuff charges."
     },
     "gemini-3.8-flash-low": {
       "input_usd_per_mtok": 0.75,
@@ -35,61 +172,20 @@
       "cache_accounting": "separate",
       "thinking_billed_as": "output",
       "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-      "fetched_at": "2026-09-10T00:01:50Z"
+      "fetched_at": "2026-11-20T00:00:00Z",
+      "simulator_hidden": true
     },
-    "gemini-3.8-flash-medium": {
-      "input_usd_per_mtok": 0.75,
-      "cache_read_usd_per_mtok": 0.075,
-      "output_usd_per_mtok": 3.75,
+    "gemini-2.5-pro": {
+      "input_usd_per_mtok": 1.25,
+      "cache_read_usd_per_mtok": 0.125,
+      "output_usd_per_mtok": 10.00,
       "cache_accounting": "separate",
       "thinking_billed_as": "output",
       "source_url": "https://ai.google.dev/gemini-api/docs/pricing",
-      "fetched_at": "2026-09-10T00:01:50Z"
-    },
-    "claude-3-7-sonnet": {
-      "input_usd_per_mtok": 3.00,
-      "cache_read_usd_per_mtok": 0.30,
-      "output_usd_per_mtok": 15.00,
-      "cache_accounting": "subset",
-      "thinking_billed_as": "output",
-      "source_url": "https://www.anthropic.com/pricing",
-      "fetched_at": "2026-09-09T00:00:00Z"
-    },
-    "claude-sonnet-4-6": {
-      "input_usd_per_mtok": 3.00,
-      "cache_read_usd_per_mtok": 0.30,
-      "output_usd_per_mtok": 15.00,
-      "cache_accounting": "subset",
-      "thinking_billed_as": "output",
-      "source_url": "https://www.anthropic.com/pricing",
-      "fetched_at": "2026-09-09T22:58:00Z"
-    },
-    "claude-sonnet-5": {
-      "input_usd_per_mtok": 2.00,
-      "cache_read_usd_per_mtok": 0.20,
-      "output_usd_per_mtok": 10.00,
-      "cache_accounting": "subset",
-      "thinking_billed_as": "output",
-      "source_url": "https://www.anthropic.com/pricing",
-      "fetched_at": "2026-09-09T22:58:00Z"
-    },
-    "glm-5.3-flash": {
-      "input_usd_per_mtok": 0.075,
-      "cache_read_usd_per_mtok": 0.015,
-      "output_usd_per_mtok": 0.25,
-      "cache_accounting": "separate",
-      "source_url": "https://openrouter.ai/z-ai/glm-5.3-flash",
-      "fetched_at": "2026-09-09T00:00:00Z",
-      "pricing_mode": "provider-equivalent",
-      "provider_note": "Benchmarked through FreeBuff at $0 direct user cost. These values model public discounted API-equivalent pricing and are not FreeBuff charges."
-    },
-    "gpt-4o": {
-      "input_usd_per_mtok": 2.50,
-      "cache_read_usd_per_mtok": 1.25,
-      "output_usd_per_mtok": 10.00,
-      "cache_accounting": "subset",
-      "source_url": "https://openai.com/api/pricing",
-      "fetched_at": "2026-09-09T00:00:00Z"
+      "fetched_at": "2026-09-10T00:01:50Z",
+      "prompt_tier_note": "Legacy fixture rate card (prompts <=200k tokens).",
+      "simulator_hidden": true,
+      "show_if_recorded": true
     }
   }
 }
