@@ -181,6 +181,11 @@ export function Overview({ data }: { data: DashboardPayload }) {
       .filter(finite),
   );
   const stats = measured ? data.headline?.stats || [] : [];
+  const totalRunsCount = data.runs?.length ?? data.cumulative?.total_runs ?? 0;
+  const archivedRunsCount = (data.runs || []).filter(
+    (run) => run.source_kind === "imported",
+  ).length;
+  const liveRunsCount = totalRunsCount - archivedRunsCount;
   return (
     <>
       <div className="page-heading">
@@ -230,8 +235,10 @@ export function Overview({ data }: { data: DashboardPayload }) {
           {tokenBenchTasks.length
             ? ` · ${tokenBenchTasks.length} token-bench`
             : ""}{" "}
-          <span className="middle-dot">·</span>{" "}
-          {data.runs?.length ?? data.cumulative?.total_runs ?? 0} total runs
+          <span className="middle-dot">·</span> {totalRunsCount} total runs
+          {archivedRunsCount > 0
+            ? ` (${liveRunsCount} live · ${archivedRunsCount} archived)`
+            : ""}
         </span>
       </div>
       {stats.length ? (
@@ -417,13 +424,15 @@ export function Overview({ data }: { data: DashboardPayload }) {
                 gArm = governedArm(task);
               const bTok = bArm?.tokens_per_passing_patch,
                 gTok = gArm?.tokens_per_passing_patch;
+              const bDenom = bArm?.evaluated_count ?? bArm?.scheduled_count;
+              const gDenom = gArm?.evaluated_count ?? gArm?.scheduled_count;
               const bPass =
-                bArm?.verified_count != null && bArm?.scheduled_count != null
-                  ? ` (${bArm.verified_count}/${bArm.scheduled_count})`
+                bArm?.verified_count != null && bDenom != null
+                  ? ` (${bArm.verified_count}/${bDenom})`
                   : "";
               const gPass =
-                gArm?.verified_count != null && gArm?.scheduled_count != null
-                  ? ` (${gArm.verified_count}/${gArm.scheduled_count})`
+                gArm?.verified_count != null && gDenom != null
+                  ? ` (${gArm.verified_count}/${gDenom})`
                   : "";
               return (
                 <div className="chart-row" key={task.task_id}>
@@ -603,7 +612,11 @@ export function Overview({ data }: { data: DashboardPayload }) {
                       0,
                     );
                     const bSched = tokenBenchTasks.reduce(
-                      (s, t) => s + (t.arms.baseline?.scheduled_count ?? 0),
+                      (s, t) =>
+                        s +
+                        (t.arms.baseline?.evaluated_count ??
+                          t.arms.baseline?.scheduled_count ??
+                          0),
                       0,
                     );
                     const gPass = tokenBenchTasks.reduce(
@@ -611,7 +624,11 @@ export function Overview({ data }: { data: DashboardPayload }) {
                       0,
                     );
                     const gSched = tokenBenchTasks.reduce(
-                      (s, t) => s + (governedArm(t)?.scheduled_count ?? 0),
+                      (s, t) =>
+                        s +
+                        (governedArm(t)?.evaluated_count ??
+                          governedArm(t)?.scheduled_count ??
+                          0),
                       0,
                     );
                     return (
