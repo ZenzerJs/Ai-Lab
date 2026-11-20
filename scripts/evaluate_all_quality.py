@@ -7,8 +7,11 @@ the TSK-025 5-dimension rubric, blind A/B packet generator, and 95% bootstrap CI
 
 from pathlib import Path
 import json
-import re
+import os
+import sqlite3
+import subprocess
 import sys
+from typing import Dict, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -23,11 +26,78 @@ def _count_ndjson_errors(pattern: str) -> int:
     if not files:
         return 0
     latest = files[-1]
-    errs = 0
+    tool_states: Dict[int, str] = {}
+    fallback_errs = 0
     for line in latest.read_text(encoding="utf-8", errors="replace").splitlines():
-        if '"state":"ERROR"' in line or '"error":' in line:
-            errs += 1
-    return errs
+        if not line.strip():
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if obj.get("event") == "step_update":
+            su = obj.get("step_update") or {}
+            if su.get("step_type") == "tool":
+                idx = su.get("step_index")
+                state = su.get("state", "")
+                if idx is not None:
+                    tool_states[int(idx)] = state
+                elif state == "ERROR":
+                    fallback_errs += 1
+    return fallback_errs + sum(1 for st in tool_states.values() if st == "ERROR")
+
+
+def _load_db_verdicts(db_path: Optional[Path] = None) -> Dict[Tuple[str, str], bool]:
+    """Read real verification_status verdicts per (task_id, arm_bucket) from usage DB."""
+    target_db = Path(db_path) if db_path is not None else ROOT / "data" / "usage.db"
+    if not target_db.is_file():
+        return {}
+    try:
+        conn = sqlite3.connect(f"file:{target_db.resolve().as_posix()}?mode=ro", uri=True)
+    except Exception:
+        conn = sqlite3.connect(str(target_db))
+    verdicts: Dict[Tuple[str, str], bool] = {}
+    try:
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(runs)")
+        cols = {row[1] for row in cur.fetchall()}
+        if not {"task_id", "arm", "verification_status"}.issubset(cols):
+            return {}
+        sim_filter = "WHERE COALESCE(is_simulation, 0) = 0" if "is_simulation" in cols else ""
+        cur.execute(f"SELECT task_id, arm, verification_status FROM runs {sim_filter} ORDER BY id ASC")
+        for tid, arm, status in cur.fetchall():
+            arm_l = (arm or "").lower()
+            bucket = "baseline" if arm_l == "baseline" else ("governed" if arm_l in ("icm", "icm-subagents", "governed", "delegation") else None)
+            if bucket:
+                verdicts[(tid, bucket)] = (status == "passed")
+    except Exception:
+        return {}
+    finally:
+        conn.close()
+    return verdicts
+
+
+def _run_pytest_target(target: Path, cwd: Path, pythonpath: Optional[Path] = None) -> bool:
+    """Run pytest on an explicit file or test directory without mutating caches."""
+    if not target.exists():
+        return False
+    env = os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    if pythonpath is not None:
+        env["PYTHONPATH"] = str(pythonpath)
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", str(target), "-q", "-p", "no:cacheprovider"],
+            cwd=str(cwd),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        return proc.returncode == 0
+    except Exception:
+        return False
 
 
 def _count_html_a11y_gaps(html_path: Path) -> int:
@@ -44,46 +114,59 @@ def _count_html_a11y_gaps(html_path: Path) -> int:
     return gaps
 
 
-def evaluate_all() -> dict:
+def evaluate_all(db_path: Optional[Path] = None) -> dict:
     paired_scores = []
     rows = []
+    db_verdicts = _load_db_verdicts(db_path)
 
     # EXP-001..004: Backend Python benchmarks in src/ + live NDJSON evidence
     backend_map = [
         ("EXP-001", ["src/slugify.py", "src/test_slugify.py"]),
         ("EXP-002", ["src/rate_limiter.py", "src/test_rate_limiter.py"]),
-        ("EXP-003", ["src/retry_transport.py", "src/test_retry_transport.py"]),
-        ("EXP-004", ["src/dead_code_finder.py", "src/test_dead_code_finder.py"]),
+        ("EXP-003", ["src/dead_code_finder.py", "src/test_dead_code_finder.py"]),
+        ("EXP-004", ["src/retry_transport.py", "src/test_retry_transport.py"]),
     ]
     for tid, targets in backend_map:
         b_errs = _count_ndjson_errors(f"live_{tid}_baseline_*.ndjson")
         g_errs = _count_ndjson_errors(f"live_{tid}_icm_*.ndjson")
-        # Baseline had out-of-scope path attempts when b_errs > 0
-        b_mod = targets + ([f"out_of_scope_{i}.py" for i in range(b_errs)])
-        g_mod = targets + ([f"out_of_scope_{i}.py" for i in range(g_errs)])
+        b_mod = list(targets)
+        g_mod = list(targets)
 
-        b_score = score_workspace(ROOT, target_files=targets, test_passed=True, lint_errors=b_errs, a11y_violations=None, modified_files=b_mod)
-        g_score = score_workspace(ROOT, target_files=targets, test_passed=True, lint_errors=g_errs, a11y_violations=None, modified_files=g_mod)
+        b_passed = db_verdicts.get((tid, "baseline"))
+        g_passed = db_verdicts.get((tid, "governed"))
+        if b_passed is None or g_passed is None:
+            src_passed = _run_pytest_target(ROOT / targets[1], cwd=ROOT)
+            if b_passed is None:
+                b_passed = src_passed
+            if g_passed is None:
+                g_passed = src_passed
+
+        b_score = score_workspace(ROOT, target_files=targets, test_passed=bool(b_passed), lint_errors=b_errs, a11y_violations=None, modified_files=b_mod)
+        g_score = score_workspace(ROOT, target_files=targets, test_passed=bool(g_passed), lint_errors=g_errs, a11y_violations=None, modified_files=g_mod)
         paired_scores.append((b_score, g_score))
         rows.append({"task_id": tid, "baseline": b_score, "governed": g_score})
 
-    # EXP-005..008: Full-Stack / UI Sandbox builds
+    # EXP-005..008: Full-Stack / UI Sandbox builds (only dedicated sandboxes that exist)
     ui_map = [
         ("EXP-005", ROOT / "sandbox/vanilla/index.html", ROOT / "sandbox/governed/index.html"),
-        ("EXP-006", ROOT / "sandbox/vanilla/index.html", ROOT / "sandbox/governed/index.html"),
+        ("EXP-006", ROOT / "sandbox/exp006_vanilla/index.html", ROOT / "sandbox/exp006_governed/index.html"),
         ("EXP-007", ROOT / "sandbox/exp007_vanilla/index.html", ROOT / "sandbox/exp007_governed/index.html"),
         ("EXP-008", ROOT / "sandbox/exp008_vanilla/index.html", ROOT / "sandbox/exp008_governed/index.html"),
     ]
     for tid, v_html, g_html in ui_map:
+        if not (v_html.is_file() and g_html.is_file()):
+            continue
         b_errs = _count_ndjson_errors(f"live_{tid}_baseline_*.ndjson")
         g_errs = _count_ndjson_errors(f"live_{tid}_icm_*.ndjson")
         b_a11y = _count_html_a11y_gaps(v_html)
         g_a11y = _count_html_a11y_gaps(g_html)
-        b_mod = ["index.html"] + ([f"extra_{i}" for i in range(b_errs)])
-        g_mod = ["index.html"]
+        b_mod = [p.relative_to(v_html.parent).as_posix() for p in sorted(v_html.parent.rglob("*")) if p.is_file()]
+        g_mod = [p.relative_to(g_html.parent).as_posix() for p in sorted(g_html.parent.rglob("*")) if p.is_file()]
+        b_passed = bool(db_verdicts.get((tid, "baseline"), False))
+        g_passed = bool(db_verdicts.get((tid, "governed"), False))
 
-        b_score = score_workspace(v_html.parent, target_files=["index.html"], test_passed=True, lint_errors=b_errs, a11y_violations=b_a11y, modified_files=b_mod)
-        g_score = score_workspace(g_html.parent, target_files=["index.html"], test_passed=True, lint_errors=g_errs, a11y_violations=g_a11y, modified_files=g_mod)
+        b_score = score_workspace(v_html.parent, target_files=["index.html"], test_passed=b_passed, lint_errors=b_errs, a11y_violations=b_a11y, modified_files=b_mod)
+        g_score = score_workspace(g_html.parent, target_files=["index.html"], test_passed=g_passed, lint_errors=g_errs, a11y_violations=g_a11y, modified_files=g_mod)
         paired_scores.append((b_score, g_score))
         rows.append({"task_id": tid, "baseline": b_score, "governed": g_score})
 
@@ -97,14 +180,23 @@ def evaluate_all() -> dict:
     for tid, slug, html_rel in mf_map:
         b_dir = ROOT / "sandbox" / "multi_file_runs" / f"{slug}_baseline"
         g_dir = ROOT / "sandbox" / "multi_file_runs" / f"{slug}_icm"
+        if not (b_dir.is_dir() and g_dir.is_dir()):
+            continue
         b_files = [p.relative_to(b_dir).as_posix() for p in b_dir.rglob("*") if p.is_file() and "__pycache__" not in p.parts and ".pytest_cache" not in p.parts]
         g_files = [p.relative_to(g_dir).as_posix() for p in g_dir.rglob("*") if p.is_file() and "__pycache__" not in p.parts and ".pytest_cache" not in p.parts]
 
         b_a11y = _count_html_a11y_gaps(b_dir / html_rel)
         g_a11y = _count_html_a11y_gaps(g_dir / html_rel)
 
-        b_score = score_workspace(b_dir, target_files=b_files, test_passed=True, lint_errors=0, a11y_violations=b_a11y, modified_files=b_files)
-        g_score = score_workspace(g_dir, target_files=g_files, test_passed=True, lint_errors=0, a11y_violations=g_a11y, modified_files=g_files)
+        b_passed = db_verdicts.get((tid, "baseline"))
+        if b_passed is None:
+            b_passed = _run_pytest_target(b_dir / "tests", cwd=b_dir, pythonpath=b_dir) if (b_dir / "tests").is_dir() else False
+        g_passed = db_verdicts.get((tid, "governed"))
+        if g_passed is None:
+            g_passed = _run_pytest_target(g_dir / "tests", cwd=g_dir, pythonpath=g_dir) if (g_dir / "tests").is_dir() else False
+
+        b_score = score_workspace(b_dir, target_files=b_files, test_passed=bool(b_passed), lint_errors=0, a11y_violations=b_a11y, modified_files=b_files)
+        g_score = score_workspace(g_dir, target_files=g_files, test_passed=bool(g_passed), lint_errors=0, a11y_violations=g_a11y, modified_files=g_files)
         paired_scores.append((b_score, g_score))
         rows.append({"task_id": tid, "baseline": b_score, "governed": g_score})
 

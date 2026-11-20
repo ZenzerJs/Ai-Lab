@@ -243,15 +243,17 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
             <div>
               <span>Baseline defect runs</span>
               <strong>
-                {data.operational.summary.baseline.defect_runs} /{" "}
-                {data.operational.summary.baseline.runs}
+                {data.operational.summary.baseline.defect_runs != null
+                  ? `${data.operational.summary.baseline.defect_runs} / ${data.operational.summary.baseline.runs}`
+                  : "Not tracked"}
               </strong>
             </div>
             <div>
               <span>Governed defect runs</span>
               <strong>
-                {data.operational.summary.icm.defect_runs} /{" "}
-                {data.operational.summary.icm.runs}
+                {data.operational.summary.icm.defect_runs != null
+                  ? `${data.operational.summary.icm.defect_runs} / ${data.operational.summary.icm.runs}`
+                  : "Not tracked"}
               </strong>
             </div>
             <div>
@@ -274,17 +276,34 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
         <section className="panel operational-panel">
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">MULTI-FILE REPOSITORY OUTLINES & QUALITY JUDGE</span>
-              <h2>6–8 file outlines (EXP-009..011) & 5-dimension rubric</h2>
+              <span className="eyebrow">
+                {data.quality_rubric.multi_file_outlines?.length
+                  ? "MULTI-FILE REPOSITORY OUTLINES & QUALITY JUDGE"
+                  : "5-DIMENSION QUALITY JUDGE"}
+              </span>
+              <h2>
+                5-dimension quality rubric
+                {data.quality_rubric.multi_file_outlines?.length
+                  ? " & multi-file outlines"
+                  : ""}
+              </h2>
               <p>
-                Evaluated above the ~150 LOC / 2+ file break-even threshold with pre-registered 0–25 quality scoring
+                Pre-registered 0–25 quality scoring across paired benchmark tasks
               </p>
             </div>
-            <span className="badge badge-green">
-              +{data.quality_rubric.quality_ci.normalized_pct.mean_delta?.toFixed(1)}% quality (95% CI: +
-              {data.quality_rubric.quality_ci.normalized_pct.ci_95?.[0]}% to +
-              {data.quality_rubric.quality_ci.normalized_pct.ci_95?.[1]}%)
-            </span>
+            {(() => {
+              const norm = data.quality_rubric.quality_ci.normalized_pct;
+              const fmtSigned = (v: number, digits = 1) =>
+                `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`;
+              return norm.mean_delta != null ? (
+                <span className="badge badge-green">
+                  {fmtSigned(norm.mean_delta)}% quality
+                  {norm.ci_95
+                    ? ` (95% CI: ${fmtSigned(norm.ci_95[0])}% to ${fmtSigned(norm.ci_95[1])}%)`
+                    : ""}
+                </span>
+              ) : null;
+            })()}
           </div>
           {data.quality_rubric.multi_file_outlines?.length ? (
             <div
@@ -328,7 +347,7 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
           <div
             className="table-scroll"
             role="region"
-            aria-label="5-dimension quality rubric scores across EXP-001 through EXP-011"
+            aria-label="5-dimension quality rubric scores"
             tabIndex={0}
           >
             <table className="data-table">
@@ -364,7 +383,19 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
             </table>
           </div>
           <p className="panel-note">
-            Dimensions (0–5 each): Correctness, Engineering Practices, Maintainability (AST LOC), Process Discipline (scope & tool hygiene), and Design/A11y (+1.00 pt mean gain, 95% CI: +0.29 to +1.71).
+            Dimensions (0–5 each): Correctness, Engineering Practices,
+            Maintainability (AST LOC), Process Discipline (scope & tool
+            hygiene), and Design/A11y
+            {(() => {
+              const designCi = data.quality_rubric.quality_ci.design;
+              if (!designCi || designCi.mean_delta == null) return "";
+              const fmtPt = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
+              const ciStr = designCi.ci_95
+                ? `, 95% CI: ${fmtPt(designCi.ci_95[0])} to ${fmtPt(designCi.ci_95[1])}`
+                : "";
+              return ` (${fmtPt(designCi.mean_delta)} pt mean gain${ciStr})`;
+            })()}
+            .
           </p>
         </section>
       )}
