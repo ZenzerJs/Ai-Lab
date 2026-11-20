@@ -362,55 +362,125 @@ export function Overview({ data }: { data: DashboardPayload }) {
           </a>
         </aside>
       </div>
-      {data.quality_rubric?.has_data && (
-        <section
-          className="panel operational-panel"
-          aria-labelledby="quality-rubric-title"
-        >
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">5-DIMENSION QUALITY & BREAK-EVEN</span>
-              <h2 id="quality-rubric-title">
-                Beyond token cost: quality CIs & multi-file outlines
-              </h2>
-              <p>
-                {data.quality_rubric.quality_ci.sample_count} paired tasks (EXP-001..EXP-011) · Pre-registered 0–25 rubric & 6–8 file outlines
-              </p>
-            </div>
-            <span className="badge badge-green">
-              <ShieldCheck size={13} />
-              95% CI above zero
-            </span>
-          </div>
-          <div className="operational-stats">
-            <div>
-              <span>Mean quality gain (ICM vs Baseline)</span>
-              <strong className="text-sea">
-                +{data.quality_rubric.quality_ci.normalized_pct.mean_delta?.toFixed(1)}%
-              </strong>
-              {data.quality_rubric.quality_ci.normalized_pct.ci_95 && (
-                <span>
-                  95% CI: +{data.quality_rubric.quality_ci.normalized_pct.ci_95[0]}% to +
-                  {data.quality_rubric.quality_ci.normalized_pct.ci_95[1]}%
-                </span>
-              )}
-            </div>
-            <div>
-              <span>Multi-file outline savings (EXP-009..011)</span>
-              <strong className="text-sea">+56.3%</strong>
-              <span>Cold-start normalized ($0.6814 → $0.2981 · +5.0% raw)</span>
-            </div>
-            <div>
-              <span>Tool & path execution errors</span>
-              <strong>
-                {data.quality_rubric.tool_errors?.icm ?? 1} vs{" "}
-                {data.quality_rubric.tool_errors?.baseline ?? 11}
-              </strong>
-              <span>90.9% reduction in live NDJSON logs</span>
-            </div>
-          </div>
-        </section>
-      )}
+      {data.quality_rubric?.has_data &&
+        (() => {
+          const rubric = data.quality_rubric;
+          const pctCi = rubric.quality_ci.normalized_pct;
+          const outlines = rubric.multi_file_outlines;
+          const outlineSummary =
+            outlines && outlines.length > 0
+              ? (() => {
+                  const totalBase = outlines.reduce(
+                    (acc, item) => acc + item.baseline_cost_usd,
+                    0,
+                  );
+                  const totalNorm = outlines.reduce(
+                    (acc, item) => acc + item.icm_cost_normalized_usd,
+                    0,
+                  );
+                  const totalRaw = outlines.reduce(
+                    (acc, item) => acc + item.icm_cost_raw_usd,
+                    0,
+                  );
+                  const normPct =
+                    totalBase > 0
+                      ? ((totalBase - totalNorm) / totalBase) * 100
+                      : null;
+                  const rawPct =
+                    totalBase > 0
+                      ? ((totalBase - totalRaw) / totalBase) * 100
+                      : null;
+                  return {
+                    count: outlines.length,
+                    totalBase,
+                    totalNorm,
+                    normPct,
+                    rawPct,
+                  };
+                })()
+              : null;
+          const fmtSigned = (v: number, digits = 1) =>
+            `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`;
+          const ciAboveZero = Boolean(pctCi.ci_95 && pctCi.ci_95[0] > 0);
+          return (
+            <section
+              className="panel operational-panel"
+              aria-labelledby="quality-rubric-title"
+            >
+              <div className="panel-heading">
+                <div>
+                  <span className="eyebrow">
+                    5-DIMENSION QUALITY & BREAK-EVEN
+                  </span>
+                  <h2 id="quality-rubric-title">
+                    Beyond token cost: quality CIs
+                    {outlineSummary ? " & multi-file outlines" : ""}
+                  </h2>
+                  <p>
+                    {rubric.quality_ci.sample_count} paired tasks ·
+                    Pre-registered 0–25 rubric
+                    {outlineSummary ? " & multi-file outlines" : ""}
+                  </p>
+                </div>
+                {ciAboveZero && (
+                  <span className="badge badge-green">
+                    <ShieldCheck size={13} />
+                    95% CI above zero
+                  </span>
+                )}
+              </div>
+              <div className="operational-stats">
+                <div>
+                  <span>Mean quality gain (ICM vs Baseline)</span>
+                  <strong className="text-sea">
+                    {pctCi.mean_delta != null
+                      ? `${fmtSigned(pctCi.mean_delta)}%`
+                      : "—"}
+                  </strong>
+                  {pctCi.ci_95 && (
+                    <span>
+                      95% CI: {fmtSigned(pctCi.ci_95[0])}% to{" "}
+                      {fmtSigned(pctCi.ci_95[1])}%
+                    </span>
+                  )}
+                </div>
+                {outlineSummary && (
+                  <div>
+                    <span>
+                      Multi-file outline savings ({outlineSummary.count} tasks)
+                    </span>
+                    <strong className="text-sea">
+                      {outlineSummary.normPct !== null
+                        ? `${fmtSigned(outlineSummary.normPct)}%`
+                        : "—"}
+                    </strong>
+                    <span>
+                      Normalized ({formatCurrency(outlineSummary.totalBase)} →{" "}
+                      {formatCurrency(outlineSummary.totalNorm)}
+                      {outlineSummary.rawPct !== null
+                        ? ` · ${fmtSigned(outlineSummary.rawPct)}% raw`
+                        : ""}
+                      )
+                    </span>
+                  </div>
+                )}
+                {rubric.tool_errors != null && (
+                  <div>
+                    <span>Tool & path execution errors</span>
+                    <strong>
+                      {rubric.tool_errors.icm} vs {rubric.tool_errors.baseline}
+                    </strong>
+                    <span>
+                      {rubric.tool_errors.reduction_percent != null
+                        ? `${rubric.tool_errors.reduction_percent.toFixed(1)}% reduction in DB-linked NDJSON logs`
+                        : "Tracked in DB-linked NDJSON logs"}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </section>
+          );
+        })()}
       <section className="explore-strip">
         <div className="explore-strip-icon">
           <SlidersIcon />

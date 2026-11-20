@@ -2,7 +2,7 @@ export interface OperationalArmSummary {
   runs: number;
   total_turns: number;
   total_duration_seconds: number;
-  defect_runs: number;
+  defect_runs: number | null;
 }
 
 export interface OperationalTaskArm {
@@ -69,6 +69,10 @@ export interface RunRecord {
   verification_status?: 'passed' | 'failed' | 'evaluator_error' | 'not_run' | string;
   evidence_ref?: string;
   notes?: string;
+  tool_calls_count?: number | null;
+  tool_errors_count?: number | null;
+  max_consecutive_tool_streak?: number | null;
+  loop_detected?: boolean | number | null;
 }
 
 export interface ArmStats {
@@ -76,6 +80,8 @@ export interface ArmStats {
   scheduled_count?: number;
   completed_count?: number;
   verified_count?: number;
+  passed_count?: number;
+  pass_rate?: number | null;
   failed_count?: number;
   excluded_count?: number;
   cost_eligible_count?: number;
@@ -95,6 +101,11 @@ export interface ArmStats {
   mean_num_turns: number;
   mean_duration_seconds: number;
   cache_hit_ratio: number;
+  cost_per_passing_patch_usd?: number | null;
+  tokens_per_passing_patch?: number | null;
+  total_tool_calls?: number;
+  total_tool_errors?: number;
+  loop_runs_count?: number;
   runs: RunRecord[];
 }
 
@@ -316,9 +327,11 @@ export interface QualityRubricBlock {
   tool_errors?: {
     baseline: number;
     icm: number;
-    reduction_percent: number;
-  };
+    reduction_percent: number | null;
+  } | null;
 }
+
+export type QualityRubricData = QualityRubricBlock;
 
 export interface DashboardPayload {
   operational?: OperationalBenchmark;

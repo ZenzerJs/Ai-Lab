@@ -95,28 +95,48 @@ def sanitize_export_payload(obj: Any) -> Any:
     return obj
 
 
-def build_operational_block() -> Dict[str, Any]:
+def build_operational_block(ops_db_path: Optional[Path] = None) -> Dict[str, Any]:
     """Build the EXP-005 operational benchmark block from the isolated ops DB.
     Returns has_data=False (valid empty structure) when the DB is absent —
     operational runs carry turns/duration/outcome only; no token telemetry exists
     for the FreeBuff provider, and none is invented.
     """
-    if not OPS_DB_PATH.exists():
+    db_file = Path(ops_db_path) if ops_db_path is not None else OPS_DB_PATH
+    if not db_file.exists():
         return {"has_data": False, "runs": [], "tasks": []}
-    conn = sqlite3.connect(str(OPS_DB_PATH))
+    conn = sqlite3.connect(str(db_file))
     conn.row_factory = sqlite3.Row
     try:
         cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(runs)")
+        cols = {row[1] for row in cursor.fetchall()}
+        defect_col = next(
+            (c for c in ("is_defect", "defect", "has_defect", "defect_runs", "verification_status") if c in cols),
+            None,
+        )
+        extra_select = f", {defect_col}" if defect_col else ""
         cursor.execute(
-            "SELECT task_id, arm, run_index, num_turns, duration_seconds, timestamp "
+            f"SELECT task_id, arm, run_index, num_turns, duration_seconds, timestamp{extra_select} "
             "FROM runs WHERE task_id LIKE 'EXP-005%' ORDER BY task_id, arm, run_index"
         )
-        runs = [dict(r) for r in cursor.fetchall()]
+        raw_rows = [dict(r) for r in cursor.fetchall()]
     finally:
         conn.close()
 
-    if not runs:
+    if not raw_rows:
         return {"has_data": False, "runs": [], "tasks": []}
+
+    runs = [
+        {
+            "task_id": r["task_id"],
+            "arm": r["arm"],
+            "run_index": r["run_index"],
+            "num_turns": r["num_turns"],
+            "duration_seconds": r["duration_seconds"],
+            "timestamp": r["timestamp"],
+        }
+        for r in raw_rows
+    ]
 
     # Aggregate per task/arm
     agg: Dict[str, Dict[str, Dict[str, float]]] = {}
@@ -146,6 +166,28 @@ def build_operational_block() -> Dict[str, Any]:
                 tot[arm]["duration"] += a["duration"]
         tasks_out.append(entry)
 
+    def _arm_defect_count(arm_name: str) -> Optional[int]:
+        if defect_col is None:
+            return None
+        arm_rows = [r for r in raw_rows if (r.get("arm") or "").lower() == arm_name]
+        if not arm_rows:
+            return None
+        if defect_col == "verification_status":
+            verdicts = [
+                r.get("verification_status")
+                for r in arm_rows
+                if r.get("verification_status") in ("passed", "failed", "evaluator_error")
+            ]
+            if not verdicts:
+                return None
+            return sum(1 for v in verdicts if v in ("failed", "evaluator_error"))
+        vals = [r.get(defect_col) for r in arm_rows if r.get(defect_col) is not None]
+        if not vals:
+            return None
+        if defect_col == "defect_runs":
+            return sum(int(v) for v in vals)
+        return sum(1 for v in vals if bool(v))
+
     bn, bturns, bdur = tot["baseline"]["n"], tot["baseline"]["turns"], tot["baseline"]["duration"]
     icm_n, iturns, idur = tot["icm"]["n"], tot["icm"]["turns"], tot["icm"]["duration"]
     summary = {
@@ -154,13 +196,13 @@ def build_operational_block() -> Dict[str, Any]:
             "runs": bn,
             "total_turns": bturns,
             "total_duration_seconds": round(bdur, 1),
-            "defect_runs": 2,
+            "defect_runs": _arm_defect_count("baseline"),
         },
         "icm": {
             "runs": icm_n,
             "total_turns": iturns,
             "total_duration_seconds": round(idur, 1),
-            "defect_runs": 0,
+            "defect_runs": _arm_defect_count("icm"),
         },
     }
     if bdur > 0:
@@ -244,14 +286,14 @@ def build_headline_block(
                 "ci95": ci,
             })
 
-    # H2: Pass / Defect rate
+    # H2: Pass / Defect rate (only emit when defect_runs is genuinely tracked)
     if operational and operational.get("has_data") and operational.get("summary"):
         summ = operational["summary"]
-        b_defects = summ.get("baseline", {}).get("defect_runs", 0)
+        b_defects = summ.get("baseline", {}).get("defect_runs")
         b_runs = summ.get("baseline", {}).get("runs", 0)
-        i_defects = summ.get("icm", {}).get("defect_runs", 0)
+        i_defects = summ.get("icm", {}).get("defect_runs")
         i_runs = summ.get("icm", {}).get("runs", 0)
-        if b_runs > 0 and i_runs > 0:
+        if b_defects is not None and i_defects is not None and b_runs > 0 and i_runs > 0:
             stats.append({
                 "id": "defect_rate",
                 "label": "Defect Rate (Quality)",
@@ -300,6 +342,148 @@ def build_headline_block(
         "sentence": sentence,
         "stats": stats,
     }
+
+
+def _resolve_evidence_path(evidence_ref: Optional[str]) -> Optional[Path]:
+    """Resolve a DB evidence_ref path cleanly if and only if the file exists on disk."""
+    if not evidence_ref:
+        return None
+    raw = str(evidence_ref).strip()
+    if not raw:
+        return None
+    norm = raw.replace("\\", "/")
+    candidates = [Path(raw), Path(norm)]
+    if not Path(norm).is_absolute():
+        candidates.append(WORKSPACE_ROOT / norm)
+    for cand in candidates:
+        try:
+            if cand.is_file():
+                return cand
+        except OSError:
+            continue
+    return None
+
+
+def _count_ndjson_tool_errors(ndjson_path: Path) -> Optional[int]:
+    """Count ERROR tool steps in a DB-linked NDJSON file, deduped by step_index."""
+    try:
+        lines = ndjson_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+
+    tool_states: Dict[int, str] = {}
+    fallback_errs = 0
+    parsed_lines = 0
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        parsed_lines += 1
+        if obj.get("event") == "step_update":
+            su = obj.get("step_update") or {}
+            if su.get("step_type") == "tool":
+                idx = su.get("step_index")
+                state = su.get("state", "")
+                if idx is not None:
+                    tool_states[int(idx)] = state
+                elif state == "ERROR":
+                    fallback_errs += 1
+
+    if parsed_lines == 0:
+        return None
+    return fallback_errs + sum(1 for st in tool_states.values() if st == "ERROR")
+
+
+def _compute_db_tool_errors(raw_runs: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Compute tool errors strictly from DB-linked runs (column or linked NDJSON)."""
+    b_errors = 0
+    i_errors = 0
+    telemetry_runs = 0
+    for r in raw_runs:
+        if r.get("is_simulation"):
+            continue
+        arm_l = (r.get("arm") or "").lower()
+        if arm_l == "baseline":
+            bucket = "baseline"
+        elif arm_l in ("icm", "icm-subagents", "governed", "delegation"):
+            bucket = "icm"
+        else:
+            continue
+
+        err_count: Optional[int] = None
+        if r.get("tool_errors_count") is not None:
+            err_count = int(r["tool_errors_count"])
+        else:
+            ev_path = _resolve_evidence_path(r.get("evidence_ref"))
+            if ev_path is not None:
+                err_count = _count_ndjson_tool_errors(ev_path)
+
+        if err_count is None:
+            continue
+
+        telemetry_runs += 1
+        if bucket == "baseline":
+            b_errors += err_count
+        else:
+            i_errors += err_count
+
+    if telemetry_runs == 0:
+        return None
+
+    if b_errors > 0:
+        reduction: Optional[float] = round((b_errors - i_errors) / b_errors * 100.0, 1)
+    elif i_errors == 0:
+        reduction = 0.0
+    else:
+        reduction = None
+
+    return {
+        "baseline": b_errors,
+        "icm": i_errors,
+        "reduction_percent": reduction,
+    }
+
+
+def _build_multi_file_outlines(cum_tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Build multi-file outline summaries strictly from DB-backed EXP-009..011 tasks."""
+    outline_meta = {
+        "EXP-009": ("Event-driven job queue & DAG", 7),
+        "EXP-010": ("Knowledge graph & BM25 search", 8),
+        "EXP-011": ("Policy-enforced API gateway", 6),
+    }
+    items: List[Dict[str, Any]] = []
+    for t in cum_tasks:
+        tid = t.get("task_id")
+        if tid not in outline_meta:
+            continue
+        arms = t.get("arms") or {}
+        b_arm = arms.get("baseline")
+        gov_key = "icm-subagents" if "icm-subagents" in arms else ("icm" if "icm" in arms else None)
+        g_arm = arms.get(gov_key) if gov_key else None
+        if not b_arm or not g_arm:
+            continue
+        b_cost = b_arm.get("mean_cost_usd")
+        g_cost = g_arm.get("mean_cost_usd")
+        if b_cost is None or g_cost is None:
+            continue
+        title, n_files = outline_meta[tid]
+        raw_pct = round((b_cost - g_cost) / b_cost * 100.0, 1) if b_cost > 0 else 0.0
+        items.append({
+            "task_id": tid,
+            "title": title,
+            "files": n_files,
+            "baseline_turns": b_arm.get("mean_num_turns", 0),
+            "icm_turns": g_arm.get("mean_num_turns", 0),
+            "baseline_cost_usd": b_cost,
+            "icm_cost_raw_usd": g_cost,
+            "icm_cost_normalized_usd": g_cost,
+            "raw_savings_percent": raw_pct,
+            "normalized_savings_percent": raw_pct,
+        })
+    return items
 
 
 def build_data_payload(
@@ -452,51 +636,18 @@ def build_data_payload(
         quality_block = None
         try:
             from evaluate_all_quality import evaluate_all
-            q_rep = evaluate_all()
-            q_Rep_outlines = [
-                {
-                    "task_id": "EXP-009",
-                    "title": "Event-driven job queue & DAG",
-                    "files": 7,
-                    "baseline_turns": 37,
-                    "icm_turns": 28,
-                    "baseline_cost_usd": 0.2769,
-                    "icm_cost_raw_usd": 0.3580,
-                    "icm_cost_normalized_usd": 0.1585,
-                    "raw_savings_percent": -29.3,
-                    "normalized_savings_percent": 42.8,
-                },
-                {
-                    "task_id": "EXP-010",
-                    "title": "Knowledge graph & BM25 search",
-                    "files": 8,
-                    "baseline_turns": 15,
-                    "icm_turns": 9,
-                    "baseline_cost_usd": 0.1840,
-                    "icm_cost_raw_usd": 0.1222,
-                    "icm_cost_normalized_usd": 0.0580,
-                    "raw_savings_percent": 33.6,
-                    "normalized_savings_percent": 68.5,
-                },
-                {
-                    "task_id": "EXP-011",
-                    "title": "Policy-enforced API gateway",
-                    "files": 6,
-                    "baseline_turns": 20,
-                    "icm_turns": 12,
-                    "baseline_cost_usd": 0.2206,
-                    "icm_cost_raw_usd": 0.1670,
-                    "icm_cost_normalized_usd": 0.0815,
-                    "raw_savings_percent": 24.3,
-                    "normalized_savings_percent": 63.0,
-                },
-            ]
+            try:
+                q_rep = evaluate_all(db_path=db_path) if db_path is not None else evaluate_all()
+            except TypeError:
+                q_rep = evaluate_all()
+            outlines = _build_multi_file_outlines(cum.get("tasks", []))
+            tool_errors = _compute_db_tool_errors(raw_runs)
             quality_block = {
-                "has_data": True,
+                "has_data": bool(q_rep.get("tasks")),
                 "tasks": q_rep["tasks"],
                 "quality_ci": q_rep["quality_ci"],
-                "multi_file_outlines": q_Rep_outlines,
-                "tool_errors": {"baseline": 11, "icm": 1, "reduction_percent": 90.9},
+                "multi_file_outlines": outlines,
+                "tool_errors": tool_errors,
             }
         except Exception:
             quality_block = None
