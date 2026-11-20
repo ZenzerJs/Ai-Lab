@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -9,7 +10,12 @@ import {
   ShieldCheck,
   TrendingDown,
 } from "lucide-react";
-import { DashboardPayload, HeadlineStat } from "../../types";
+import {
+  DashboardPayload,
+  HeadlineStat,
+  RunRecord,
+  TaskSummaryItem,
+} from "../../types";
 import { formatCurrency, formatTokens } from "../../lib/formatters";
 import { experimentNames, finite, governedArm } from "../../lib/workspace";
 
@@ -106,13 +112,16 @@ function ContextOrbit() {
 
 function Metric({ stat }: { stat: HeadlineStat }) {
   const isCost = stat.id === "cost_reduction";
+  const isToken = stat.id === "tokens_per_pass";
   const isQuality = stat.id === "defect_rate";
-  const Icon = isCost ? TrendingDown : isQuality ? ShieldCheck : Cpu;
+  const Icon = isCost || isToken ? TrendingDown : isQuality ? ShieldCheck : Cpu;
   const label = isCost
     ? "Cost reduction"
-    : isQuality
-      ? "Governed defect rate"
-      : "Governed cache hit rate";
+    : isToken
+      ? "Tokens / passing patch"
+      : isQuality
+        ? "Governed defect rate"
+        : "Governed cache hit rate";
   return (
     <article className="metric-card">
       <div className="metric-top">
@@ -120,10 +129,12 @@ function Metric({ stat }: { stat: HeadlineStat }) {
         <Icon size={19} />
       </div>
       <div
-        className={`metric-value ${isCost && finite(stat.value) && stat.value < 0 ? "text-rust" : ""}`}
+        className={`metric-value ${(isCost || isToken) && finite(stat.value) && stat.value < 0 ? "text-rust" : ""}`}
       >
         {finite(stat.value) ? `${stat.value.toFixed(1)}%` : stat.value}
-        <span className="metric-tag">{isQuality ? "Quality" : "Recorded"}</span>
+        <span className="metric-tag">
+          {isQuality ? "Quality" : isToken ? "All models" : "Recorded"}
+        </span>
       </div>
       <div className="metric-comparison">
         <span>
@@ -134,7 +145,7 @@ function Metric({ stat }: { stat: HeadlineStat }) {
         </span>
       </div>
       <div className="metric-foot">
-        {stat.source} · {stat.n_tasks} tasks
+        {stat.source} · {stat.n_tasks} {isToken ? "series" : "tasks"}
         {stat.ci95 && (
           <span className="confidence">
             95% CI: {stat.ci95[0]}% to {stat.ci95[1]}%
@@ -146,11 +157,21 @@ function Metric({ stat }: { stat: HeadlineStat }) {
 }
 
 export function Overview({ data }: { data: DashboardPayload }) {
+  const [benchModel, setBenchModel] = useState("all");
   const measured =
     !data.is_demo_report &&
     !data.is_simulation &&
     Boolean(data.cumulative?.has_measured_data);
   const tasks = data.tasks || [];
+  const taskModel = (task: TaskSummaryItem) =>
+    task.model || task.arms.baseline?.model || governedArm(task)?.model || "";
+  const taskKey = (task: TaskSummaryItem) =>
+    task.series_id || `${task.task_id}::${taskModel(task)}`;
+  const multiModelTasks = new Set(
+    tasks
+      .filter((t) => tasks.filter((o) => o.task_id === t.task_id).length > 1)
+      .map((t) => t.task_id),
+  );
   const pricedTasks = tasks.filter(
     (task) =>
       finite(task.arms.baseline?.mean_cost_usd) ||
@@ -162,6 +183,97 @@ export function Overview({ data }: { data: DashboardPayload }) {
       (finite(task.arms.baseline?.tokens_per_passing_patch) ||
         finite(governedArm(task)?.tokens_per_passing_patch)),
   );
+  const unpricedModels = useMemo(
+    () =>
+      Array.from(
+        new Set(tokenBenchTasks.map(taskModel).filter(Boolean)),
+      ).sort(),
+    [tokenBenchTasks],
+  );
+  const visibleTokenBenchTasks =
+    benchModel === "all"
+      ? tokenBenchTasks
+      : tokenBenchTasks.filter((task) => taskModel(task) === benchModel);
+  const modelSummaries = useMemo(() => {
+    const byModel = new Map<string, RunRecord[]>();
+    for (const run of data.runs || []) {
+      if (run.source_kind === "imported" || !run.model) continue;
+      const list = byModel.get(run.model) || [];
+      list.push(run);
+      byModel.set(run.model, list);
+    }
+    const runTokens = (r: RunRecord) =>
+      finite(r.total_tokens)
+        ? r.total_tokens
+        : (finite(r.input_tokens) ? r.input_tokens : 0) +
+          (finite(r.output_tokens) ? r.output_tokens : 0);
+    const sumUsd = (runs: RunRecord[]) => {
+      const priced = runs.filter(
+        (r) => r.is_comparison_eligible && finite(r.cost_usd),
+      );
+      return priced.length > 0
+        ? priced.reduce((s, r) => s + (r.cost_usd as number), 0)
+        : null;
+    };
+    return Array.from(byModel.keys())
+      .sort()
+      .map((model) => {
+        const runs = byModel.get(model)!;
+        const baseRuns = runs.filter((r) => r.arm === "baseline");
+        const govRuns = runs.filter((r) => r.arm !== "baseline");
+        const basePassed = baseRuns.filter(
+          (r) => r.verification_status === "passed",
+        ).length;
+        const govPassed = govRuns.filter(
+          (r) => r.verification_status === "passed",
+        ).length;
+        const baseTokPass =
+          basePassed > 0
+            ? baseRuns.reduce((s, r) => s + runTokens(r), 0) / basePassed
+            : null;
+        const govTokPass =
+          govPassed > 0
+            ? govRuns.reduce((s, r) => s + runTokens(r), 0) / govPassed
+            : null;
+        const tokDeltaPct =
+          baseTokPass != null && baseTokPass > 0 && govTokPass != null
+            ? ((baseTokPass - govTokPass) / baseTokPass) * 100
+            : null;
+        const baseTools = baseRuns.reduce(
+          (s, r) => s + (finite(r.tool_calls_count) ? r.tool_calls_count : 0),
+          0,
+        );
+        const baseErrors = baseRuns.reduce(
+          (s, r) => s + (finite(r.tool_errors_count) ? r.tool_errors_count : 0),
+          0,
+        );
+        const govTools = govRuns.reduce(
+          (s, r) => s + (finite(r.tool_calls_count) ? r.tool_calls_count : 0),
+          0,
+        );
+        const govErrors = govRuns.reduce(
+          (s, r) => s + (finite(r.tool_errors_count) ? r.tool_errors_count : 0),
+          0,
+        );
+        return {
+          model,
+          liveRuns: runs.length,
+          baseTotal: baseRuns.length,
+          basePassed,
+          govTotal: govRuns.length,
+          govPassed,
+          baseTokPass,
+          govTokPass,
+          tokDeltaPct,
+          baseTools,
+          baseErrors,
+          govTools,
+          govErrors,
+          baseUsd: sumUsd(baseRuns),
+          govUsd: sumUsd(govRuns),
+        };
+      });
+  }, [data.runs]);
   const maxCost = Math.max(
     0.001,
     ...pricedTasks
@@ -173,7 +285,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
   );
   const maxBenchTokens = Math.max(
     1,
-    ...tokenBenchTasks
+    ...visibleTokenBenchTasks
       .flatMap((task) => [
         task.arms.baseline?.tokens_per_passing_patch,
         governedArm(task)?.tokens_per_passing_patch,
@@ -231,6 +343,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
       <div className="section-heading results-heading">
         <h2>What the evidence says</h2>
         <span>
+          {modelSummaries.length > 1 ? `${modelSummaries.length} models · ` : ""}
           {pricedTasks.length} priced
           {tokenBenchTasks.length
             ? ` · ${tokenBenchTasks.length} token-bench`
@@ -293,11 +406,17 @@ export function Overview({ data }: { data: DashboardPayload }) {
             {pricedTasks.map((task) => {
               const baseline = task.arms.baseline?.mean_cost_usd,
                 governed = governedArm(task)?.mean_cost_usd;
+              const mdl = taskModel(task);
               return (
-                <div className="chart-row" key={task.task_id}>
+                <div className="chart-row" key={taskKey(task)}>
                   <a href="#tasks" className="chart-label">
                     {task.task_id}
-                    <span>{experimentNames[task.task_id] || "Experiment"}</span>
+                    <span>
+                      {experimentNames[task.task_id] || "Experiment"}
+                      {multiModelTasks.has(task.task_id) && mdl
+                        ? ` · ${mdl}`
+                        : ""}
+                    </span>
                   </a>
                   <div className="chart-bars">
                     <div className="bar-line">
@@ -393,6 +512,87 @@ export function Overview({ data }: { data: DashboardPayload }) {
           </a>
         </aside>
       </div>
+      {modelSummaries.length > 1 && (
+        <section
+          className="panel operational-panel"
+          aria-labelledby="cross-model-title"
+        >
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">CROSS-MODEL BREAKDOWN</span>
+              <h2 id="cross-model-title">
+                Performance & token efficiency by model
+              </h2>
+              <p>
+                Live non-imported runs grouped by model; tokens/pass includes
+                tokens spent on failed runs.
+              </p>
+            </div>
+            <span className="badge badge-purple">
+              {modelSummaries.length} models · {liveRunsCount} live runs
+            </span>
+          </div>
+          <div
+            className="table-scroll"
+            role="region"
+            aria-label="Cross-model performance summary"
+            tabIndex={0}
+          >
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">Model</th>
+                  <th scope="col">Live runs</th>
+                  <th scope="col">Pass (Base / Gov)</th>
+                  <th scope="col">Tokens / pass (Base → Gov)</th>
+                  <th scope="col">Δ Tokens</th>
+                  <th scope="col">Tool calls (err)</th>
+                  <th scope="col">Priced USD (Base → Gov)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {modelSummaries.map((m) => (
+                  <tr key={m.model}>
+                    <th scope="row">{m.model}</th>
+                    <td>{m.liveRuns}</td>
+                    <td>
+                      {m.basePassed}/{m.baseTotal} / {m.govPassed}/{m.govTotal}
+                    </td>
+                    <td>
+                      {m.baseTokPass != null ? formatTokens(m.baseTokPass) : "—"}{" "}
+                      → {m.govTokPass != null ? formatTokens(m.govTokPass) : "—"}
+                    </td>
+                    <td>
+                      {m.tokDeltaPct != null ? (
+                        <span
+                          className={
+                            m.tokDeltaPct >= 0 ? "text-sea" : "text-rust"
+                          }
+                        >
+                          {m.tokDeltaPct >= 0
+                            ? `−${m.tokDeltaPct.toFixed(1)}%`
+                            : `+${Math.abs(m.tokDeltaPct).toFixed(1)}%`}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td>
+                      {m.baseTools} ({m.baseErrors}) / {m.govTools} ({m.govErrors}
+                      )
+                    </td>
+                    <td>
+                      {m.baseUsd != null && m.govUsd != null
+                        ? `${formatCurrency(m.baseUsd)} → ${formatCurrency(m.govUsd)}`
+                        : "Unpriced"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
       {tokenBenchTasks.length > 0 && (
         <section
           className="panel operational-panel comparison-panel"
@@ -401,17 +601,45 @@ export function Overview({ data }: { data: DashboardPayload }) {
           <div className="panel-heading">
             <div>
               <h2 id="token-bench-title">Multi-file benchmarks</h2>
-              <p>Tokens per passing patch (unpriced model)</p>
+              <p>
+                Tokens per passing patch (unpriced{" "}
+                {unpricedModels.length > 1 ? "models" : "model"})
+              </p>
             </div>
-            <div className="chart-legend">
-              <span>
-                <i className="legend-baseline" />
-                Baseline
-              </span>
-              <span>
-                <i className="legend-governed" />
-                Governed
-              </span>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "14px",
+                flexWrap: "wrap",
+              }}
+            >
+              {unpricedModels.length > 1 && (
+                <label className="select-field">
+                  Model
+                  <select
+                    value={benchModel}
+                    onChange={(event) => setBenchModel(event.target.value)}
+                  >
+                    <option value="all">All models</option>
+                    {unpricedModels.map((mdl) => (
+                      <option key={mdl} value={mdl}>
+                        {mdl}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <div className="chart-legend">
+                <span>
+                  <i className="legend-baseline" />
+                  Baseline
+                </span>
+                <span>
+                  <i className="legend-governed" />
+                  Governed
+                </span>
+              </div>
             </div>
           </div>
           <div
@@ -419,7 +647,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
             role="group"
             aria-label="Tokens per passing patch comparison for multi-file benchmarks."
           >
-            {tokenBenchTasks.map((task) => {
+            {visibleTokenBenchTasks.map((task) => {
               const bArm = task.arms.baseline,
                 gArm = governedArm(task);
               const bTok = bArm?.tokens_per_passing_patch,
@@ -434,11 +662,17 @@ export function Overview({ data }: { data: DashboardPayload }) {
                 gArm?.verified_count != null && gDenom != null
                   ? ` (${gArm.verified_count}/${gDenom})`
                   : "";
+              const mdl = taskModel(task);
               return (
-                <div className="chart-row" key={task.task_id}>
+                <div className="chart-row" key={taskKey(task)}>
                   <a href="#tasks" className="chart-label">
                     {task.task_id}
-                    <span>{experimentNames[task.task_id] || "Benchmark"}</span>
+                    <span>
+                      {experimentNames[task.task_id] || "Benchmark"}
+                      {multiModelTasks.has(task.task_id) && mdl
+                        ? ` · ${mdl}`
+                        : ""}
+                    </span>
                   </a>
                   <div className="chart-bars">
                     <div className="bar-line">

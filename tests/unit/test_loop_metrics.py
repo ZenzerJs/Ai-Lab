@@ -365,3 +365,54 @@ def test_migrate_db_phase2_upgrade_idempotency(tmp_path: Path):
     assert {"tool_calls_count", "tool_errors_count", "max_consecutive_tool_streak", "loop_detected"}.issubset(cols)
     assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='run_events'").fetchone() is not None
     conn.close()
+
+
+def test_cross_model_task_stratification_no_blending(tmp_path: Path):
+    """Multi-model runs for the same task_id stay stratified per (task_id, model) without blending."""
+    import hashlib
+
+    db_file = tmp_path / "stratified.db"
+    conn = ledger.get_connection(db_file)
+    ledger.seed_pricing(conn=conn)
+
+    ev_file = tmp_path / "ev.ndjson"
+    ev_file.write_text('{"event":"init"}\n{"event":"result"}\n', encoding="utf-8")
+    ev_hash = hashlib.sha256(ev_file.read_bytes()).hexdigest()
+
+    for model_name, base_tok, icm_tok in [
+        ("gemini-3.8-flash-low", 100_000, 60_000),
+        ("gemini-4-argon-low", 40_000, 30_000),
+    ]:
+        for arm, inp in [("baseline", base_tok), ("icm", icm_tok)]:
+            ledger.record_run(
+                task_id="BENCH-007",
+                arm=arm,
+                model=model_name,
+                run_index=1,
+                timestamp="2026-11-20T00:00:00Z",
+                input_tokens=inp,
+                output_tokens=1_000,
+                cache_read_tokens=0,
+                total_tokens=inp + 1_000,
+                num_turns=1,
+                duration_seconds=10.0,
+                source_kind="live",
+                evidence_status="verified",
+                evidence_ref=str(ev_file),
+                evidence_hash=ev_hash,
+                execution_status="completed",
+                verification_status="passed",
+                conn=conn,
+            )
+
+    cum = ledger.cumulative_savings(conn=conn)
+    assert cum["scheduled_count"] == 4
+    assert len(cum["tasks"]) == 2
+    by_series = {t["series_id"]: t for t in cum["tasks"]}
+    assert "BENCH-007::gemini-3.8-flash-low" in by_series
+    assert "BENCH-007::gemini-4-argon-low" in by_series
+    assert by_series["BENCH-007::gemini-3.8-flash-low"]["arms"]["baseline"]["mean_input_tokens"] == 100_000.0
+    assert by_series["BENCH-007::gemini-4-argon-low"]["arms"]["baseline"]["mean_input_tokens"] == 40_000.0
+    assert by_series["BENCH-007::gemini-3.8-flash-low"]["has_measured_data"] is True
+    assert by_series["BENCH-007::gemini-4-argon-low"]["has_measured_data"] is False
+    conn.close()

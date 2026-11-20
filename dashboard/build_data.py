@@ -14,7 +14,7 @@ import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # Add scripts directory to path to import ledger
 DASHBOARD_DIR = Path(__file__).resolve().parent
@@ -272,6 +272,8 @@ def build_headline_block(
         if tot_b is not None and tot_i is not None and tot_b > 0:
             pct = round((tot_b - tot_i) / tot_b * 100.0, 1)
             ci = compute_bootstrap_ci(b_costs, i_costs)
+            b_pac = cum.get("per_arm_counts", {}).get("baseline", {})
+            i_pac = cum.get("per_arm_counts", {}).get("icm", {})
             stats.append({
                 "id": "cost_reduction",
                 "label": "Cost Reduction per Task",
@@ -279,8 +281,8 @@ def build_headline_block(
                 "unit": "%",
                 "baseline": f"${tot_b:.4f}",
                 "icm": f"${tot_i:.4f}",
-                "n_baseline": cum.get("per_arm_counts", {}).get("baseline", {}).get("completed", 0),
-                "n_icm": cum.get("per_arm_counts", {}).get("icm", {}).get("completed", 0),
+                "n_baseline": b_pac.get("cost_eligible") or b_pac.get("completed", 0),
+                "n_icm": i_pac.get("cost_eligible") or i_pac.get("completed", 0),
                 "n_tasks": len(valid_tasks),
                 "source": "live CLI",
                 "ci95": ci,
@@ -312,6 +314,8 @@ def build_headline_block(
         b_cache = cum.get("baseline_cache_hit_pct")
         i_cache = cum.get("icm_cache_hit_pct")
         if b_cache is not None and i_cache is not None:
+            b_pac = cum.get("per_arm_counts", {}).get("baseline", {})
+            i_pac = cum.get("per_arm_counts", {}).get("icm", {})
             stats.append({
                 "id": "cache_efficiency",
                 "label": "Prompt Cache Hit Ratio",
@@ -319,10 +323,38 @@ def build_headline_block(
                 "unit": "%",
                 "baseline": f"{round(b_cache, 1)}%",
                 "icm": f"{round(i_cache, 1)}%",
-                "n_baseline": cum.get("per_arm_counts", {}).get("baseline", {}).get("completed", 0),
-                "n_icm": cum.get("per_arm_counts", {}).get("icm", {}).get("completed", 0),
+                "n_baseline": b_pac.get("cost_eligible") or b_pac.get("completed", 0),
+                "n_icm": i_pac.get("cost_eligible") or i_pac.get("completed", 0),
                 "n_tasks": len(valid_tasks),
                 "source": "live CLI",
+            })
+
+    # H4: Cross-model Tokens per Passing Patch
+    if valid_tasks and cum.get("has_measured_data"):
+        b_pac = cum.get("per_arm_counts", {}).get("baseline", {})
+        i_pac = cum.get("per_arm_counts", {}).get("icm", {})
+        b_tpp = b_pac.get("tokens_per_passing_patch")
+        i_tpp = i_pac.get("tokens_per_passing_patch")
+        if (
+            isinstance(b_tpp, (int, float))
+            and isinstance(i_tpp, (int, float))
+            and not isinstance(b_tpp, bool)
+            and not isinstance(i_tpp, bool)
+            and b_tpp > 0
+        ):
+            pct = round((b_tpp - i_tpp) / b_tpp * 100.0, 1)
+            n_models = len({t.get("model") for t in tasks if t.get("model")})
+            stats.append({
+                "id": "tokens_per_pass",
+                "label": "Tokens per Passing Patch",
+                "value": pct,
+                "unit": "%",
+                "baseline": f"{int(round(b_tpp)):,}",
+                "icm": f"{int(round(i_tpp)):,}",
+                "n_baseline": b_pac.get("passed_count", 0),
+                "n_icm": i_pac.get("passed_count", 0),
+                "n_tasks": len(tasks),
+                "source": f"{n_models} models" if n_models else "live CLI",
             })
 
     if not stats:
@@ -506,7 +538,7 @@ def build_data_payload(
         raw_runs = [dict(r) for r in cursor.fetchall()]
 
         # Process each run through shared eligibility and accounting
-        task_pairs: Dict[str, Dict[int, Dict[str, Any]]] = {}
+        task_pairs: Dict[Tuple[str, str], Dict[int, Dict[str, Any]]] = {}
         processed_runs: List[Dict[str, Any]] = []
 
         for r in raw_runs:
@@ -547,18 +579,24 @@ def build_data_payload(
             # Only pair eligible measured runs for timeline (requires comparison eligibility)
             if r.get("is_comparison_eligible") and not r.get("is_simulation") and r["cost_usd"] is not None:
                 tid = r["task_id"]
+                mdl = r["model"]
                 ridx = r["run_index"]
                 arm = r["arm"].lower()
-                task_pairs.setdefault(tid, {}).setdefault(ridx, {})[arm] = r
+                task_pairs.setdefault((tid, mdl), {}).setdefault(ridx, {})[arm] = r
+
+        models_per_tid: Dict[str, set] = {}
+        for tid, mdl in task_pairs:
+            models_per_tid.setdefault(tid, set()).add(mdl)
 
         # Build timeline for cumulative savings curve using only qualifying measured runs
         timeline: List[Dict[str, Any]] = []
         cumulative_saved = 0.0
         step = 1
 
-        for tid in sorted(task_pairs):
-            for ridx in sorted(task_pairs[tid]):
-                arms = task_pairs[tid][ridx]
+        for tid, mdl in sorted(task_pairs):
+            multi_mdl = len(models_per_tid.get(tid, set())) > 1
+            for ridx in sorted(task_pairs[(tid, mdl)]):
+                arms = task_pairs[(tid, mdl)][ridx]
                 gov_arm = "icm-subagents" if "icm-subagents" in arms else ("icm" if "icm" in arms else None)
                 if not gov_arm:
                     for k in arms:
@@ -572,8 +610,9 @@ def build_data_payload(
                     cumulative_saved += delta
                     timeline.append({
                         "step": step,
-                        "label": f"{tid} Run {ridx}",
+                        "label": f"{tid} ({mdl}) Run {ridx}" if multi_mdl else f"{tid} Run {ridx}",
                         "task_id": tid,
+                        "model": mdl,
                         "run_index": ridx,
                         "governed_arm": gov_arm,
                         "timestamp": arms[gov_arm]["timestamp"],
