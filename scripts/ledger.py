@@ -2276,14 +2276,25 @@ def _compute_task_summary_with_rows(
     for arm_name in distinct_arms:
         all_arm_rows = [r for r in rows if r["arm"].lower() == arm_name]
         qualifying_runs = arms_data.get(arm_name, [])
+        telemetry_runs = (
+            qualifying_runs
+            if qualifying_runs
+            else [
+                r
+                for r in all_arm_rows
+                if r.get("source_kind") == "live"
+                and r.get("evidence_status") == "verified"
+                and r.get("execution_status") == "completed"
+            ]
+        )
         valid_costs = [r["cost_usd"] for r in qualifying_runs if r["cost_usd"] is not None]
-        inputs = [r["input_tokens"] for r in qualifying_runs if r["input_tokens"] is not None]
-        caches = [r["cache_read_tokens"] for r in qualifying_runs if r["cache_read_tokens"] is not None]
-        outputs = [r["output_tokens"] for r in qualifying_runs if r["output_tokens"] is not None]
-        totals = [r["total_tokens"] for r in qualifying_runs if r["total_tokens"] is not None]
-        thinkings = [r["thinking_tokens"] for r in qualifying_runs if r.get("thinking_tokens") is not None]
-        turns = [r["num_turns"] for r in qualifying_runs]
-        durations = [r["duration_seconds"] for r in qualifying_runs]
+        inputs = [r["input_tokens"] for r in telemetry_runs if r["input_tokens"] is not None]
+        caches = [r["cache_read_tokens"] for r in telemetry_runs if r["cache_read_tokens"] is not None]
+        outputs = [r["output_tokens"] for r in telemetry_runs if r["output_tokens"] is not None]
+        totals = [r["total_tokens"] for r in telemetry_runs if r["total_tokens"] is not None]
+        thinkings = [r["thinking_tokens"] for r in telemetry_runs if r.get("thinking_tokens") is not None]
+        turns = [r["num_turns"] for r in telemetry_runs]
+        durations = [r["duration_seconds"] for r in telemetry_runs]
 
         mean_cost = sum(valid_costs) / len(valid_costs) if valid_costs else None
         min_cost = min(valid_costs) if valid_costs else None

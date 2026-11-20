@@ -1143,12 +1143,20 @@ code {
 .operational-panel {
   margin-top: 25px;
 }
-.operational-stats,
+.operational-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  padding: 10px 26px 20px;
+  gap: 20px;
+}
 .ledger-summary {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   padding: 10px 26px 20px;
   gap: 20px;
+}
+.cost-chart-tokens .chart-bars {
+  padding-right: 108px;
 }
 .operational-stats span,
 .ledger-summary span {

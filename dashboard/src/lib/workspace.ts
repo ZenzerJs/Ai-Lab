@@ -27,6 +27,14 @@ export function governedArm(task: TaskSummaryItem) {
 }
 
 export const experimentNames: Record<string, string> = {
+  "BENCH-001": "Date range boundaries",
+  "BENCH-002": "Cross-file API contract",
+  "BENCH-003": "Event parser refactor",
+  "BENCH-004": "Stateful filter table",
+  "BENCH-005": "Config precedence scope",
+  "BENCH-006": "Accounting mutation suite",
+  "BENCH-007": "Cache & billing precision",
+  "BENCH-008": "Worker lease & rollback",
   "EXP-001": "Text normalization",
   "EXP-002": "Rate limiting",
   "EXP-003": "Code analysis",

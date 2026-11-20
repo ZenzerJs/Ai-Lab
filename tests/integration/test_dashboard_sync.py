@@ -273,3 +273,48 @@ def test_dashboard_tsx_sources_have_no_stale_hardcoded_literals():
         "?? 1",
     ):
         assert stale not in combined
+
+
+def test_unpriced_live_runs_preserve_token_and_duration_telemetry(tmp_path: Path):
+    """Unpriced live runs keep mean_cost_usd=None and has_measured_data=False while reporting real tokens/duration."""
+    db_file = tmp_path / "unpriced_bench.db"
+    conn = ledger.get_connection(db_file)
+    ledger.seed_pricing(conn=conn)
+    ev_file = tmp_path / "bench_live.ndjson"
+    ev_file.write_text('{"event":"init"}\n{"event":"result"}\n', encoding="utf-8")
+    import hashlib
+    ev_hash = hashlib.sha256(ev_file.read_bytes()).hexdigest()
+
+    for arm, inp, out, dur in [("baseline", 40_000, 5_000, 42.5), ("icm", 32_000, 4_000, 31.0)]:
+        ledger.record_run(
+            task_id="BENCH-002",
+            arm=arm,
+            model="unpriced-test-model",
+            run_index=1,
+            timestamp="2026-11-20T00:00:00Z",
+            input_tokens=inp,
+            output_tokens=out,
+            cache_read_tokens=10_000,
+            total_tokens=inp + out,
+            num_turns=1,
+            duration_seconds=dur,
+            source_kind="live",
+            evidence_status="verified",
+            evidence_ref=str(ev_file),
+            evidence_hash=ev_hash,
+            execution_status="completed",
+            verification_status="passed",
+            conn=conn,
+        )
+    conn.close()
+
+    payload = build_data.build_data_payload(db_path=db_file)
+    assert payload["has_data"] is False
+    assert len(payload["tasks"]) == 1
+    task = payload["tasks"][0]
+    assert task["has_measured_data"] is False
+    assert task["arms"]["baseline"]["mean_cost_usd"] is None
+    assert task["arms"]["baseline"]["mean_input_tokens"] == 40_000.0
+    assert task["arms"]["baseline"]["mean_duration_seconds"] == 42.5
+    assert task["arms"]["icm"]["mean_input_tokens"] == 32_000.0
+    assert task["arms"]["icm"]["mean_duration_seconds"] == 31.0

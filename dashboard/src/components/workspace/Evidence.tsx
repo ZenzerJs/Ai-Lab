@@ -280,6 +280,16 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
                           {formatTokens(run.output_tokens)} /{" "}
                           {formatTokens(run.thinking_tokens)}
                         </dd>
+                        {run.tool_calls_count != null ? (
+                          <>
+                            <dt>Tools / errors / loop</dt>
+                            <dd>
+                              {run.tool_calls_count} calls ·{" "}
+                              {run.tool_errors_count ?? 0} errors
+                              {run.loop_detected ? " · loop flagged" : ""}
+                            </dd>
+                          </>
+                        ) : null}
                         <dt>Recorded</dt>
                         <dd>{run.timestamp}</dd>
                         {run.exclusion_reasons?.length ? (

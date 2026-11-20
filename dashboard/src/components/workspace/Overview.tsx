@@ -10,7 +10,7 @@ import {
   TrendingDown,
 } from "lucide-react";
 import { DashboardPayload, HeadlineStat } from "../../types";
-import { formatCurrency } from "../../lib/formatters";
+import { formatCurrency, formatTokens } from "../../lib/formatters";
 import { experimentNames, finite, governedArm } from "../../lib/workspace";
 
 function ContextOrbit() {
@@ -151,12 +151,32 @@ export function Overview({ data }: { data: DashboardPayload }) {
     !data.is_simulation &&
     Boolean(data.cumulative?.has_measured_data);
   const tasks = data.tasks || [];
+  const pricedTasks = tasks.filter(
+    (task) =>
+      finite(task.arms.baseline?.mean_cost_usd) ||
+      finite(governedArm(task)?.mean_cost_usd),
+  );
+  const tokenBenchTasks = tasks.filter(
+    (task) =>
+      !pricedTasks.includes(task) &&
+      (finite(task.arms.baseline?.tokens_per_passing_patch) ||
+        finite(governedArm(task)?.tokens_per_passing_patch)),
+  );
   const maxCost = Math.max(
     0.001,
-    ...tasks
+    ...pricedTasks
       .flatMap((task) => [
         task.arms.baseline?.mean_cost_usd,
         governedArm(task)?.mean_cost_usd,
+      ])
+      .filter(finite),
+  );
+  const maxBenchTokens = Math.max(
+    1,
+    ...tokenBenchTasks
+      .flatMap((task) => [
+        task.arms.baseline?.tokens_per_passing_patch,
+        governedArm(task)?.tokens_per_passing_patch,
       ])
       .filter(finite),
   );
@@ -206,8 +226,12 @@ export function Overview({ data }: { data: DashboardPayload }) {
       <div className="section-heading results-heading">
         <h2>What the evidence says</h2>
         <span>
-          {tasks.length} experiments <span className="middle-dot">·</span>{" "}
-          {data.cumulative?.total_runs ?? 0} comparison runs
+          {pricedTasks.length} priced
+          {tokenBenchTasks.length
+            ? ` · ${tokenBenchTasks.length} token-bench`
+            : ""}{" "}
+          <span className="middle-dot">·</span>{" "}
+          {data.runs?.length ?? data.cumulative?.total_runs ?? 0} total runs
         </span>
       </div>
       {stats.length ? (
@@ -259,7 +283,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
             role="group"
             aria-label="Cost comparison in US dollars. Values for baseline and governed runs are labeled on each row."
           >
-            {tasks.map((task) => {
+            {pricedTasks.map((task) => {
               const baseline = task.arms.baseline?.mean_cost_usd,
                 governed = governedArm(task)?.mean_cost_usd;
               return (
@@ -301,9 +325,9 @@ export function Overview({ data }: { data: DashboardPayload }) {
                 </div>
               );
             })}
-            {!tasks.length && (
+            {!pricedTasks.length && (
               <p className="empty-inline">
-                No experiment comparisons available.
+                No priced experiment comparisons available.
               </p>
             )}
           </div>
@@ -362,6 +386,97 @@ export function Overview({ data }: { data: DashboardPayload }) {
           </a>
         </aside>
       </div>
+      {tokenBenchTasks.length > 0 && (
+        <section
+          className="panel operational-panel comparison-panel"
+          aria-labelledby="token-bench-title"
+        >
+          <div className="panel-heading">
+            <div>
+              <h2 id="token-bench-title">Multi-file benchmarks</h2>
+              <p>Tokens per passing patch (unpriced model)</p>
+            </div>
+            <div className="chart-legend">
+              <span>
+                <i className="legend-baseline" />
+                Baseline
+              </span>
+              <span>
+                <i className="legend-governed" />
+                Governed
+              </span>
+            </div>
+          </div>
+          <div
+            className="cost-chart cost-chart-tokens"
+            role="group"
+            aria-label="Tokens per passing patch comparison for multi-file benchmarks."
+          >
+            {tokenBenchTasks.map((task) => {
+              const bArm = task.arms.baseline,
+                gArm = governedArm(task);
+              const bTok = bArm?.tokens_per_passing_patch,
+                gTok = gArm?.tokens_per_passing_patch;
+              const bPass =
+                bArm?.verified_count != null && bArm?.scheduled_count != null
+                  ? ` (${bArm.verified_count}/${bArm.scheduled_count})`
+                  : "";
+              const gPass =
+                gArm?.verified_count != null && gArm?.scheduled_count != null
+                  ? ` (${gArm.verified_count}/${gArm.scheduled_count})`
+                  : "";
+              return (
+                <div className="chart-row" key={task.task_id}>
+                  <a href="#tasks" className="chart-label">
+                    {task.task_id}
+                    <span>{experimentNames[task.task_id] || "Benchmark"}</span>
+                  </a>
+                  <div className="chart-bars">
+                    <div className="bar-line">
+                      <span
+                        className="bar bar-baseline"
+                        style={{
+                          width: finite(bTok)
+                            ? `${Math.max(1, (bTok / maxBenchTokens) * 100)}%`
+                            : "0%",
+                        }}
+                      />
+                      <span className="bar-value">
+                        <span className="sr-only">Baseline </span>
+                        {formatTokens(bTok)}
+                        {bPass}
+                      </span>
+                    </div>
+                    <div className="bar-line">
+                      <span
+                        className="bar bar-governed"
+                        style={{
+                          width: finite(gTok)
+                            ? `${Math.max(1, (gTok / maxBenchTokens) * 100)}%`
+                            : "0%",
+                        }}
+                      />
+                      <span className="bar-value">
+                        <span className="sr-only">Governed </span>
+                        {formatTokens(gTok)}
+                        {gPass}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="panel-bottom">
+            <span>
+              Tokens per passing patch · rate card unpriced (excluded from USD totals)
+            </span>
+            <a className="text-link" href="#tasks">
+              View breakdown <ArrowUpRight size={15} />
+            </a>
+          </div>
+        </section>
+      )}
       {data.quality_rubric?.has_data &&
         (() => {
           const rubric = data.quality_rubric;
@@ -464,6 +579,65 @@ export function Overview({ data }: { data: DashboardPayload }) {
                     </span>
                   </div>
                 )}
+                {!outlineSummary &&
+                  tokenBenchTasks.length > 0 &&
+                  (() => {
+                    const bTpps = tokenBenchTasks
+                      .map((t) => t.arms.baseline?.tokens_per_passing_patch)
+                      .filter(finite);
+                    const gTpps = tokenBenchTasks
+                      .map((t) => governedArm(t)?.tokens_per_passing_patch)
+                      .filter(finite);
+                    const bAvg = bTpps.length
+                      ? bTpps.reduce((a, b) => a + b, 0) / bTpps.length
+                      : null;
+                    const gAvg = gTpps.length
+                      ? gTpps.reduce((a, b) => a + b, 0) / gTpps.length
+                      : null;
+                    const deltaPct =
+                      bAvg != null && bAvg > 0 && gAvg != null
+                        ? ((bAvg - gAvg) / bAvg) * 100
+                        : null;
+                    const bPass = tokenBenchTasks.reduce(
+                      (s, t) => s + (t.arms.baseline?.verified_count ?? 0),
+                      0,
+                    );
+                    const bSched = tokenBenchTasks.reduce(
+                      (s, t) => s + (t.arms.baseline?.scheduled_count ?? 0),
+                      0,
+                    );
+                    const gPass = tokenBenchTasks.reduce(
+                      (s, t) => s + (governedArm(t)?.verified_count ?? 0),
+                      0,
+                    );
+                    const gSched = tokenBenchTasks.reduce(
+                      (s, t) => s + (governedArm(t)?.scheduled_count ?? 0),
+                      0,
+                    );
+                    return (
+                      <div>
+                        <span>
+                          Multi-file token efficiency ({tokenBenchTasks.length}{" "}
+                          tasks)
+                        </span>
+                        <strong
+                          className={
+                            deltaPct != null && deltaPct >= 0
+                              ? "text-sea"
+                              : "text-rust"
+                          }
+                        >
+                          {deltaPct != null ? `${fmtSigned(deltaPct)}%` : "—"}
+                        </strong>
+                        <span>
+                          {formatTokens(bAvg)} → {formatTokens(gAvg)} tok/pass
+                          {bSched > 0 && gSched > 0
+                            ? ` · ${gPass}/${gSched} ICM vs ${bPass}/${bSched} base`
+                            : ""}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 {rubric.tool_errors != null && (
                   <div>
                     <span>Tool & path execution errors</span>

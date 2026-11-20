@@ -19,7 +19,15 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
         const matches = `${task.task_id} ${experimentNames[task.task_id] || ""}`
           .toLowerCase()
           .includes(query.toLowerCase());
-        const delta = task.savings?.mean_savings_percent;
+        const bTok = task.arms.baseline?.tokens_per_passing_patch;
+        const gTok = governedArm(task)?.tokens_per_passing_patch;
+        const tokDelta =
+          finite(bTok) && bTok > 0 && finite(gTok)
+            ? ((bTok - gTok) / bTok) * 100
+            : undefined;
+        const delta = finite(task.savings?.mean_savings_percent)
+          ? task.savings?.mean_savings_percent
+          : tokDelta;
         return (
           matches &&
           (filter === "all" ||
@@ -73,12 +81,41 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
           const baseline = task.arms.baseline,
             governed = governedArm(task),
             reduction = task.savings?.mean_savings_percent;
-          const lower = finite(reduction) && reduction > 0;
           const measured =
             !data.is_demo_report &&
             !data.is_simulation &&
             !task.is_simulation &&
             Boolean(task.has_measured_data);
+          const isTokenOnly =
+            !measured &&
+            (finite(baseline?.tokens_per_passing_patch) ||
+              finite(governed?.tokens_per_passing_patch));
+          const bTok = baseline?.tokens_per_passing_patch;
+          const gTok = governed?.tokens_per_passing_patch;
+          const tokenReduction =
+            finite(bTok) && bTok > 0 && finite(gTok)
+              ? ((bTok - gTok) / bTok) * 100
+              : undefined;
+          const activeDelta = finite(reduction)
+            ? reduction
+            : isTokenOnly
+              ? tokenReduction
+              : undefined;
+          const lower = finite(activeDelta) && activeDelta > 0;
+          const fmtDur = (arm?: typeof baseline) => {
+            if (!arm || !finite(arm.mean_duration_seconds)) return "—";
+            if (arm.mean_duration_seconds === 0 && !arm.completed_count)
+              return "—";
+            return `${arm.mean_duration_seconds.toFixed(1)}s`;
+          };
+          const fmtPass = (arm?: typeof baseline) =>
+            arm?.verified_count != null && arm?.scheduled_count != null
+              ? `${arm.verified_count}/${arm.scheduled_count}`
+              : "—";
+          const fmtTools = (arm?: typeof baseline) =>
+            arm?.total_tool_calls != null
+              ? `${arm.total_tool_calls} (${arm.total_tool_errors ?? 0} err)`
+              : "—";
           return (
             <article key={task.task_id} className="panel experiment-card">
               <div className="experiment-card-heading">
@@ -92,38 +129,88 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
                   </div>
                 </div>
                 <span
-                  className={`badge ${measured ? "badge-green" : "badge-amber"}`}
+                  className={`badge ${measured ? "badge-green" : isTokenOnly ? "badge-blue" : "badge-amber"}`}
                 >
-                  {measured ? "Measured" : "Non-measured"} · {task.total_runs}{" "}
-                  runs
+                  {measured
+                    ? "Measured"
+                    : isTokenOnly
+                      ? "Token-verified"
+                      : "Non-measured"}{" "}
+                  · {task.total_runs} runs
                 </span>
               </div>
               <div className="experiment-metrics">
-                <div>
-                  <span>Baseline cost / run</span>
-                  <strong>{formatCurrency(baseline?.mean_cost_usd)}</strong>
-                </div>
-                <div>
-                  <span>Governed cost / run</span>
-                  <strong>{formatCurrency(governed?.mean_cost_usd)}</strong>
-                </div>
-                <div>
-                  <span>{lower ? "Cost reduction" : "Cost overhead"}</span>
-                  <strong
-                    className={
-                      lower ? "text-sea" : finite(reduction) ? "text-rust" : ""
-                    }
-                  >
-                    {lower ? (
-                      <ArrowDownRight size={20} />
-                    ) : (
-                      <ArrowUpRight size={20} />
-                    )}{" "}
-                    {finite(reduction)
-                      ? `${Math.abs(reduction).toFixed(1)}%`
-                      : "—"}
-                  </strong>
-                </div>
+                {isTokenOnly ? (
+                  <>
+                    <div>
+                      <span>Baseline tok / pass</span>
+                      <strong>{formatTokens(bTok)}</strong>
+                    </div>
+                    <div>
+                      <span>Governed tok / pass</span>
+                      <strong>{formatTokens(gTok)}</strong>
+                    </div>
+                    <div>
+                      <span>
+                        {lower ? "Token reduction" : "Token overhead"}
+                      </span>
+                      <strong
+                        className={
+                          lower
+                            ? "text-sea"
+                            : finite(activeDelta)
+                              ? "text-rust"
+                              : ""
+                        }
+                      >
+                        {finite(activeDelta) ? (
+                          lower ? (
+                            <ArrowDownRight size={20} />
+                          ) : (
+                            <ArrowUpRight size={20} />
+                          )
+                        ) : null}
+                        {finite(activeDelta)
+                          ? ` ${Math.abs(activeDelta).toFixed(1)}%`
+                          : "—"}
+                      </strong>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <span>Baseline cost / run</span>
+                      <strong>{formatCurrency(baseline?.mean_cost_usd)}</strong>
+                    </div>
+                    <div>
+                      <span>Governed cost / run</span>
+                      <strong>{formatCurrency(governed?.mean_cost_usd)}</strong>
+                    </div>
+                    <div>
+                      <span>{lower ? "Cost reduction" : "Cost overhead"}</span>
+                      <strong
+                        className={
+                          lower
+                            ? "text-sea"
+                            : finite(reduction)
+                              ? "text-rust"
+                              : ""
+                        }
+                      >
+                        {finite(reduction) ? (
+                          lower ? (
+                            <ArrowDownRight size={20} />
+                          ) : (
+                            <ArrowUpRight size={20} />
+                          )
+                        ) : null}
+                        {finite(reduction)
+                          ? ` ${Math.abs(reduction).toFixed(1)}%`
+                          : "—"}
+                      </strong>
+                    </div>
+                  </>
+                )}
               </div>
               <details className="experiment-details">
                 <summary>
@@ -148,6 +235,12 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
                     </thead>
                     <tbody>
                       {[
+                        ["Pass rate", fmtPass(baseline), fmtPass(governed)],
+                        [
+                          "Tokens / pass",
+                          formatTokens(bTok),
+                          formatTokens(gTok),
+                        ],
                         [
                           "Input tokens",
                           formatTokens(baseline?.mean_input_tokens),
@@ -168,19 +261,25 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
                           formatTokens(baseline?.mean_thinking_tokens),
                           formatTokens(governed?.mean_thinking_tokens),
                         ],
-                        [
-                          "Duration",
-                          finite(baseline?.mean_duration_seconds)
-                            ? `${baseline.mean_duration_seconds.toFixed(1)}s`
-                            : "—",
-                          finite(governed?.mean_duration_seconds)
-                            ? `${governed.mean_duration_seconds.toFixed(1)}s`
-                            : "—",
-                        ],
+                        ["Duration", fmtDur(baseline), fmtDur(governed)],
                         [
                           "Agent turns",
                           baseline?.mean_num_turns ?? "—",
                           governed?.mean_num_turns ?? "—",
+                        ],
+                        [
+                          "Tool calls (errors)",
+                          fmtTools(baseline),
+                          fmtTools(governed),
+                        ],
+                        [
+                          "Loop flags",
+                          baseline?.loop_runs_count != null
+                            ? String(baseline.loop_runs_count)
+                            : "—",
+                          governed?.loop_runs_count != null
+                            ? String(governed.loop_runs_count)
+                            : "—",
                         ],
                         [
                           "Model",
