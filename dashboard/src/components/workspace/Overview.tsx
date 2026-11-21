@@ -419,6 +419,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
                         ? ` · ${mdl}`
                         : ""}
                     </span>
+                    <span className="badge badge-purple chart-arm-badge">{formatArm(governedArmName(task))}</span>
                   </a>
                   <div className="chart-bars">
                     <div className="bar-line">
@@ -445,7 +446,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
                         }}
                       />
                       <span className="bar-value">
-                        <span className="badge badge-purple">{formatArm(governedArmName(task))}</span>{" "}
+                        <span className="sr-only">{formatArm(governedArmName(task))} </span>
                         {formatCurrency(governed)}
                       </span>
                     </div>
@@ -675,6 +676,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
                         ? ` · ${mdl}`
                         : ""}
                     </span>
+                    <span className="badge badge-purple chart-arm-badge">{formatArm(governedArmName(task))}</span>
                   </a>
                   <div className="chart-bars">
                     <div className="bar-line">
@@ -702,7 +704,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
                         }}
                       />
                       <span className="bar-value">
-                        <span className="badge badge-purple">{formatArm(governedArmName(task))}</span>{" "}
+                        <span className="sr-only">{formatArm(governedArmName(task))} </span>
                         {formatTokens(gTok)}
                         {gPass}
                       </span>

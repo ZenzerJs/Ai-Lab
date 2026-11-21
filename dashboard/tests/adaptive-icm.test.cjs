@@ -103,6 +103,11 @@ test('all three workspace views render old and Lite payloads without changing ra
     const markup = renderToStaticMarkup(React.createElement(Component, { data: lite }));
     assert.match(markup, /ICM-Lite/);
     assert.doesNotMatch(markup, />icm_lite</);
+    if (name === 'Overview') {
+      // Keep badges out of the fixed-width numeric gutter at full-length bars.
+      assert.match(markup, /chart-arm-badge/);
+      assert.doesNotMatch(markup, /class="bar-value"><span class="badge/);
+    }
   }
   assert.equal(JSON.stringify(lite), original);
 });

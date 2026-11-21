@@ -31,6 +31,15 @@
   width: 28px;
   height: 28px;
 }
+.chart-label .chart-arm-badge {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  white-space: normal;
+  margin-top: 5px;
+  color: var(--iris);
+}
+
 .adaptive-icm {
   margin: 24px 0;
   padding: 24px;
