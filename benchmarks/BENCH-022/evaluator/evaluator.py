@@ -45,10 +45,13 @@ def run_checks():
             fw.add()
             assert fw.count() == 1
 
-            clock2 = ManualClock(100.0)
+            clock2 = ManualClock(90.0)
             sl = SlidingLog(10.0, clock2)
-            for t in (90.0, 99.9, 100.0):
-                sl._times.append(t)
+            sl.add()                     # 90.0
+            clock2.advance(9.9)
+            sl.add()                     # 99.9
+            clock2.advance(0.1)
+            sl.add()                     # 100.0
             # (now-window, now]: 90.0 is exactly at the cutoff -> excluded.
             assert sl.count() == 2
             sl.add()

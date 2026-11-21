@@ -413,19 +413,20 @@ def test_bench021_seeded_insert_delete_invariants():
 def test_bench022_seeded_sliding_window_boundary():
     """(now-window, now] boundary holds over random timestamp inserts."""
     with _load_bench("BENCH-022"):
-        import bisect
         from clock import ManualClock
         from windows import SlidingLog
 
         rng = random.Random(777)
         for _ in range(20):
-            clock = ManualClock(1000.0)
+            clock = ManualClock(900.0)
             sl = SlidingLog(60.0, clock)
             inserted = []
             for _i in range(rng.randrange(5, 25)):
                 t = 900.0 + rng.random() * 200.0
-                bisect.insort(sl._times, t)
+                clock.value = t
+                sl.add()
                 inserted.append(t)
+            clock.value = 1000.0
             expected = [t for t in inserted if 940.0 < t <= 1000.0]
             assert sl.count() == len(expected)
 

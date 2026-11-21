@@ -1,4 +1,4 @@
-import { TaskSummaryItem } from "../types";
+import { RunRecord, TaskSummaryItem } from "../types";
 
 export type Destination =
   "overview" | "tasks" | "simulator" | "sandboxes" | "audit";
@@ -71,7 +71,7 @@ export function bootstrapPercentCI(
       b += pairs[k][0];
       g += pairs[k][1];
     }
-    samples.push(((b / n - g / n) / (b / n)) * 100);
+    if (b > 0) samples.push(((g / n - b / n) / (b / n)) * 100);
   }
   samples.sort((a, b) => a - b);
   return [
@@ -88,13 +88,15 @@ export function suiteBootstrapCI(
 ): [number, number] | null {
   const base = task.arms.baseline?.runs || [];
   const gov = task.arms[armName]?.runs || [];
+  const eligible = (r: RunRecord) =>
+    r.is_comparison_eligible !== false && finite(r.cost_usd);
   const baseByIdx = new Map(
-    base.filter((r) => finite(r.cost_usd)).map((r) => [r.run_index, r.cost_usd as number]),
+    base.filter(eligible).map((r) => [r.run_index, r.cost_usd as number]),
   );
   const pairs: [number, number][] = [];
   for (const r of gov) {
     const b = baseByIdx.get(r.run_index);
-    if (b !== undefined && finite(r.cost_usd)) pairs.push([b, r.cost_usd as number]);
+    if (b !== undefined && eligible(r)) pairs.push([b, r.cost_usd as number]);
   }
   return bootstrapPercentCI(pairs);
 }
