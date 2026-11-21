@@ -275,6 +275,21 @@ def test_scope_telemetry_clean_when_touched_matches_declared(tmp_path):
     assert list(scope["files_touched"]) == ["target.py"]
 
 
+def test_scope_telemetry_tolerates_malformed_target_files(tmp_path):
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "target.py").write_text("a = 1\n", encoding="utf-8")
+    workspace = tmp_path / "workspace"
+    shutil.copytree(snapshot, workspace)
+    (workspace / "target.py").write_text("a = 2\n", encoding="utf-8")
+
+    for declared in ([None], [""], ["nested/../target.py"], ["target.py", 7]):
+        scope = runner.scope_telemetry(workspace, snapshot, {"target_files": declared})
+        assert scope["files_touched"].keys() == {"target.py"}
+    assert runner.scope_telemetry(workspace, snapshot, {"target_files": ["nested/../target.py"]})["scope_mismatch"] is False
+    assert runner.scope_telemetry(workspace, snapshot, {"target_files": [None]})["scope_mismatch"] is True
+
+
 def test_live_bench_logs_scope_telemetry_and_run_event(tmp_path, monkeypatch, capsys):
     evidence_dir = tmp_path / "evidence"
     db = tmp_path / "runs.db"

@@ -386,8 +386,12 @@ def scope_telemetry(workspace_dir: Path, snapshot_dir: Path, metadata: Mapping[s
             kind = "modified"
         touched[rel] = {"kind": kind, "lines": (len(new.read_text(encoding="utf-8", errors="replace").splitlines()) if old is None else len(old.read_text(encoding="utf-8", errors="replace").splitlines()) if new is None else _count_changed_lines(old, new))}
     declared = metadata.get("target_files")
-    declared_set = {str(Path(f).as_posix()) for f in declared} if isinstance(declared, list) else set()
-    scope_mismatch = set(touched) != declared_set if declared else bool(touched)
+    declared_set = {
+        Path(os.path.normpath(f)).as_posix()
+        for f in declared
+        if isinstance(f, str) and f.strip()
+    } if isinstance(declared, list) else set()
+    scope_mismatch = set(touched) != declared_set if declared_set else bool(touched)
     return {
         "files_touched": touched,
         "lines_touched": sum(entry["lines"] for entry in touched.values()),
