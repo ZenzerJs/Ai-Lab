@@ -2256,14 +2256,20 @@ def _compute_arm_efficiency_metrics(arm_rows: List[Dict[str, Any]]) -> Dict[str,
     """Compute pass-rate, cost/tokens per passing patch, and tool/loop metrics over arm rows."""
     verified_count = len([r for r in arm_rows if r.get("verification_status") == "passed"])
     pass_rate = (verified_count / len(arm_rows)) if arm_rows else None
+    # Compute per-pass metrics over telemetry-bearing rows only, so runs with
+    # cost_status="unavailable" / null token counters don't null the aggregate.
+    cost_rows = [r for r in arm_rows if r.get("cost_usd") is not None]
+    cost_passes = len([r for r in cost_rows if r.get("verification_status") == "passed"])
     cost_per_passing_patch_usd = (
-        sum(r["cost_usd"] for r in arm_rows) / verified_count
-        if verified_count > 0 and arm_rows and all(r.get("cost_usd") is not None for r in arm_rows)
+        sum(r["cost_usd"] for r in cost_rows) / cost_passes
+        if cost_passes > 0
         else None
     )
+    token_rows = [r for r in arm_rows if r.get("total_tokens") is not None]
+    token_passes = len([r for r in token_rows if r.get("verification_status") == "passed"])
     tokens_per_passing_patch = (
-        sum(r["total_tokens"] for r in arm_rows) / verified_count
-        if verified_count > 0 and arm_rows and all(r.get("total_tokens") is not None for r in arm_rows)
+        sum(r["total_tokens"] for r in token_rows) / token_passes
+        if token_passes > 0
         else None
     )
     total_tool_calls = sum(
