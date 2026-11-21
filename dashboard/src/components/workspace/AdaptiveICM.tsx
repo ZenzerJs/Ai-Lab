@@ -10,7 +10,12 @@ export default function AdaptiveICM({ data }: { data?: DashboardPayload }) {
     for (const name of armNames(task)) {
       const arm = task.arms[name];
       const cur = armTotals.get(name) || { runs: 0, cost: 0, n: 0 };
-      cur.runs += arm?.n ?? arm?.runs?.length ?? 0;
+      cur.runs +=
+        arm?.scheduled_count ??
+        arm?.evaluated_count ??
+        arm?.n ??
+        arm?.runs?.length ??
+        0;
       if (finite(arm?.mean_cost_usd) && finite(arm?.cost_complete_n)) {
         cur.cost += arm.mean_cost_usd * arm.cost_complete_n;
         cur.n += arm.cost_complete_n;
