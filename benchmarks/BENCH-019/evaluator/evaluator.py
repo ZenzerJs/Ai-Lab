@@ -80,6 +80,12 @@ def run_checks():
                 assert wal.replay(path3) == [Record("put", "k", b"v"),
                                              Record("put", "late", b"7"),
                                              Record("put", "k", b"v")]
+                # truncate() rewrote the file: the corrupt tail is gone
+                # from disk, not just skipped by replay().
+                assert len(path3.read_bytes()) == (
+                    len(encode(Record("put", "k", b"v")))
+                    + len(encode(Record("put", "late", b"7")))
+                    + len(encode(Record("put", "k", b"v"))))
                 assert wal.replay(Path(tmp) / "absent.wal") == []
                 assert wal.truncate(Path(tmp) / "absent.wal") == 0
 

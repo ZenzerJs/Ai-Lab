@@ -299,7 +299,7 @@ def test_bench018_seeded_journal_balance():
 def test_bench018_seeded_half_even_quantize():
     """quantize() rounds half-even, including the float-trap case 2.675."""
     with _load_bench("BENCH-018"):
-        from decimal import Decimal
+        from decimal import ROUND_HALF_EVEN, Decimal
         from models import quantize
 
         rng = random.Random(2718)
@@ -309,9 +309,8 @@ def test_bench018_seeded_half_even_quantize():
             value = Decimal(cents) / 1000 + Decimal(half) / 1000
             rounded = quantize(str(value))
             # half-even: ties resolve to the even cent
-            scaled = (value * 100).normalize()
-            if value * 100 == scaled and scaled % 1 == Decimal("0.5"):
-                pass  # unreachable guard; direct cases below
+            assert rounded == value.quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_EVEN)
         assert quantize("0.125") == Decimal("0.12")
         assert quantize("0.135") == Decimal("0.14")
         assert quantize("2.675") == Decimal("2.68")
