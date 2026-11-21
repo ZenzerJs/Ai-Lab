@@ -1,0 +1,13 @@
+{
+  "task_id": "BENCH-012",
+  "name": "RBAC Policy Engine and Audit Trail",
+  "category": "authorization",
+  "target_files": [
+    "models.py",
+    "matcher.py",
+    "audit.py",
+    "policy_engine.py"
+  ],
+  "description": "Fix deny precedence, safe resource matching, cycle-safe role inheritance and complete audit logging.",
+  "expected_broken_reason": "rbac_invariant_violation"
+}
