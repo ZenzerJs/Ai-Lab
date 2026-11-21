@@ -310,9 +310,11 @@ def test_run_benchmark_live_with_mocked_agy_cli_and_unpriced_model(tmp_path: Pat
 
     events = ledger.get_run_events(res["run_id"], conn=conn)
     assert events[0]["phase"] == "start"
-    assert events[-2]["phase"] == "verify"
-    assert events[-2]["status"] == "failed"
+    assert events[-3]["phase"] == "verify"
+    assert events[-3]["status"] == "failed"
+    assert events[-2]["phase"] == "scope"
+    assert events[-2]["status"] in ("scope_ok", "scope_mismatch")
     assert events[-1]["phase"] == "rollback"
     assert events[-1]["status"] == "rolled_back"
-    assert len(events) == 1 + 61 + 2
+    assert len(events) == 1 + 61 + 3
     conn.close()

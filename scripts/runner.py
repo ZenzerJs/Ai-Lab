@@ -29,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -337,11 +338,16 @@ def _tree_files(root_dir: Path) -> Dict[str, Path]:
     files: Dict[str, Path] = {}
     if not root_dir.exists():
         return files
+    root_res = root_dir.resolve()
     for p in sorted(root_dir.rglob("*")):
-        if not p.is_file():
+        if p.is_symlink() or not p.is_file():
             continue
         rel = p.relative_to(root_dir)
         if "__pycache__" in rel.parts or ".pytest_cache" in rel.parts or p.suffix in (".pyc", ".pyo"):
+            continue
+        try:
+            p.resolve().relative_to(root_res)
+        except (ValueError, OSError, RuntimeError):
             continue
         files[rel.as_posix()] = p
     return files
@@ -1693,9 +1699,14 @@ def run_benchmark_live(
     metadata_path = task_dir / "task.json"
     if metadata_path.is_file():
         try:
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            loaded = json.loads(metadata_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            metadata = {}
+            warnings.warn(f"Malformed task.json at {metadata_path}: not valid JSON; treating scope metadata as empty.")
+            loaded = {}
+        if isinstance(loaded, dict):
+            metadata = loaded
+        else:
+            warnings.warn(f"Malformed task.json at {metadata_path}: expected a JSON object; treating scope metadata as empty.")
     routing_decision: Optional[RoutingDecision] = None
     if mode is not None:
         routing_decision = classify_mode(mode, metadata, snapshot_dir)

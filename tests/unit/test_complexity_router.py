@@ -290,6 +290,57 @@ def test_scope_telemetry_tolerates_malformed_target_files(tmp_path):
     assert runner.scope_telemetry(workspace, snapshot, {"target_files": [None]})["scope_mismatch"] is True
 
 
+def test_tree_files_skips_symlinks_and_escapes(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "real.py").write_text("a = 1\n", encoding="utf-8")
+    outside = tmp_path / "outside.py"
+    outside.write_text("secret = 1\n", encoding="utf-8")
+    (root / "link.py").symlink_to(outside)
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    (nested / "deep.py").write_text("d = 1\n", encoding="utf-8")
+    (root / "dir_link").symlink_to(nested, target_is_directory=True)
+
+    files = runner._tree_files(root)
+    assert set(files) == {"real.py"}
+
+
+def test_run_benchmark_live_warns_on_malformed_task_json(tmp_path, monkeypatch):
+    task_dir = runner.WORKSPACE_ROOT / "benchmarks" / "BENCH-001"
+    metadata_path = task_dir / "task.json"
+    original = metadata_path.read_text(encoding="utf-8")
+    evidence_dir = tmp_path / "evidence"
+    db = tmp_path / "runs.db"
+    monkeypatch.setattr(runner, "DEFAULT_EVIDENCE_DIR", evidence_dir)
+    prepare_workspace = runner.WorkspaceManager.prepare_arm_workspace
+
+    def prepare_in_tmp(**kwargs):
+        return prepare_workspace(**{**kwargs, "workspace_root": tmp_path / "workspaces"})
+
+    monkeypatch.setattr(runner.WorkspaceManager, "prepare_arm_workspace", prepare_in_tmp)
+
+    def fake_cli(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, returncode=1, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_cli)
+    try:
+        metadata_path.write_text("not json {", encoding="utf-8")
+        with pytest.warns(UserWarning, match="task.json"):
+            runner.run_benchmark_live(
+                task_id="BENCH-001", arm="baseline", run_index=1,
+                db_path=db, workspace_root=tmp_path / "workspaces",
+            )
+        metadata_path.write_text('["a", "b"]', encoding="utf-8")
+        with pytest.warns(UserWarning, match="task.json"):
+            runner.run_benchmark_live(
+                task_id="BENCH-001", arm="baseline", run_index=1,
+                db_path=db, workspace_root=tmp_path / "workspaces",
+            )
+    finally:
+        metadata_path.write_text(original, encoding="utf-8")
+
+
 def test_live_bench_logs_scope_telemetry_and_run_event(tmp_path, monkeypatch, capsys):
     evidence_dir = tmp_path / "evidence"
     db = tmp_path / "runs.db"
