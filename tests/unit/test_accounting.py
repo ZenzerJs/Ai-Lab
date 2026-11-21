@@ -413,3 +413,92 @@ def test_acc_06_simulation_on_pure_fixture_task_not_measured(tmp_path: Path):
     assert sim_summary["is_simulation"] is True
     conn.close()
 
+
+def test_pricing_exact_match_precedes_effort_fallback(tmp_path: Path):
+    """
+    Exact-match precedence: 'gemini-3.8-flash-low' has an explicit PRICING.json
+    entry, so it must resolve to that row rather than the 'gemini-3.8-flash' base.
+    """
+    db_file = tmp_path / "exact_precedence.db"
+    conn = ledger.get_connection(db_file)
+    ledger.seed_pricing(conn=conn)
+
+    rates = ledger.get_pricing("gemini-3.8-flash-low", conn=conn)
+    assert rates["model"] == "gemini-3.8-flash-low"
+
+    conn.close()
+
+
+@pytest.mark.parametrize("suffix", ["low", "medium", "high", "xhigh"])
+def test_pricing_effort_suffix_fallback(tmp_path: Path, suffix: str):
+    """
+    Effort-suffixed ids resolve to the base model's rate card when no exact key
+    exists, e.g. gemini-4-argon-low -> gemini-4-argon, computing usage_estimate.
+    """
+    db_file = tmp_path / f"suffix_{suffix}.db"
+    conn = ledger.get_connection(db_file)
+    ledger.seed_pricing(conn=conn)
+    base = "gemini-4-argon"
+
+    rates = ledger.get_pricing(f"{base}-{suffix}", conn=conn)
+    assert rates["model"] == base
+
+    # argon: 500k in * 2.00 + 100k cache * 0.10 + 10k out * 10.00 = $1.110000
+    res = ledger.calculate_cost_detailed(
+        input_tokens=500_000,
+        cache_read_tokens=100_000,
+        output_tokens=10_000,
+        model=f"{base}-{suffix}",
+        conn=conn,
+    )
+    assert res["cost_status"] == "usage_estimate"
+    assert res["cost_usd"] == 1.110000
+
+    conn.close()
+
+
+@pytest.mark.parametrize(
+    "model,expected_base",
+    [
+        ("gemini-4-hydrogen-low", "gemini-4-hydrogen"),
+        ("claude-sonnet-5-5-low", "claude-sonnet-5-5"),
+    ],
+)
+def test_pricing_real_telemetry_suffix_models(tmp_path: Path, model: str, expected_base: str):
+    """
+    Real-telemetry model ids recorded with effort suffixes resolve to their
+    base rate cards.
+    """
+    db_file = tmp_path / f"telemetry_{expected_base}.db"
+    conn = ledger.get_connection(db_file)
+    ledger.seed_pricing(conn=conn)
+
+    rates = ledger.get_pricing(model, conn=conn)
+    assert rates["model"] == expected_base
+
+    conn.close()
+
+
+def test_pricing_unknown_model_never_invents_rates(tmp_path: Path):
+    """
+    Unknown-model fallback: no base entry means unavailable, never borrowed rates.
+    Covers a non-suffixed unknown id and an effort-suffixed id with unknown base.
+    """
+    db_file = tmp_path / "unknown_model.db"
+    conn = ledger.get_connection(db_file)
+    ledger.seed_pricing(conn=conn)
+
+    for model in ("swe-2-max-lightning", "nonexistent-model-low"):
+        res = ledger.calculate_cost_detailed(
+            input_tokens=500_000,
+            cache_read_tokens=100_000,
+            output_tokens=10_000,
+            model=model,
+            conn=conn,
+        )
+        assert res["cost_usd"] is None
+        assert res["cost_status"] == "unavailable"
+        assert "model_rate_absent" in res["reasons"]
+
+    conn.close()
+

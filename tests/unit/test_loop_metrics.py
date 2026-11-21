@@ -381,7 +381,7 @@ def test_cross_model_task_stratification_no_blending(tmp_path: Path):
 
     for model_name, base_tok, icm_tok in [
         ("gemini-3.8-flash-low", 100_000, 60_000),
-        ("gemini-4-argon-low", 40_000, 30_000),
+        ("swe-2-max-lightning", 40_000, 30_000),
     ]:
         for arm, inp in [("baseline", base_tok), ("icm", icm_tok)]:
             ledger.record_run(
@@ -410,9 +410,9 @@ def test_cross_model_task_stratification_no_blending(tmp_path: Path):
     assert len(cum["tasks"]) == 2
     by_series = {t["series_id"]: t for t in cum["tasks"]}
     assert "BENCH-007::gemini-3.8-flash-low" in by_series
-    assert "BENCH-007::gemini-4-argon-low" in by_series
+    assert "BENCH-007::swe-2-max-lightning" in by_series
     assert by_series["BENCH-007::gemini-3.8-flash-low"]["arms"]["baseline"]["mean_input_tokens"] == 100_000.0
-    assert by_series["BENCH-007::gemini-4-argon-low"]["arms"]["baseline"]["mean_input_tokens"] == 40_000.0
+    assert by_series["BENCH-007::swe-2-max-lightning"]["arms"]["baseline"]["mean_input_tokens"] == 40_000.0
     assert by_series["BENCH-007::gemini-3.8-flash-low"]["has_measured_data"] is True
-    assert by_series["BENCH-007::gemini-4-argon-low"]["has_measured_data"] is False
+    assert by_series["BENCH-007::swe-2-max-lightning"]["has_measured_data"] is False
     conn.close()

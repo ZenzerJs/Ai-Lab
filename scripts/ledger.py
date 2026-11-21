@@ -29,6 +29,18 @@ DEFAULT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB_PATH = DEFAULT_ROOT / "data" / "usage.db"
 DEFAULT_PRICING_PATH = DEFAULT_ROOT / "config" / "PRICING.json"
 
+# Trailing effort levels telemetry appends to a base model id
+# (e.g. gemini-4-argon-low -> gemini-4-argon).
+EFFORT_SUFFIXES = frozenset({"low", "medium", "high", "xhigh"})
+
+
+def base_model_id(model: str) -> str:
+    """Strip one trailing effort suffix for pricing fallback lookups."""
+    base, sep, suffix = model.rpartition("-")
+    if sep and suffix.lower() in EFFORT_SUFFIXES:
+        return base
+    return model
+
 
 def sanitize_export_text(text: Optional[str]) -> Optional[str]:
     """Redact private file paths and sentinel secrets from public export."""
@@ -1333,6 +1345,13 @@ def get_pricing(model: str, conn: Optional[sqlite3.Connection] = None, db_path: 
             row = cursor.fetchone()
         except Exception:
             pass
+
+    if not row:
+        # Effort-suffixed ids resolve to the base model's rate card.
+        base = base_model_id(model)
+        if base != model:
+            cursor.execute("SELECT * FROM pricing WHERE model = ?", (base,))
+            row = cursor.fetchone()
 
     if not row:
         if should_close:
