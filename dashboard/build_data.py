@@ -284,12 +284,22 @@ def build_headline_block(
     if valid_tasks and cum.get("has_measured_data"):
         b_costs = []
         i_costs = []
+        n_paired_tasks = 0
         for t, gov_key in task_arms:
-            b_cost = t["arms"].get("baseline", {}).get("mean_cost_usd")
-            i_cost = t["arms"].get(gov_key, {}).get("mean_cost_usd")
-            if b_cost is not None and i_cost is not None:
-                b_costs.append(b_cost)
-                i_costs.append(i_cost)
+            # Only tasks whose arms share run_index pairs feed the paired cost
+            # totals in cumulative_savings; count and CI must match that set.
+            b_runs = {r.get("run_index"): r for r in t["arms"].get("baseline", {}).get("runs", [])}
+            g_runs = {r.get("run_index"): r for r in t["arms"].get(gov_key, {}).get("runs", [])}
+            paired = [
+                (b_runs[i].get("cost_usd"), g_runs[i].get("cost_usd"))
+                for i in sorted(set(b_runs) & set(g_runs))
+            ]
+            paired = [(b, g) for b, g in paired if b is not None and g is not None]
+            if not paired:
+                continue
+            n_paired_tasks += 1
+            b_costs.append(sum(b for b, _ in paired) / len(paired))
+            i_costs.append(sum(g for _, g in paired) / len(paired))
 
         tot_b = cum.get("total_baseline_cost_usd")
         tot_i = cum.get("total_icm_cost_usd")
@@ -305,7 +315,7 @@ def build_headline_block(
                 "icm": f"${tot_i:.4f}",
                 "n_baseline": b_pac.get("cost_eligible") or b_pac.get("completed", 0),
                 "n_icm": n_governed,
-                "n_tasks": len(valid_tasks),
+                "n_tasks": n_paired_tasks,
                 "source": "live CLI",
                 "ci95": ci,
             })
