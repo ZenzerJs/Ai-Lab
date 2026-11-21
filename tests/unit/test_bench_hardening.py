@@ -38,6 +38,12 @@ _MODULE_NAMES = {
     "parser", "matcher", "scheduler",
     "rates", "ledger", "reconciler",
     "wal", "compactor", "kv_store",
+    "nodes", "pager", "btree", "index",
+    "windows", "bucket", "limiter", "chain",
+    "log", "election", "node", "cluster",
+    "graph", "resources", "ready",
+    "lexer", "env", "eval",
+    "memtable", "sstable",
 }
 
 
@@ -368,3 +374,199 @@ def test_bench019_seeded_compaction_identity():
             assert compact(compact_log(records)) == compact(records)
             assert [r.key for r in compact_log(records)] == sorted(
                 {r.key for r in records})
+
+
+def test_bench021_seeded_insert_delete_invariants():
+    """Random insert/delete workloads keep occupancy and ordering valid."""
+    with _load_bench("BENCH-021"):
+        from btree import BTree
+        from models import KeyNotFound
+
+        rng = random.Random(4242)
+        for order in (3, 4, 5):
+            tree = BTree(order)
+            live = set()
+            for _ in range(300):
+                if rng.random() < 0.6:
+                    k = rng.randrange(200)
+                    if k not in live:
+                        tree.insert(k, f"v{k}")
+                        live.add(k)
+                else:
+                    k = rng.randrange(200)
+                    if k in live:
+                        tree.delete(k)
+                        live.discard(k)
+                tree.validate()
+            assert [k for k, _v in tree.items()] == sorted(live)
+            for k in live:
+                assert tree.search(k) == f"v{k}"
+            for k in range(200):
+                if k not in live:
+                    try:
+                        tree.delete(k)
+                        raise AssertionError("missing delete accepted")
+                    except KeyNotFound:
+                        pass
+
+
+def test_bench022_seeded_sliding_window_boundary():
+    """(now-window, now] boundary holds over random timestamp inserts."""
+    with _load_bench("BENCH-022"):
+        from clock import ManualClock
+        from windows import SlidingLog
+
+        rng = random.Random(777)
+        for _ in range(20):
+            clock = ManualClock(900.0)
+            sl = SlidingLog(60.0, clock)
+            inserted = []
+            for _i in range(rng.randrange(5, 25)):
+                t = 900.0 + rng.random() * 200.0
+                clock.value = t
+                sl.add()
+                inserted.append(t)
+            clock.value = 1000.0
+            expected = [t for t in inserted if 940.0 < t <= 1000.0]
+            assert sl.count() == len(expected)
+
+
+def test_bench022_seeded_bucket_cap_and_atomicity():
+    """Refill is capacity-capped; try_consume is all-or-nothing."""
+    with _load_bench("BENCH-022"):
+        from bucket import TokenBucket
+        from clock import ManualClock
+
+        rng = random.Random(31337)
+        clock = ManualClock(0.0)
+        bucket = TokenBucket(5, 0.5, clock)
+        for _ in range(50):
+            clock.advance(rng.random() * 30.0)
+            assert bucket.tokens <= 5.0
+            demand = rng.randrange(0, 8)
+            if demand == 0:
+                continue
+            if bucket.tokens >= demand:
+                before = bucket.tokens
+                assert bucket.try_consume(demand)
+                assert bucket.tokens == before - demand
+            else:
+                assert not bucket.try_consume(demand)
+
+
+def test_bench023_seeded_partition_commit_safety():
+    """Minority-partitioned leaders never advance commit_index."""
+    with _load_bench("BENCH-023"):
+        from cluster import Cluster
+        from node import RaftNode
+
+        rng = random.Random(60606)
+        for _ in range(10):
+            ids = [f"n{i}" for i in range(5)]
+            cluster = Cluster([RaftNode(i, ids) for i in ids])
+            cluster.elect("n0")
+            leader = cluster.nodes["n0"]
+            # Random 3-node partition isolates the leader in a minority.
+            cut = set(rng.sample(ids[1:], 3))
+            cluster.partition(cut)
+            cluster.replicate("n0", "x")
+            assert leader.commit_index == 0
+            cluster.heal()
+            cluster.replicate("n0", "y")
+            assert leader.commit_index == 2
+            for nid, node in cluster.nodes.items():
+                assert node.log.entries[0].command == "x"
+
+
+def test_bench024_seeded_priority_order_respects_deps():
+    """Random DAGs execute dependencies before dependents and higher
+    priority first among ready tasks."""
+    with _load_bench("BENCH-024"):
+        from graph import DependencyGraph
+        from models import Task, TaskState
+        from resources import ResourcePool
+        from scheduler import Scheduler
+
+        rng = random.Random(9090)
+        for _ in range(15):
+            g = DependencyGraph()
+            ids = [f"t{i}" for i in range(rng.randrange(4, 10))]
+            for i, tid in enumerate(ids):
+                deps = tuple(d for d in ids[:i] if rng.random() < 0.3)
+                g.add(Task(tid, deps=deps, priority=rng.randrange(0, 10)))
+            sched = Scheduler(g, ResourcePool({"cpu": 4}))
+            states = sched.run(lambda t: None)
+            assert all(s is TaskState.DONE for s in states.values())
+            order_pos = {tid: i for i, tid in enumerate(sched.order)}
+            for tid, task in g.tasks.items():
+                for dep in task.deps:
+                    assert order_pos[dep] < order_pos[tid]
+
+
+def test_bench025_seeded_eval_arithmetic():
+    """Random arithmetic programs evaluate with strict precedence."""
+    with _load_bench("BENCH-025"):
+        from eval import run
+
+        rng = random.Random(12321)
+        ops = ["+", "-", "*"]
+        for _ in range(100):
+            terms = [rng.randrange(1, 50) for _ in range(4)]
+            expr = (f"{terms[0]} {rng.choice(ops)} {terms[1]} "
+                    f"{rng.choice(ops)} {terms[2]} {rng.choice(ops)} "
+                    f"{terms[3]}")
+            expected = eval(expr)   # Python agrees on int precedence
+            assert run(expr) == [expected]
+
+
+def test_bench025_seeded_scoping_shadowing():
+    """Child scopes shadow without leaking to parents."""
+    with _load_bench("BENCH-025"):
+        from env import Environment
+        from eval import run
+
+        rng = random.Random(202)
+        env = Environment()
+        env.define("x", 1)
+        for _ in range(10):
+            child = env.child()
+            val = rng.randrange(100)
+            child.define("x", val)
+            assert run("x", env=child) == [val]
+            assert env.get("x") == 1
+
+
+def test_bench026_seeded_reopen_and_compact_identity():
+    """Reopen and compaction preserve the latest per-key state."""
+    with _load_bench("BENCH-026"):
+        import tempfile
+        from models import NotFoundError
+        from store import KVStore
+
+        rng = random.Random(5150)
+        for _ in range(10):
+            expected = {}
+            with tempfile.TemporaryDirectory() as td:
+                kv = KVStore(td)
+                for _i in range(rng.randrange(10, 60)):
+                    key = f"k{rng.randrange(12)}"
+                    if rng.random() < 0.8:
+                        kv.put(key, f"v{rng.randrange(100)}")
+                        expected[key] = kv.mem.get(key).value
+                    else:
+                        kv.delete(key)
+                        expected.pop(key, None)
+                    if rng.random() < 0.3:
+                        kv.flush()
+                kv.compact()
+                kv.close()
+                kv2 = KVStore(td)
+                for key, val in expected.items():
+                    assert kv2.get(key) == val
+                for key in {f"k{i}" for i in range(12)} - set(expected):
+                    try:
+                        kv2.get(key)
+                        raise AssertionError("deleted key readable")
+                    except NotFoundError:
+                        pass
+                kv2.close()

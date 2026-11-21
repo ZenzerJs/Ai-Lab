@@ -17,7 +17,7 @@ import {
   TaskSummaryItem,
 } from "../../types";
 import { formatArm, formatCurrency, formatTokens } from "../../lib/formatters";
-import { experimentNames, finite, governedArm, governedArmName } from "../../lib/workspace";
+import { armNames, experimentNames, finite, governedArm, governedArmName } from "../../lib/workspace";
 import AdaptiveICM from "./AdaptiveICM";
 
 function ContextOrbit() {
@@ -278,11 +278,17 @@ export function Overview({ data }: { data: DashboardPayload }) {
   const maxCost = Math.max(
     0.001,
     ...pricedTasks
-      .flatMap((task) => [
-        task.arms.baseline?.mean_cost_usd,
-        governedArm(task)?.mean_cost_usd,
-      ])
+      .flatMap((task) =>
+        armNames(task).map((n) => task.arms[n]?.mean_cost_usd),
+      )
       .filter(finite),
+  );
+  const legendArms = Array.from(
+    new Set(
+      pricedTasks.flatMap((task) =>
+        armNames(task).filter((n) => n !== "baseline"),
+      ),
+    ),
   );
   const maxBenchTokens = Math.max(
     1,
@@ -341,7 +347,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
         </div>
         <ContextOrbit />
       </section>
-      <AdaptiveICM />
+      <AdaptiveICM data={data} />
       <div className="section-heading results-heading">
         <h2>What the evidence says</h2>
         <span>
@@ -394,10 +400,12 @@ export function Overview({ data }: { data: DashboardPayload }) {
                 <i className="legend-baseline" />
                 Baseline
               </span>
-              <span>
-                <i className="legend-governed" />
-                Governed
-              </span>
+              {legendArms.map((n) => (
+                <span key={n}>
+                  <i className="legend-governed" />
+                  {formatArm(n)}
+                </span>
+              ))}
             </div>
           </div>
           <div
@@ -406,8 +414,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
             aria-label="Cost comparison in US dollars. Values for baseline and governed runs are labeled on each row."
           >
             {pricedTasks.map((task) => {
-              const baseline = task.arms.baseline?.mean_cost_usd,
-                governed = governedArm(task)?.mean_cost_usd;
+              const baseline = task.arms.baseline?.mean_cost_usd;
               const mdl = taskModel(task);
               return (
                 <div className="chart-row" key={taskKey(task)}>
@@ -436,20 +443,27 @@ export function Overview({ data }: { data: DashboardPayload }) {
                         {formatCurrency(baseline)}
                       </span>
                     </div>
-                    <div className="bar-line">
-                      <span
-                        className="bar bar-governed"
-                        style={{
-                          width: finite(governed)
-                            ? `${Math.max(1, (governed / maxCost) * 100)}%`
-                            : "0%",
-                        }}
-                      />
-                      <span className="bar-value">
-                        <span className="sr-only">{formatArm(governedArmName(task))} </span>
-                        {formatCurrency(governed)}
-                      </span>
-                    </div>
+                    {armNames(task)
+                      .filter((n) => n !== "baseline")
+                      .map((name) => {
+                        const cost = task.arms[name]?.mean_cost_usd;
+                        return (
+                          <div className="bar-line" key={name}>
+                            <span
+                              className="bar bar-governed"
+                              style={{
+                                width: finite(cost)
+                                  ? `${Math.max(1, (cost / maxCost) * 100)}%`
+                                  : "0%",
+                              }}
+                            />
+                            <span className="bar-value">
+                              <span className="sr-only">{formatArm(name)} </span>
+                              {formatCurrency(cost)}
+                            </span>
+                          </div>
+                        );
+                      })}
                   </div>
                 </div>
               );

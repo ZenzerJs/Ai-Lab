@@ -1,8 +1,37 @@
 import { ArrowRight, Layers3 } from "lucide-react";
-import { formatArm } from "../../lib/formatters";
+import { formatArm, formatCurrency } from "../../lib/formatters";
+import { armNames, finite } from "../../lib/workspace";
+import { DashboardPayload } from "../../types";
 
 /** Routing guidance, deliberately separate from the recorded benchmark results. */
-export default function AdaptiveICM() {
+export default function AdaptiveICM({ data }: { data?: DashboardPayload }) {
+  const armTotals = new Map<string, { runs: number; cost: number; n: number }>();
+  for (const task of data?.tasks || []) {
+    for (const name of armNames(task)) {
+      const arm = task.arms[name];
+      const cur = armTotals.get(name) || { runs: 0, cost: 0, n: 0 };
+      cur.runs +=
+        arm?.scheduled_count ??
+        arm?.evaluated_count ??
+        arm?.n ??
+        arm?.runs?.length ??
+        0;
+      if (finite(arm?.mean_cost_usd) && finite(arm?.cost_complete_n)) {
+        cur.cost += arm.mean_cost_usd * arm.cost_complete_n;
+        cur.n += arm.cost_complete_n;
+      } else if (finite(arm?.mean_cost_usd)) {
+        cur.cost += arm.mean_cost_usd * (arm?.n ?? 0);
+        cur.n += arm?.n ?? 0;
+      }
+      armTotals.set(name, cur);
+    }
+  }
+  const order = ["baseline", "icm", "icm_lite"];
+  const names = Array.from(armTotals.keys()).sort(
+    (a, b) => (order.indexOf(a) === -1 ? 9 : order.indexOf(a)) -
+      (order.indexOf(b) === -1 ? 9 : order.indexOf(b)) ||
+      a.localeCompare(b),
+  );
   return (
     <section className="adaptive-icm panel" aria-label="Adaptive ICM routing guidance">
       <div className="adaptive-heading">
@@ -32,6 +61,22 @@ export default function AdaptiveICM() {
         Unconstrained comparison arm. These are deterministic auto-routing rules informed by
         the empirical break-even range, not a guarantee of savings.
       </p>
+      {names.length > 0 && (
+        <div className="adaptive-measured" aria-label="Measured arm totals">
+          {names.map((name) => {
+            const t = armTotals.get(name)!;
+            return (
+              <span key={name} className="adaptive-arm-chip">
+                <span className={`badge ${name === "baseline" ? "badge-neutral" : "badge-purple"}`}>
+                  {formatArm(name)}
+                </span>
+                {" "}{t.runs} runs ·{" "}
+                {t.n ? formatCurrency(t.cost / t.n) : "—"} / run
+              </span>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }

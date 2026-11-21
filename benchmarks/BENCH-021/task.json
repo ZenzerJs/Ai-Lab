@@ -1,0 +1,15 @@
+{
+  "task_id": "BENCH-021",
+  "name": "B+Tree Index with Rebalancing and Range Scan",
+  "category": "data_structures",
+  "target_files": [
+    "models.py",
+    "nodes.py",
+    "pager.py",
+    "btree.py",
+    "index.py"
+  ],
+  "description": "Repair copy-up leaf splits, moved-up internal separators, search descent past equal separators, borrow/merge delete rebalancing with separator refresh, and inclusive range scans.",
+  "expected_broken_reason": "ordering_invariant_violation",
+  "planted_defect": "leaf split off-by-one keeps wrong entries and pushes the wrong separator, internal split leaves promoted key in the node, search descends left on equal separators, delete never rebalances, range_scan excludes the hi bound, validate() stubbed"
+}

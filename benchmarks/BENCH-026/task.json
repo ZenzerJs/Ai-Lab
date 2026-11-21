@@ -1,0 +1,15 @@
+{
+  "task_id": "BENCH-026",
+  "name": "LSM-Style Key-Value Store",
+  "category": "storage",
+  "target_files": [
+    "models.py",
+    "wal.py",
+    "memtable.py",
+    "sstable.py",
+    "store.py"
+  ],
+  "description": "Repair CRC32 frame verification, sorted memtable/segment ordering, highest-seq merge, tombstone semantics, WAL truncation on flush, and sequence resume across reopen.",
+  "expected_broken_reason": "storage_invariant_violation",
+  "planted_defect": "checksums never verified, unordered segments, last-write-wins merge ignores seq, tombstones ignored on reads, WAL never truncated, seq resets on reopen"
+}
