@@ -30,6 +30,10 @@ TASK_IDS = [
     "BENCH-006",
     "BENCH-007",
     "BENCH-008",
+    "BENCH-009",
+    "BENCH-010",
+    "BENCH-011",
+    "BENCH-012",
 ]
 
 
@@ -341,4 +345,3 @@ sys.exit(0)
     assert verif.passed is False
     assert verif.verification_status == "evaluator_error"
     assert "evaluator_tampered_during_execution" in verif.reasons
-

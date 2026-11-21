@@ -35,6 +35,15 @@ def test_auto_uses_declared_target_footprint_and_estimate(tmp_path, metadata, ar
     assert resolve_mode("auto", metadata, tmp_path) == arm
 
 
+@pytest.mark.parametrize("task_id", ["BENCH-007", "BENCH-008", "BENCH-009", "BENCH-010", "BENCH-011", "BENCH-012"])
+def test_bench_multifile_metadata_routes_to_full_icm(task_id):
+    task_dir = runner.WORKSPACE_ROOT / "benchmarks" / task_id
+    metadata = json.loads((task_dir / "task.json").read_text(encoding="utf-8"))
+    assert len(metadata["target_files"]) == 4
+    assert all((task_dir / "workspace" / name).is_file() for name in metadata["target_files"])
+    assert resolve_mode("auto", metadata, task_dir / "workspace") == "icm"
+
+
 @pytest.mark.parametrize(("line_count", "arm"), [(149, "icm_lite"), (150, "icm")])
 def test_auto_counts_physical_lines_of_the_named_file_only(tmp_path, line_count, arm):
     (tmp_path / "target.py").write_text("pass\n" * line_count, encoding="utf-8")

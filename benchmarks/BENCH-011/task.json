@@ -1,0 +1,13 @@
+{
+  "task_id": "BENCH-011",
+  "name": "Versioned Event Store and Snapshot Replay",
+  "category": "event_sourcing",
+  "target_files": [
+    "schema.py",
+    "upcaster.py",
+    "store.py",
+    "projector.py"
+  ],
+  "description": "Repair chained schema upcasting, optimistic concurrency, immutable event storage and snapshot-tail replay equivalence.",
+  "expected_broken_reason": "event_store_invariant_violation"
+}

@@ -1,0 +1,13 @@
+{
+  "task_id": "BENCH-010",
+  "name": "DAG Scheduler and Failure Propagation",
+  "category": "graph_and_state",
+  "target_files": [
+    "models.py",
+    "graph.py",
+    "scheduler.py",
+    "executor.py"
+  ],
+  "description": "Fix deterministic ready-node ordering, cycle paths, transitive failure skips and idempotent execution.",
+  "expected_broken_reason": "dag_invariant_violation"
+}
