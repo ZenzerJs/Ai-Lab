@@ -45,11 +45,13 @@ def run_checks():
 
     def reader_checks():
         stream = io.StringIO(
-            '{"a": 1}\n\n   \nnot json\n[1, 2]\n{"b": 2}\n"str"\n')
+            '{"a": 1}\n\n   \nnot json\n[1, 2]\n{"b": 2}\n"str"\n'
+            '{"x": NaN}\n{"y": Infinity}\n')
         records = list(iter_jsonl(stream))
         assert [(r.line_no, r.error) for r in records] == [
             (1, None), (4, "invalid_json"), (5, "not_object"),
-            (6, None), (7, "not_object"),
+            (6, None), (7, "not_object"), (8, "invalid_json"),
+            (9, "invalid_json"),
         ]
         assert records[0].data == {"a": 1}
         assert records[1].data == "not json"
@@ -83,6 +85,7 @@ def run_checks():
             ({"name": "a", "count": 1, "ratio": "inf"}, "bad_type:ratio"),
             ({"name": "a", "count": 1, "ratio": float("inf")}, "bad_type:ratio"),
             ({"name": "a", "count": 1, "ratio": True}, "bad_type:ratio"),
+            ({"name": "a", "count": 1, "ratio": 10 ** 400}, "bad_type:ratio"),
             ({"name": 5, "count": 1, "ratio": 1.0}, "bad_type:name"),
             ({"name": "a", "ratio": 1.0}, "missing_field:count"),
             ({"name": "a", "count": None, "ratio": 1.0}, "missing_field:count"),

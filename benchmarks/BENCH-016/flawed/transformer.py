@@ -50,6 +50,6 @@ class Transformer:
                 return None, f"missing_field:{name}"
             try:
                 clean[name] = coerce(data[name], kind)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, OverflowError):
                 return None, f"bad_type:{name}"
         return clean, None

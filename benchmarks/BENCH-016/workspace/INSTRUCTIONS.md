@@ -14,7 +14,8 @@ Use Python stdlib only; no network or paid services.
   DeadLetter instances, and requires summary counts to match their lengths.
 - reader.iter_jsonl(stream) yields one RawRecord per nonempty line with a
   1-based line_no: parsed JSON dicts pass through as data; invalid JSON yields
-  error="invalid_json" with the raw line text as data; valid non-dict JSON
+  error="invalid_json" with the raw line text as data (non-standard bare
+  literals like NaN/Infinity are also invalid_json); valid non-dict JSON
   yields error="not_object". Blank/whitespace-only lines are skipped ENTIRELY.
   Malformed input never raises.
   reader.iter_csv(stream) wraps csv.DictReader over the stream; line numbers
