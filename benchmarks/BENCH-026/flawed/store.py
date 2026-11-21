@@ -17,6 +17,11 @@ class KVStore:
         for entry in self.wal.recover():
             self.mem.put(entry)
             self._seq = max(self._seq, entry.seq)
+        # Sequence numbers must not be reused across flushes: resume
+        # from the highest seq already sealed into a segment.
+        for path in self._segment_paths():
+            for entry in read_segment(path):
+                self._seq = max(self._seq, entry.seq)
 
     def _segment_paths(self):
         names = sorted(n for n in os.listdir(self.dir)
@@ -69,9 +74,13 @@ class KVStore:
         if len(paths) <= 1:
             return
         merged = merge_segments(paths, drop_tombstones=True)
+        dest = os.path.join(self.dir, "seg0000.log")
+        # Write before removing: a failed merge must leave persisted
+        # segments intact.
+        write_segment(dest, merged)
         for path in paths:
-            os.remove(path)
-        write_segment(os.path.join(self.dir, "seg0000.log"), merged)
+            if path != dest:
+                os.remove(path)
 
     def close(self):
         self.wal.close()
