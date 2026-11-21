@@ -9,5 +9,6 @@
     "middleware.py"
   ],
   "description": "Repair clock injection, exact refill precision, tenant isolation, and atomic multi-bucket multi-token consumption across four modules.",
-  "expected_broken_reason": "token_bucket_invariant_violation"
+  "expected_broken_reason": "token_bucket_invariant_violation",
+  "planted_defect": "Clock injection bypassed (time.monotonic), float-precision refill, tenant isolation broken (key=name), non-atomic multi-bucket consumption"
 }

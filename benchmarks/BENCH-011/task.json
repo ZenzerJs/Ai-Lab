@@ -9,5 +9,6 @@
     "projector.py"
   ],
   "description": "Repair chained schema upcasting, optimistic concurrency, immutable event storage and snapshot-tail replay equivalence.",
-  "expected_broken_reason": "event_store_invariant_violation"
+  "expected_broken_reason": "event_store_invariant_violation",
+  "planted_defect": "upcast stops after one migration step (if vs while), append accepts expected_version > current, events stored/returned mutable (no deepcopy), projector replays from version 0 ignoring snapshot"
 }

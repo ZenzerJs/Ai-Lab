@@ -9,5 +9,6 @@
     "executor.py"
   ],
   "description": "Fix deterministic ready-node ordering, cycle paths, transitive failure skips and idempotent execution.",
-  "expected_broken_reason": "dag_invariant_violation"
+  "expected_broken_reason": "dag_invariant_violation",
+  "planted_defect": "topological_order returns insertion order (no cycle path, no deterministic ready ordering), should_skip ignores transitive 'skipped', executor re-runs non-pending tasks"
 }

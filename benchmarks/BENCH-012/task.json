@@ -9,5 +9,6 @@
     "policy_engine.py"
   ],
   "description": "Fix deny precedence, safe resource matching, cycle-safe role inheritance and complete audit logging.",
-  "expected_broken_reason": "rbac_invariant_violation"
+  "expected_broken_reason": "rbac_invariant_violation",
+  "planted_defect": "audit log drops denied decisions, prefix matching without segment validation, first-match wins instead of deny precedence, role inheritance not cycle-safe"
 }
