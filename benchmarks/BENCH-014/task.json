@@ -1,0 +1,13 @@
+{
+  "task_id": "BENCH-014",
+  "name": "Structured Query Filter AST and Safe SQL Compiler",
+  "category": "parsing_and_security",
+  "target_files": [
+    "ast_nodes.py",
+    "parser.py",
+    "validator.py",
+    "compiler.py"
+  ],
+  "description": "Repair AST node validation, filter parsing precedence, field allowlist enforcement, and parameterized SQL generation across four modules.",
+  "expected_broken_reason": "sql_compiler_invariant_violation"
+}

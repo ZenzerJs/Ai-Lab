@@ -1,0 +1,13 @@
+{
+  "task_id": "BENCH-013",
+  "name": "Distributed Lock and Fencing-Token Lease Manager",
+  "category": "concurrency_and_leases",
+  "target_files": [
+    "models.py",
+    "clock.py",
+    "lock_store.py",
+    "coordinator.py"
+  ],
+  "description": "Repair monotonic fencing tokens, lease expiry and reclamation, ownership-checked release and renewal, and contention-safe acquisition across four modules.",
+  "expected_broken_reason": "lease_invariant_violation"
+}

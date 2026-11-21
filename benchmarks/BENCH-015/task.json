@@ -1,0 +1,13 @@
+{
+  "task_id": "BENCH-015",
+  "name": "Signed Webhook Ingress and Idempotency Gateway",
+  "category": "ingress_security",
+  "target_files": [
+    "models.py",
+    "signer.py",
+    "idempotency.py",
+    "gateway.py"
+  ],
+  "description": "Repair constant-time HMAC verification, replay-window tolerance, idempotency deduplication and conflict handling, and payload integrity across four modules.",
+  "expected_broken_reason": "webhook_invariant_violation"
+}
