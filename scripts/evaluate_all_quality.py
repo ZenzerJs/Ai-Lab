@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.campaign import score_workspace, prepare_blind_ab_packet, compute_quality_ci
+from scripts.complexity_router import ICM_LITE
 
 
 def _count_ndjson_errors(pattern: str) -> int:
@@ -67,9 +68,13 @@ def _load_db_verdicts(db_path: Optional[Path] = None) -> Dict[Tuple[str, str], b
         cur.execute(f"SELECT task_id, arm, verification_status FROM runs {sim_filter} ORDER BY id ASC")
         for tid, arm, status in cur.fetchall():
             arm_l = (arm or "").lower()
-            bucket = "baseline" if arm_l == "baseline" else ("governed" if arm_l in ("icm", "icm-subagents", "governed", "delegation") else None)
-            if bucket:
-                verdicts[(tid, bucket)] = (status == "passed")
+            if arm_l == "baseline":
+                bucket = "baseline"
+            elif arm_l in ("icm", "icm-subagents", "governed", "delegation", ICM_LITE):
+                bucket = "governed"
+            else:
+                continue
+            verdicts[(tid, bucket)] = (status == "passed")
     except Exception:
         return {}
     finally:

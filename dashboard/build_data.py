@@ -25,6 +25,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import ledger
 import campaign
+from complexity_router import ICM_LITE
 
 # Ensure UTF-8 output encoding
 if hasattr(sys.stdout, "reconfigure"):
@@ -34,6 +35,22 @@ if hasattr(sys.stderr, "reconfigure"):
 
 OUTPUT_PATH = DASHBOARD_DIR / "public" / "data.json"
 OPS_DB_PATH = WORKSPACE_ROOT / "data" / "ops_exp005.db"
+GOVERNED_ARMS = ("icm-subagents", "icm", "delegation", "governed", ICM_LITE)
+
+
+def _governed_key(arms: Dict[str, Any], preferred: Optional[str] = None) -> Optional[str]:
+    if preferred and preferred in arms:
+        return preferred
+    return next((arm for arm in GOVERNED_ARMS if arm in arms), None)
+
+
+def _arm_bucket(arm: Optional[str]) -> Optional[str]:
+    arm = (arm or "").lower()
+    if arm == "baseline":
+        return arm
+    if arm in GOVERNED_ARMS:
+        return "icm"
+    return None
 
 
 def get_build_identity() -> str:
@@ -141,7 +158,9 @@ def build_operational_block(ops_db_path: Optional[Path] = None) -> Dict[str, Any
     # Aggregate per task/arm
     agg: Dict[str, Dict[str, Dict[str, float]]] = {}
     for r in runs:
-        tid, arm = r["task_id"], r["arm"]
+        tid, arm = r["task_id"], _arm_bucket(r["arm"])
+        if arm is None:
+            continue
         agg.setdefault(tid, {}).setdefault(arm, {"n": 0, "turns": 0, "duration": 0.0})
         a = agg[tid][arm]
         a["n"] += 1
@@ -169,7 +188,7 @@ def build_operational_block(ops_db_path: Optional[Path] = None) -> Dict[str, Any
     def _arm_defect_count(arm_name: str) -> Optional[int]:
         if defect_col is None:
             return None
-        arm_rows = [r for r in raw_rows if (r.get("arm") or "").lower() == arm_name]
+        arm_rows = [r for r in raw_rows if _arm_bucket(r.get("arm")) == arm_name]
         if not arm_rows:
             return None
         if defect_col == "verification_status":
@@ -256,12 +275,17 @@ def build_headline_block(
     # H1: Delta cost per passing task (%)
     # Requires >= 1 task with valid measured data
     valid_tasks = [t for t in tasks if t.get("has_measured_data") and t.get("savings")]
+    counts = cum.get("per_arm_counts", {})
+    b_pac = counts.get("baseline", {})
+    task_arms = [(t, _governed_key(t["arms"], t.get("governed_arm"))) for t in valid_tasks]
+    governed_keys = {key for _, key in task_arms if key}
+    governed_counts = [counts.get(key, {}) for key in sorted(governed_keys)]
+    n_governed = sum(row.get("cost_eligible") or row.get("completed", 0) for row in governed_counts)
     if valid_tasks and cum.get("has_measured_data"):
         b_costs = []
         i_costs = []
-        for t in valid_tasks:
+        for t, gov_key in task_arms:
             b_cost = t["arms"].get("baseline", {}).get("mean_cost_usd")
-            gov_key = "icm-subagents" if "icm-subagents" in t["arms"] else "icm"
             i_cost = t["arms"].get(gov_key, {}).get("mean_cost_usd")
             if b_cost is not None and i_cost is not None:
                 b_costs.append(b_cost)
@@ -272,8 +296,6 @@ def build_headline_block(
         if tot_b is not None and tot_i is not None and tot_b > 0:
             pct = round((tot_b - tot_i) / tot_b * 100.0, 1)
             ci = compute_bootstrap_ci(b_costs, i_costs)
-            b_pac = cum.get("per_arm_counts", {}).get("baseline", {})
-            i_pac = cum.get("per_arm_counts", {}).get("icm", {})
             stats.append({
                 "id": "cost_reduction",
                 "label": "Cost Reduction per Task",
@@ -282,7 +304,7 @@ def build_headline_block(
                 "baseline": f"${tot_b:.4f}",
                 "icm": f"${tot_i:.4f}",
                 "n_baseline": b_pac.get("cost_eligible") or b_pac.get("completed", 0),
-                "n_icm": i_pac.get("cost_eligible") or i_pac.get("completed", 0),
+                "n_icm": n_governed,
                 "n_tasks": len(valid_tasks),
                 "source": "live CLI",
                 "ci95": ci,
@@ -314,8 +336,6 @@ def build_headline_block(
         b_cache = cum.get("baseline_cache_hit_pct")
         i_cache = cum.get("icm_cache_hit_pct")
         if b_cache is not None and i_cache is not None:
-            b_pac = cum.get("per_arm_counts", {}).get("baseline", {})
-            i_pac = cum.get("per_arm_counts", {}).get("icm", {})
             stats.append({
                 "id": "cache_efficiency",
                 "label": "Prompt Cache Hit Ratio",
@@ -324,17 +344,18 @@ def build_headline_block(
                 "baseline": f"{round(b_cache, 1)}%",
                 "icm": f"{round(i_cache, 1)}%",
                 "n_baseline": b_pac.get("cost_eligible") or b_pac.get("completed", 0),
-                "n_icm": i_pac.get("cost_eligible") or i_pac.get("completed", 0),
+                "n_icm": n_governed,
                 "n_tasks": len(valid_tasks),
                 "source": "live CLI",
             })
 
     # H4: Cross-model Tokens per Passing Patch
     if valid_tasks and cum.get("has_measured_data"):
-        b_pac = cum.get("per_arm_counts", {}).get("baseline", {})
-        i_pac = cum.get("per_arm_counts", {}).get("icm", {})
         b_tpp = b_pac.get("tokens_per_passing_patch")
-        i_tpp = i_pac.get("tokens_per_passing_patch")
+        i_passes = sum(row.get("passed_count", 0) for row in governed_counts)
+        i_tpp = None
+        if i_passes and all(row.get("tokens_per_passing_patch") is not None for row in governed_counts):
+            i_tpp = sum(row["tokens_per_passing_patch"] * row["passed_count"] for row in governed_counts) / i_passes
         if (
             isinstance(b_tpp, (int, float))
             and isinstance(i_tpp, (int, float))
@@ -352,7 +373,7 @@ def build_headline_block(
                 "baseline": f"{int(round(b_tpp)):,}",
                 "icm": f"{int(round(i_tpp)):,}",
                 "n_baseline": b_pac.get("passed_count", 0),
-                "n_icm": i_pac.get("passed_count", 0),
+                "n_icm": i_passes,
                 "n_tasks": len(tasks),
                 "source": f"{n_models} models" if n_models else "live CLI",
             })
@@ -437,12 +458,8 @@ def _compute_db_tool_errors(raw_runs: List[Dict[str, Any]]) -> Optional[Dict[str
     for r in raw_runs:
         if r.get("is_simulation") or (r.get("source_kind") or "").lower() == "imported":
             continue
-        arm_l = (r.get("arm") or "").lower()
-        if arm_l == "baseline":
-            bucket = "baseline"
-        elif arm_l in ("icm", "icm-subagents", "governed", "delegation"):
-            bucket = "icm"
-        else:
+        bucket = _arm_bucket(r.get("arm"))
+        if bucket is None:
             continue
 
         err_count: Optional[int] = None
@@ -493,7 +510,7 @@ def _build_multi_file_outlines(cum_tasks: List[Dict[str, Any]]) -> List[Dict[str
             continue
         arms = t.get("arms") or {}
         b_arm = arms.get("baseline")
-        gov_key = "icm-subagents" if "icm-subagents" in arms else ("icm" if "icm" in arms else None)
+        gov_key = _governed_key(arms, t.get("governed_arm"))
         g_arm = arms.get(gov_key) if gov_key else None
         if not b_arm or not g_arm:
             continue
@@ -637,7 +654,7 @@ def build_data_payload(
             multi_mdl = len(models_per_tid.get(tid, set())) > 1
             for ridx in sorted(task_pairs[(tid, mdl)]):
                 arms = task_pairs[(tid, mdl)][ridx]
-                gov_arm = "icm-subagents" if "icm-subagents" in arms else ("icm" if "icm" in arms else None)
+                gov_arm = _governed_key(arms)
                 if not gov_arm:
                     for k in arms:
                         if k != "baseline":

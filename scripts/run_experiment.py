@@ -37,6 +37,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import ledger
+from complexity_router import ICM_LITE, MODES, build_mode_prompt, resolve_mode
 
 # Ensure UTF-8 output encoding
 if hasattr(sys.stdout, "reconfigure"):
@@ -223,7 +224,9 @@ def execute_dry_run(
         sys.stderr.write(f"✗ No fixture events matched task ID '{task_id}' in {fixtures_path}\n")
         sys.exit(1)
 
+    selected_arms = ("baseline", "icm")
     if target_arm and target_arm != "both":
+        selected_arms = (target_arm,)
         arm_runs = [k for k in runs_events if k[0] == target_arm]
         if not arm_runs:
             sys.stderr.write(f"✗ Fixtures must contain '{target_arm}' arm events.\n")
@@ -234,7 +237,6 @@ def execute_dry_run(
                 f"but fixture only contains {len(arm_runs)}.\n"
             )
             sys.exit(1)
-        filtered_keys = [k for k in sorted(runs_events.keys()) if k[0] == target_arm and k[1] <= runs_per_arm]
     else:
         baseline_runs = [k for k in runs_events if k[0] == "baseline"]
         icm_runs = [k for k in runs_events if k[0] == "icm"]
@@ -264,11 +266,11 @@ def execute_dry_run(
             runs_per_arm=runs_per_arm,
         )
 
-        filtered_keys = [k for k in sorted(runs_events.keys()) if k[1] <= runs_per_arm]
-
+    filtered_keys = [k for k in sorted(runs_events) if k[0] in selected_arms and k[1] <= runs_per_arm]
     recorded_run_ids = []
     print(f"[*] Parsing and storing {len(filtered_keys)} simulated run(s) for task '{task_id}' ({runs_per_arm} per arm)...")
-    ledger.clear_task_runs(task_id, db_path=db_path, arm=target_arm if target_arm != "both" else None)
+    for arm in selected_arms:
+        ledger.clear_task_runs(task_id, db_path=db_path, arm=arm)
 
     for key in filtered_keys:
         ev_lines = runs_events[key]
@@ -351,6 +353,7 @@ def execute_live_run(
     run_index: int,
     cli_cmd: str,
     target_repo_path: Path,
+    use_mode_contract: bool = False,
 ) -> Dict[str, Any]:
     """
     Execute a single live headless run using Antigravity CLI.
@@ -364,10 +367,13 @@ def execute_live_run(
     prompt = task["prompt"]
     model = task["model"]
 
-    effective_prompt = prompt if arm == "baseline" else (
-        f"Execute the following task strictly conforming to the workspace ICM pipeline "
-        f"(01_intake -> 02_plan -> 03_exec -> 04_verify):\n\n{prompt}"
-    )
+    if use_mode_contract:
+        effective_prompt = build_mode_prompt(prompt, arm)
+    else:
+        effective_prompt = prompt if arm == "baseline" else (
+            f"Execute the following task strictly conforming to the workspace ICM pipeline "
+            f"(01_intake -> 02_plan -> 03_exec -> 04_verify):\n\n{prompt}"
+        )
     prompt_hash = hashlib.sha256(effective_prompt.encode("utf-8")).hexdigest()
 
     cmd_args = [
@@ -482,11 +488,17 @@ def main():
         default=None,
         help="Custom path to SQLite database (default: data/usage.db)",
     )
-    parser.add_argument(
+    routing = parser.add_mutually_exclusive_group()
+    routing.add_argument(
         "--arm",
         choices=["baseline", "icm", "icm-subagents", "both"],
         default="both",
         help="Arm to execute: 'baseline', 'icm', 'icm-subagents', or 'both' (default: both)",
+    )
+    routing.add_argument(
+        "--mode",
+        choices=MODES,
+        help="Select one contract arm (auto routes by task scope)",
     )
     parser.add_argument(
         "--clear",
@@ -532,7 +544,10 @@ def main():
 
     task_id = task["task_id"]
     runs_per_arm = task["runs_per_arm"]
+    target_repo_path = (task_path.parent / task["target_repo"]).resolve()
     arm_to_run = args.arm
+    if args.mode is not None:
+        arm_to_run = resolve_mode(args.mode, task["frontmatter"], target_repo_path)
 
     # Invariant checks across task definition
     verify_fairness_invariants(
@@ -555,6 +570,8 @@ def main():
     print(f"  Task ID:        {task_id}")
     print(f"  Model:          {task['model']}")
     print(f"  Arm:            {arm_to_run.upper()}")
+    if args.mode is not None:
+        print(f"  Routing mode:   {args.mode}")
     if args.skills:
         print(f"  Active Skills:  {args.skills}")
     if args.subagents:
@@ -569,8 +586,8 @@ def main():
     if args.dry_run or not cli_executable:
         if not args.dry_run and not cli_executable:
             print(f"[*] Live CLI not detected on PATH. Executing simulated telemetry runner for task '{task_id}'...")
-        if args.clear:
-            ledger.clear_task_runs(task_id, db_path=db_path, arm=arm_to_run if arm_to_run != "both" else None)
+        if args.clear and arm_to_run == "both":
+            ledger.clear_task_runs(task_id, db_path=db_path)
         execute_dry_run(
             task_id=task_id,
             fixtures_path=Path(args.fixtures),
@@ -579,8 +596,6 @@ def main():
             target_arm=arm_to_run,
         )
     else:
-        target_repo_path = (task_path.parent / task["target_repo"]).resolve()
-
         if arm_to_run in ("baseline", "both"):
             print(f"\n[*] Starting Baseline Arm ({runs_per_arm} runs)...")
             if args.clear:
@@ -612,7 +627,7 @@ def main():
                     db_path=db_path,
                 )
 
-        if arm_to_run in ("icm", "icm-subagents", "both"):
+        if arm_to_run in ("icm", "icm-subagents", ICM_LITE, "both"):
             target_gov_arm = "icm" if arm_to_run == "both" else arm_to_run
             print(f"\n[*] Starting {target_gov_arm.upper()} Arm ({runs_per_arm} runs)...")
             if args.clear:
@@ -620,7 +635,10 @@ def main():
             for i in range(1, runs_per_arm + 1):
                 run_idx = get_next_run_index(task_id, target_gov_arm, db_path=db_path)
                 print(f"  → Running {target_gov_arm.upper()} Arm #{run_idx}...")
-                res = execute_live_run(task, target_gov_arm, run_idx, cli_executable, target_repo_path)
+                res = execute_live_run(
+                    task, target_gov_arm, run_idx, cli_executable, target_repo_path,
+                    use_mode_contract=args.mode is not None,
+                )
                 u = res["parsed"]["usage"]
                 ledger.record_run(
                     task_id=task_id,
