@@ -1,0 +1,13 @@
+{
+  "task_id": "BENCH-016",
+  "name": "Streaming CSV and JSONL ETL Pipeline with Dead-Letter Routing",
+  "category": "streaming_etl",
+  "target_files": [
+    "models.py",
+    "reader.py",
+    "transformer.py",
+    "pipeline.py"
+  ],
+  "description": "Repair streaming row parsing, schema validation and coercion, dead-letter error isolation, and deterministic summary metrics across four modules.",
+  "expected_broken_reason": "etl_invariant_violation"
+}
