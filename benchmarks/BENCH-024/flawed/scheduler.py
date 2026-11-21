@@ -32,6 +32,10 @@ class Scheduler:
                     queue.push(task)
                     self.states[tid] = TaskState.READY
             if len(queue) == 0:
+                # SKIPPED dependents are terminal, not a deadlock.
+                if all(self.states[tid] is TaskState.SKIPPED
+                       for tid in pending):
+                    break
                 raise DeadlockError(
                     f"deadlocked: {sorted(pending)}")
             progressed = False

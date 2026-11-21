@@ -13,13 +13,17 @@ class ResourcePool:
         self.capacities = dict(capacities)
         self._in_use = {name: 0 for name in capacities}
 
+    def _totals(self, needs):
+        totals = {}
+        for name, units in needs:
+            totals[name] = totals.get(name, 0) + units
+        return totals
+
     def check(self, needs):
         """True iff every requested unit fits the pool's capacity."""
-        for name, units in needs:
+        for name, units in self._totals(needs).items():
             cap = self.capacities.get(name)
-            if cap is None:
-                return False
-            if units > cap:
+            if cap is None or units > cap:
                 return False
         return True
 
@@ -27,10 +31,11 @@ class ResourcePool:
         """All-or-nothing: acquire every unit or none (never partial)."""
         if not self.check(needs):
             return False
-        for name, units in needs:
+        totals = self._totals(needs)
+        for name, units in totals.items():
             if self._in_use[name] + units > self.capacities[name]:
                 return False
-        for name, units in needs:
+        for name, units in totals.items():
             self._in_use[name] += units
         return True
 
