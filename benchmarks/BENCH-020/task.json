@@ -1,0 +1,13 @@
+{
+  "task_id": "BENCH-020",
+  "name": "Circuit Breaker, Bulkhead and Idempotent Retry Client",
+  "category": "state_and_precision",
+  "target_files": [
+    "models.py",
+    "breaker.py",
+    "bulkhead.py",
+    "client.py"
+  ],
+  "description": "Repair injectable-clock circuit breaker transitions, half-open probe gating, concurrency bulkhead limits, and idempotent-only retry with recorded backoff.",
+  "expected_broken_reason": "resilience_invariant_violation"
+}

@@ -1,0 +1,13 @@
+{
+  "task_id": "BENCH-019",
+  "name": "Checksummed WAL and Crash-Recovery Key-Value Store",
+  "category": "state_and_precision",
+  "target_files": [
+    "models.py",
+    "wal.py",
+    "compactor.py",
+    "kv_store.py"
+  ],
+  "description": "Repair CRC32-framed WAL encoding, corrupt-tail truncation on replay, tombstone-safe compaction, and snapshot/WAL replay equivalence.",
+  "expected_broken_reason": "wal_recovery_invariant_violation"
+}
