@@ -16,7 +16,7 @@ class EventStore:
         current = self.version(stream_id)
         if type(expected_version) is not int or expected_version != current:
             raise ConflictError("expected version does not match")
-        batch = deepcopy(list(events))
+        batch = [deepcopy(event) for event in events]
         for offset, event in enumerate(batch, 1):
             if not isinstance(event, Event):
                 raise ValueError("expected Event")
