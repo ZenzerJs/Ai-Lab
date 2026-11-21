@@ -35,7 +35,7 @@ def test_auto_uses_declared_target_footprint_and_estimate(tmp_path, metadata, ar
     assert resolve_mode("auto", metadata, tmp_path) == arm
 
 
-@pytest.mark.parametrize("task_id", ["BENCH-007", "BENCH-008", "BENCH-009"])
+@pytest.mark.parametrize("task_id", ["BENCH-007", "BENCH-008", "BENCH-009", "BENCH-010"])
 def test_bench_multifile_metadata_routes_to_full_icm(task_id):
     task_dir = runner.WORKSPACE_ROOT / "benchmarks" / task_id
     metadata = json.loads((task_dir / "task.json").read_text(encoding="utf-8"))
