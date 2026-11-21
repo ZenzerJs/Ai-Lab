@@ -9,5 +9,6 @@
     "compiler.py"
   ],
   "description": "Repair AST node validation, filter parsing precedence, field allowlist enforcement, and parameterized SQL generation across four modules.",
-  "expected_broken_reason": "sql_compiler_invariant_violation"
+  "expected_broken_reason": "sql_compiler_invariant_violation",
+  "planted_defect": "flat AND/OR precedence, validator never recurses into And/Or/Not, literal interpolation instead of parameterized SQL, missing AST node validation"
 }
