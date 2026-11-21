@@ -101,6 +101,13 @@ def run_checks():
             assert pair[1].replace(tzinfo=None) == datetime(2026, 11, 2, 1, 30)
             assert pair[1].utcoffset() == timedelta(hours=-5)
             assert pair[0].astimezone(timezone.utc) == datetime(2026, 11, 1, 5, 30, tzinfo=timezone.utc)
+            # Inside the repeated hour (1:30 EST), strictly-after holds by instant.
+            after3 = datetime(2026, 11, 1, 6, 30, tzinfo=timezone.utc)
+            nxt = next_run(parse("45 1 * * *"), after3, ny)
+            assert nxt.astimezone(timezone.utc) > after3
+            assert nxt.replace(tzinfo=None) == datetime(2026, 11, 1, 1, 45)
+            assert nxt.fold == 1
+            assert nxt.utcoffset() == timedelta(hours=-5)
             # Hourly schedule across the fall-back night sees each wall hour once.
             hourly = next_runs(parse("15 * * * *"), after2, ny, 4)
             assert [r.replace(tzinfo=None) for r in hourly] == [

@@ -28,8 +28,9 @@ Python stdlib only (zoneinfo allowed); no network, sleeps, or paid services.
   strictly after `after` (which must be timezone-aware), ascending. `tz` is
   a zoneinfo.ZoneInfo or an IANA name string. Scanning happens over local
   wall-clock minutes in `tz`: nonexistent times (spring-forward gap) never
-  match, ambiguous times (fall-back overlap) yield only their first
-  (fold=0) occurrence. count < 1 raises ValueError; a schedule with no
+  match, ambiguous times (fall-back overlap) yield their first (fold=0)
+  occurrence unless it is already past `after`, in which case the second
+  occurrence applies. count < 1 raises ValueError; a schedule with no
   matching run within five years raises ValueError.
 - scheduler.next_run(schedule, after, tz) is next_runs(..., 1)[0].
 

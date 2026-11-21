@@ -9,16 +9,18 @@ _SEARCH_LIMIT = timedelta(days=366 * 5)
 
 
 def _localize(tz, naive):
-    """Attach tz to a naive wall-clock datetime.
+    """UTC instants a wall-clock minute maps to.
 
-    Returns None for nonexistent wall-clock times (spring-forward gap);
-    ambiguous times (fall-back overlap) resolve to the first occurrence.
+    Empty for nonexistent times (spring-forward gap); one instant for
+    normal times; both occurrences for ambiguous times (fall-back).
     """
-    aware = naive.replace(tzinfo=tz)  # fold defaults to 0
-    roundtrip = aware.astimezone(timezone.utc).astimezone(tz)
-    if roundtrip.replace(tzinfo=None) != naive:
-        return None
-    return aware
+    instants = set()
+    for fold in (0, 1):
+        aware = naive.replace(tzinfo=tz, fold=fold)
+        utc = aware.astimezone(timezone.utc)
+        if utc.astimezone(tz).replace(tzinfo=None) == naive:
+            instants.add(utc)
+    return instants
 
 
 def next_runs(schedule, after, tz, count):
@@ -26,26 +28,27 @@ def next_runs(schedule, after, tz, count):
 
     `tz` is a zoneinfo.ZoneInfo or an IANA timezone name. Skipped
     wall-clock times (DST gaps) never match; ambiguous times yield their
-    first (fold=0) occurrence only. Raises ValueError when `count` < 1 or
-    no further run exists within five years.
+    first (fold=0) occurrence unless that instant is already past `after`,
+    in which case the second occurrence applies. Raises ValueError when
+    `count` < 1 or no further run exists within five years.
     """
     if isinstance(tz, str):
         tz = ZoneInfo(tz)
     if count < 1:
         raise ValueError("count must be positive")
-    cursor = after.astimezone(tz).replace(second=0, microsecond=0) + timedelta(minutes=1)
-    naive = cursor.replace(tzinfo=None)
+    after_utc = after.astimezone(timezone.utc)
+    naive = after.astimezone(tz).replace(second=0, microsecond=0, tzinfo=None)
     deadline = naive + _SEARCH_LIMIT
-    results = []
-    while len(results) < count:
+    instants = set()
+    while len(instants) < count:
         if naive > deadline:
             raise ValueError("no matching run within five years")
         if matches(schedule, naive):
-            aware = _localize(tz, naive)
-            if aware is not None:
-                results.append(aware)
+            future = sorted(u for u in _localize(tz, naive) if u > after_utc)
+            if future:
+                instants.add(future[0])
         naive += timedelta(minutes=1)
-    return results
+    return [u.astimezone(tz) for u in sorted(instants)[:count]]
 
 
 def next_run(schedule, after, tz):
