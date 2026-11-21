@@ -1,0 +1,13 @@
+{
+  "task_id": "BENCH-009",
+  "name": "Multi-File Token-Bucket Rate Limiter",
+  "category": "state_and_precision",
+  "target_files": [
+    "models.py",
+    "bucket.py",
+    "registry.py",
+    "middleware.py"
+  ],
+  "description": "Repair clock injection, exact refill precision, tenant isolation, and atomic multi-bucket multi-token consumption across four modules.",
+  "expected_broken_reason": "token_bucket_invariant_violation"
+}
