@@ -48,7 +48,8 @@ test('governed selection honors Lite explicitly and preserves legacy precedence'
 });
 
 test('the published snapshot still resolves its original governed comparisons', () => {
-  assert.equal(snapshot.runs.length, 134);
+  assert.equal(snapshot.runs.length, 162);
+  assert.equal(snapshot.runs.filter((r) => r.arm === 'icm_lite').length, 4);
   for (const task of snapshot.tasks) {
     assert.equal(governedArmName(task), 'icm');
     assert.equal(governedArm(task), task.arms.icm);
@@ -77,14 +78,14 @@ test('simulation uses the same explicitly selected Lite arm in savings and timel
   assert.equal(data.runs[2].arm, 'icm_lite');
 });
 
-test('routing callout describes policy boundaries without claiming Lite measurements', () => {
+test('routing callout describes policy boundaries as deterministic routing rules', () => {
   const AdaptiveICM = require('../src/components/workspace/AdaptiveICM.tsx').default;
   const markup = renderToStaticMarkup(React.createElement(AdaptiveICM));
   assert.match(markup, /ICM-Lite/);
   assert.match(markup, /&lt;150 LOC <strong>and<\/strong> exactly 1 target file/);
   assert.match(markup, /≥150 LOC <strong>or<\/strong> 2\+ target files/);
   assert.match(markup, /Unknown scope defaults here/);
-  assert.match(markup, /not a guarantee of savings or measured ICM-Lite results/);
+  assert.match(markup, /not a guarantee of savings/);
 });
 
 test('all three workspace views render old and Lite payloads without changing raw IDs', () => {

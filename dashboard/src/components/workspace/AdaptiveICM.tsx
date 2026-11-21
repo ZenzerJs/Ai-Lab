@@ -29,8 +29,8 @@ export default function AdaptiveICM() {
       </div>
       <p className="adaptive-note">
         <span className="badge badge-neutral">{formatArm("baseline")}</span>
-        Unconstrained comparison arm. These are auto-routing rules informed by
-        the empirical break-even range, not a guarantee of savings or measured ICM-Lite results.
+        Unconstrained comparison arm. These are deterministic auto-routing rules informed by
+        the empirical break-even range, not a guarantee of savings.
       </p>
     </section>
   );

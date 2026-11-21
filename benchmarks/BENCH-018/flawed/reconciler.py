@@ -36,7 +36,7 @@ class Reconciler:
         on either side (the missing side counts as zero).
         """
         keys = set(expected)
-        for legs in self.ledger.entries():
+        for _entry_id, legs in self.ledger.entries():
             for leg in legs:
                 keys.add((leg.account, leg.money.currency))
         discrepancies = []
