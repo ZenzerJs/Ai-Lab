@@ -298,8 +298,11 @@ def build_headline_block(
             if not paired:
                 continue
             n_paired_tasks += 1
-            b_costs.append(sum(b for b, _ in paired) / len(paired))
-            i_costs.append(sum(g for _, g in paired) / len(paired))
+            # Weight the bootstrap by pair, matching cumulative_savings'
+            # totals: every matched run counts equally, not every task.
+            for b, g in paired:
+                b_costs.append(b)
+                i_costs.append(g)
 
         tot_b = cum.get("total_baseline_cost_usd")
         tot_i = cum.get("total_icm_cost_usd")
