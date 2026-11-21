@@ -39,7 +39,7 @@ class KVStore:
     @classmethod
     def recover(cls, wal_path):
         """Rebuild a store by replaying `wal_path` (corrupt tail truncated)."""
-        store = cls()
+        store = cls(wal_path)
         for record in wal.replay(wal_path):
             if record.op == "put":
                 store._data[record.key] = record.value

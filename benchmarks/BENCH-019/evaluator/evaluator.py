@@ -66,6 +66,10 @@ def run_checks():
                 assert wal.replay(path3) == [Record("put", "k", b"v")]
                 assert wal.truncate(path3) == 1
                 assert len(path3.read_bytes()) == len(encode(Record("put", "k", b"v")))
+                # Appends land after the corrupt tail and stay replayable.
+                wal.append(path3, Record("put", "late", b"7"))
+                assert wal.replay(path3) == [Record("put", "k", b"v"),
+                                             Record("put", "late", b"7")]
                 assert wal.replay(Path(tmp) / "absent.wal") == []
                 assert wal.truncate(Path(tmp) / "absent.wal") == 0
 
@@ -106,6 +110,10 @@ def run_checks():
                 recovered = KVStore.recover(path)
                 assert recovered.snapshot() == store.snapshot()
                 assert recovered.snapshot() == {"beta": b"2"}
+                # A recovered store keeps logging to its WAL.
+                recovered.put("gamma", b"3")
+                assert KVStore.recover(path).snapshot() == {"beta": b"2",
+                                                            "gamma": b"3"}
                 # Snapshot/WAL equivalence after compaction.
                 from compactor import compact_log as clog
                 compacted = Path(tmp) / "kv2.wal"
@@ -117,7 +125,7 @@ def run_checks():
                 raw[-2] ^= 0xFF
                 torn = Path(tmp) / "torn.wal"
                 torn.write_bytes(bytes(raw))
-                assert KVStore.recover(torn).snapshot() == {"alpha": b"1", "beta": b"2"}
+                assert KVStore.recover(torn).snapshot() == {"beta": b"2"}
                 pure = KVStore()
                 pure.put("in-memory", b"only")
                 assert pure.snapshot() == {"in-memory": b"only"}

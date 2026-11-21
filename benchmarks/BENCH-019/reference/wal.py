@@ -5,11 +5,23 @@ from models import Record, encode, scan
 
 
 def append(path, record):
-    """Append one framed record to the WAL at `path`."""
+    """Append one framed record at the end of `path`'s valid prefix.
+
+    A corrupt or truncated tail is dropped first, so appended records are
+    always reachable by replay().
+    """
     if not isinstance(record, Record):
         raise ValueError("append requires a Record")
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        data = path.read_bytes()
+        end = 0
+        for _record, frame_end in scan(data):
+            end = frame_end
+        if end < len(data):
+            with open(path, "r+b") as handle:
+                handle.truncate(end)
     with open(path, "ab") as handle:
         handle.write(encode(record))
 

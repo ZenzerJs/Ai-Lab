@@ -16,9 +16,11 @@ Python stdlib only (zlib for CRC32); no network, sleeps, or paid services.
 - models.scan(data) yields (record, end_offset) for each VALID frame and
   stops silently at the first corrupt, truncated, or malformed frame;
   trailing garbage never raises.
-- wal.append(path, record) appends one frame (parents created, ValueError
-  on non-Record). wal.replay(path) returns records up to the first bad
-  frame — corrupt-tail truncation — and [] for a missing file.
+- wal.append(path, record) appends one frame at the end of the valid
+  prefix — a corrupt tail is dropped first so appended records always
+  replay (parents created, ValueError on non-Record). wal.replay(path)
+  returns records up to the first bad frame — corrupt-tail truncation —
+  and [] for a missing file.
   wal.truncate(path) rewrites the file dropping the corrupt suffix and
   returns the number of records kept.
 - compactor.compact(records) -> live key->value dict: last op wins, a
@@ -32,6 +34,7 @@ Python stdlib only (zlib for CRC32); no network, sleeps, or paid services.
   snapshot() is an independent dict (mutations do not leak back).
 - KVStore.recover(wal_path) rebuilds state via wal.replay — corrupt tails
   truncate — and its snapshot must equal the live store's snapshot
-  (snapshot/WAL replay equivalence, including tombstones).
+  (snapshot/WAL replay equivalence, including tombstones). The recovered
+  store keeps wal_path: subsequent mutations still mirror into the WAL.
 
 Visible tests are smoke coverage, not the complete specification.
