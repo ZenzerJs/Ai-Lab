@@ -9,5 +9,6 @@
     "coordinator.py"
   ],
   "description": "Repair monotonic fencing tokens, lease expiry and reclamation, ownership-checked release and renewal, and contention-safe acquisition across four modules.",
-  "expected_broken_reason": "lease_invariant_violation"
+  "expected_broken_reason": "lease_invariant_violation",
+  "planted_defect": "fencing tokens from len(locks)+1 (non-monotonic reuse), no lease expiry/reclamation, unchecked release/renew ownership, non-atomic acquire"
 }

@@ -9,5 +9,6 @@
     "kv_store.py"
   ],
   "description": "Repair CRC32-framed WAL encoding, corrupt-tail truncation on replay, tombstone-safe compaction, and snapshot/WAL replay equivalence.",
-  "expected_broken_reason": "wal_recovery_invariant_violation"
+  "expected_broken_reason": "wal_recovery_invariant_violation",
+  "planted_defect": "no CRC32 framing, replay raises on corrupt tail instead of truncating, append doesn't drop corrupt tail, compact is first-op-wins without tombstones, get returns None not KeyError, snapshot leaks mutable dict"
 }
