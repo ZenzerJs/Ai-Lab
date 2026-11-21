@@ -5,6 +5,8 @@ on:
     branches: [main, chore/agentic-scaffold]
   pull_request:
     branches: [main]
+    # labeled/unlabeled: re-run so the snapshot guard sees data-publish label changes
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 jobs:
   verify-stack:
