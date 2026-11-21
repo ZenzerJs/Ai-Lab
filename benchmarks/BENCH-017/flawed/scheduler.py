@@ -6,6 +6,9 @@ from zoneinfo import ZoneInfo
 from matcher import matches
 
 _SEARCH_LIMIT = timedelta(days=366 * 5)
+# Any zone's UTC offset stays within +/-14h, so a wall minute's instants
+# can fall at most 14h away from the scan cursor.
+_OFFSET_SPAN = timedelta(hours=14)
 
 
 def _localize(tz, naive):
@@ -37,18 +40,28 @@ def next_runs(schedule, after, tz, count):
     if count < 1:
         raise ValueError("count must be positive")
     after_utc = after.astimezone(timezone.utc)
-    naive = after.astimezone(tz).replace(second=0, microsecond=0, tzinfo=None)
+    # Start 14h early: second (fold=1) occurrences of earlier wall minutes
+    # can still land after `after`.
+    naive = after.astimezone(tz).replace(second=0, microsecond=0,
+                                       tzinfo=None) - _OFFSET_SPAN
     deadline = naive + _SEARCH_LIMIT
-    instants = set()
-    while len(instants) < count:
+    instants = sorted(set())
+    while True:
         if naive > deadline:
+            if len(instants) >= count:
+                break
             raise ValueError("no matching run within five years")
+        # A wall minute maps no earlier than naive - 14h; once the count-th
+        # result precedes that bound no earlier instant can still appear.
+        if len(instants) >= count \
+                and naive - _OFFSET_SPAN > instants[count - 1].replace(tzinfo=None):
+            break
         if matches(schedule, naive):
             future = sorted(u for u in _localize(tz, naive) if u > after_utc)
             if future:
-                instants.add(future[0])
+                instants = sorted(instants + [future[0]])
         naive += timedelta(minutes=1)
-    return [u.astimezone(tz) for u in sorted(instants)[:count]]
+    return [u.astimezone(tz) for u in instants[:count]]
 
 
 def next_run(schedule, after, tz):
