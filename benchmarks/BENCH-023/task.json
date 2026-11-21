@@ -1,0 +1,15 @@
+{
+  "task_id": "BENCH-023",
+  "name": "Raft-Lite Election and Log Replication Core",
+  "category": "consensus",
+  "target_files": [
+    "models.py",
+    "log.py",
+    "election.py",
+    "node.py",
+    "cluster.py"
+  ],
+  "description": "Repair term fencing, one-vote-per-term grants, candidate log freshness checks, prev-match append acceptance, majority-gated commits, and committed-entry truncation safety.",
+  "expected_broken_reason": "consensus_safety_violation",
+  "planted_defect": "votes always granted and re-granted per term, log freshness unchecked, leader elected on quorum-1, append accepts mismatched prev entries, commit advances on minority, truncation drops committed entries"
+}

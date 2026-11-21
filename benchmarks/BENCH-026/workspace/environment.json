@@ -1,0 +1,6 @@
+{
+  "task_id": "BENCH-026",
+  "runtime": "python",
+  "python_version": ">=3.10",
+  "dependencies": []
+}

@@ -42,6 +42,12 @@ TASK_IDS = [
     "BENCH-018",
     "BENCH-019",
     "BENCH-020",
+    "BENCH-021",
+    "BENCH-022",
+    "BENCH-023",
+    "BENCH-024",
+    "BENCH-025",
+    "BENCH-026",
 ]
 
 

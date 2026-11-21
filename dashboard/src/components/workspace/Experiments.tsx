@@ -6,9 +6,9 @@ import {
   FlaskConical,
   Search,
 } from "lucide-react";
-import { DashboardPayload } from "../../types";
-import { experimentNames, finite, governedArm, governedArmName } from "../../lib/workspace";
-import { formatArm, formatCurrency, formatTokens } from "../../lib/formatters";
+import { ArmStats, DashboardPayload } from "../../types";
+import { armNames, experimentNames, finite, governedArm, governedArmName, suiteBootstrapCI } from "../../lib/workspace";
+import { formatArm, formatCurrency, formatSignedPercent, formatTokens } from "../../lib/formatters";
 import AdaptiveICM from "./AdaptiveICM";
 
 export default function Experiments({ data }: { data: DashboardPayload }) {
@@ -74,7 +74,7 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
           {data.tasks?.length || 0} series · {uniqueTaskCount} tasks
         </span>
       </div>
-      <AdaptiveICM />
+      <AdaptiveICM data={data} />
       <div className="toolbar">
         <label className="search-field">
           <Search size={18} />
@@ -159,6 +159,11 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
           const cardModel =
             task.model || baseline?.model || governed?.model || "";
           const cardKey = task.series_id || `${task.task_id}::${cardModel}`;
+          const arms = armNames(task);
+          const governedNames = arms.filter((n) => n !== "baseline");
+          const ciByArm = Object.fromEntries(
+            governedNames.map((n) => [n, suiteBootstrapCI(task, n)]),
+          );
           return (
             <article key={cardKey} className="panel experiment-card">
               <div className="experiment-card-heading">
@@ -173,7 +178,9 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
                     </span>
                     <h2>{experimentNames[task.task_id] || task.task_id}</h2>
                     <span className="badge badge-neutral">Baseline</span>{" "}
-                    <span className="badge badge-purple">{formatArm(governedArmName(task))}</span>
+                    {governedNames.map((n) => (
+                      <span key={n} className="badge badge-purple">{formatArm(n)}</span>
+                    ))}{" "}
                   </div>
                 </div>
                 <span
@@ -230,10 +237,22 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
                       <span>Baseline cost / run</span>
                       <strong>{formatCurrency(baseline?.mean_cost_usd)}</strong>
                     </div>
-                    <div>
-                      <span>{formatArm(governedArmName(task))} cost / run</span>
-                      <strong>{formatCurrency(governed?.mean_cost_usd)}</strong>
-                    </div>
+                    {governedNames.map((name) => {
+                      const arm = task.arms[name];
+                      const ci = ciByArm[name];
+                      return (
+                        <div key={name}>
+                          <span>{formatArm(name)} cost / run</span>
+                          <strong>{formatCurrency(arm?.mean_cost_usd)}</strong>
+                          {ci && (
+                            <span className="confidence">
+                              95% CI Δ {formatSignedPercent(ci[0])} to{" "}
+                              {formatSignedPercent(ci[1])}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
                     <div>
                       <span>{lower ? "Cost reduction" : "Cost overhead"}</span>
                       <strong
@@ -277,68 +296,65 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
                     <thead>
                       <tr>
                         <th scope="col">Per-run measure</th>
-                        <th scope="col">Baseline</th>
-                        <th scope="col">{formatArm(governedArmName(task))}</th>
+                        {arms.map((n) => (
+                          <th key={n} scope="col">{formatArm(n)}</th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {[
-                        ["Pass rate", fmtPass(baseline), fmtPass(governed)],
+                      {([
+                        ["Pass rate", (a) => fmtPass(a)],
                         [
                           "Tokens / pass",
-                          formatTokens(bTok),
-                          formatTokens(gTok),
+                          (a) => formatTokens(a?.tokens_per_passing_patch),
                         ],
                         [
                           "Input tokens",
-                          formatTokens(baseline?.mean_input_tokens),
-                          formatTokens(governed?.mean_input_tokens),
+                          (a) => formatTokens(a?.mean_input_tokens),
                         ],
                         [
                           "Cache read tokens",
-                          formatTokens(baseline?.mean_cache_read_tokens),
-                          formatTokens(governed?.mean_cache_read_tokens),
+                          (a) => formatTokens(a?.mean_cache_read_tokens),
                         ],
                         [
                           "Output tokens",
-                          formatTokens(baseline?.mean_output_tokens),
-                          formatTokens(governed?.mean_output_tokens),
+                          (a) => formatTokens(a?.mean_output_tokens),
                         ],
                         [
                           "Thinking tokens",
-                          formatTokens(baseline?.mean_thinking_tokens),
-                          formatTokens(governed?.mean_thinking_tokens),
+                          (a) => formatTokens(a?.mean_thinking_tokens),
                         ],
-                        ["Duration", fmtDur(baseline), fmtDur(governed)],
+                        ["Duration", (a) => fmtDur(a)],
                         [
                           "Agent turns",
-                          baseline?.mean_num_turns ?? "—",
-                          governed?.mean_num_turns ?? "—",
+                          (a) => a?.mean_num_turns ?? "—",
                         ],
-                        [
-                          "Tool calls (errors)",
-                          fmtTools(baseline),
-                          fmtTools(governed),
-                        ],
+                        ["Tool calls (errors)", (a) => fmtTools(a)],
                         [
                           "Loop flags",
-                          baseline?.loop_runs_count != null
-                            ? String(baseline.loop_runs_count)
-                            : "—",
-                          governed?.loop_runs_count != null
-                            ? String(governed.loop_runs_count)
-                            : "—",
+                          (a) =>
+                            a?.loop_runs_count != null
+                              ? String(a.loop_runs_count)
+                              : "—",
                         ],
+                        ["Model", (a) => a?.model || "—"],
                         [
-                          "Model",
-                          baseline?.model || "—",
-                          governed?.model || "—",
+                          "95% CI cost Δ vs baseline",
+                          (_a, name) =>
+                            name === "baseline"
+                              ? "—"
+                              : ciByArm[name]
+                                ? `${formatSignedPercent(ciByArm[name][0])} to ${formatSignedPercent(ciByArm[name][1])}`
+                                : "—",
                         ],
-                      ].map(([label, b, g]) => (
+                      ] as [string, (a: ArmStats | undefined, name: string) => React.ReactNode][]).map(([label, cell]) => (
                         <tr key={label}>
                           <th scope="row">{label}</th>
-                          <td>{b}</td>
-                          <td>{g}</td>
+                          {arms.map((name) => (
+                            <td key={name}>
+                              {cell(task.arms[name], name)}
+                            </td>
+                          ))}
                         </tr>
                       ))}
                     </tbody>
