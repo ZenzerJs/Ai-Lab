@@ -2,6 +2,7 @@
   "task_id": "BENCH-003",
   "name": "Behaviour-Preserving Event Parser Refactor",
   "category": "refactoring",
+  "target_files": ["event_parser.py", "event_parser/models.py", "event_parser/validator.py", "event_parser/normalizer.py", "event_parser/__init__.py"],
   "description": "Split monolithic event parser into maintainable modular package while preserving exact golden outputs, exception types, Unicode handling, and public entry points.",
   "expected_broken_reason": "structural_refactor_incomplete"
 }

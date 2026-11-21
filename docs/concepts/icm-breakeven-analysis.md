@@ -64,5 +64,24 @@ The empirical break-even threshold where ICM becomes cost-positive occurs at:
 2. **File Footprint:** $\ge 2$ interacting files (e.g. implementation + test suite or multi-module imports).
 3. **Execution Depth:** $\ge 2$ interactive agent turns.
 
-### Architectural Recommendation: Adaptive ICM
-For tasks below 100 LOC and 1 file, an **ICM-Lite** protocol (single contract with 1-turn execution) eliminates fixed markdown overhead while retaining AST symbol filtering and output sanitation. Full 5-stage ICM governance is optimal for multi-file systems engineering.
+## 4. Adaptive ICM Routing
+
+The opt-in `--mode auto` router uses **ICM-Lite** only when the task has exactly one target file and an estimated size below 150 LOC. At **150 LOC or two target files**, and when the scope or size is unknown, it uses full five-stage ICM: Intake, Plan, Execution, Verification, and Retrospective. The cutoff is a deterministic policy informed by the break-even range, not a guarantee of cost savings.
+
+Declare the edit footprint in benchmark `task.json` (paths relative to its `workspace/`) or experiment task YAML frontmatter (paths relative to `target_repo`). List edited or created files, including tests, not files merely read. For example:
+
+```yaml
+target_files: [src/slugify.py]
+estimated_loc: 48
+```
+
+The router counts distinct declared paths, or uses `target_files_count` when there is no list. It uses `estimated_loc` if supplied, otherwise the upper bound of `target_loc_range` (e.g. `"120-150"`), then the physical line count of a named file that already exists. Supply an estimate for a new file; the router does not infer scope by scanning the workspace or interpreting task prose.
+
+Use `--mode icm` to force the five-stage contract, `--mode icm-lite` to force the single-stage `icm_lite` contract, or `--mode baseline` for the original prompt without governance. ICM-Lite keeps scope, symbol-level inspection, diff-only editing, and sanitized verification together without separate stage files.
+
+```bash
+python3 scripts/runner.py --live-bench BENCH-001 --mode auto
+python3 scripts/run_experiment.py --task MOCK-001 --mode auto --dry-run
+```
+
+`--mode` selects one arm and cannot be combined with `--arm`. Omitting it preserves the legacy prompts and default arms (baseline for live benchmarks, baseline plus ICM for experiments). Dry runs replay fixtures for the selected arm rather than generating a contract run, so a Lite replay requires fixtures labeled `icm_lite`. The original `MOCK-001 --dry-run` command still replays both legacy arms.

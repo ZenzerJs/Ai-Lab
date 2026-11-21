@@ -47,6 +47,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import stat
 import ledger
+from complexity_router import MODES, build_mode_prompt, resolve_mode
 
 DEFAULT_FIXTURES_PATH = WORKSPACE_ROOT / "experiments" / "fixtures" / "mock_stream.ndjson"
 DEFAULT_EVIDENCE_DIR = WORKSPACE_ROOT / "experiments" / "evidence"
@@ -1591,6 +1592,7 @@ def run_benchmark_live(
     timeout_seconds: int = 180,
     db_path: Optional[Path] = None,
     workspace_root: Optional[Path] = None,
+    mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Execute a live benchmark task using the agy CLI in an isolated DisposableWorkspace.
@@ -1598,10 +1600,17 @@ def run_benchmark_live(
     grades via ProtectedEvaluator, rolls back on failure, and persists run + run_events.
     """
     _validate_identifier(task_id, "task_id")
-    _validate_identifier(arm, "arm")
-
     task_dir = WORKSPACE_ROOT / "benchmarks" / task_id
     snapshot_dir = task_dir / "workspace"
+    if mode is not None:
+        metadata_path = task_dir / "task.json"
+        metadata = {}
+        if mode == "auto" and metadata_path.is_file():
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        arm = resolve_mode(mode, metadata, snapshot_dir)
+        print(f"[*] Routing mode '{mode}' selected arm '{arm}'.")
+    _validate_identifier(arm, "arm")
+
     evaluator_dir = task_dir / "evaluator"
     if not snapshot_dir.is_dir():
         raise FileNotFoundError(f"Benchmark workspace not found: {snapshot_dir}")
@@ -1612,7 +1621,10 @@ def run_benchmark_live(
     if not instructions_path.is_file():
         raise FileNotFoundError(f"INSTRUCTIONS.md not found in {snapshot_dir}")
     instructions_text = instructions_path.read_text(encoding="utf-8")
-    prompt = _build_live_prompt(instructions_text, arm)
+    if mode is None:
+        prompt = _build_live_prompt(instructions_text, arm)
+    else:
+        prompt = build_mode_prompt(instructions_text, arm)
 
     evaluator = ProtectedEvaluator(evaluator_dir)
     run_uid = f"live_{task_id}_{os.getpid()}_{int(time.time() * 1000)}"
@@ -1847,13 +1859,17 @@ def main():
     parser.add_argument("--smoke", action="store_true", help="Run fixture-only end-to-end smoke workflow")
     parser.add_argument("--live-bench", nargs="?", const="BENCH-001", default=None, help="Run a live benchmark task (e.g., --live-bench --task BENCH-002)")
     parser.add_argument("--task", default=None, help="Benchmark task ID for --live-bench (default: BENCH-001)")
-    parser.add_argument("--arm", default="baseline", help="Experiment arm for --live-bench (default: baseline)")
+    routing = parser.add_mutually_exclusive_group()
+    routing.add_argument("--arm", default="baseline", help="Experiment arm for --live-bench (default: baseline)")
+    routing.add_argument("--mode", choices=MODES, help="Select a live benchmark contract (auto routes by task scope)")
     parser.add_argument("--run-index", type=int, default=1, help="Run index for --live-bench (default: 1)")
     parser.add_argument("--model", default="gemini-4-hydrogen-low", help="Model ID for --live-bench")
     parser.add_argument("--cli", default="agy", help="CLI executable for --live-bench (default: agy)")
     parser.add_argument("--timeout", type=int, default=180, help="Timeout seconds for --live-bench (default: 180)")
     parser.add_argument("--db", default=None, help="Custom database path for smoke or runner execution")
     args = parser.parse_args()
+    if args.mode is not None and (args.smoke or args.live_bench is None):
+        parser.error("--mode requires --live-bench without --smoke")
 
     if args.smoke:
         print("[*] Running Phase 2 Fixture-Only Smoke Flow...")
@@ -1865,7 +1881,7 @@ def main():
     if args.live_bench is not None:
         target_task = args.task or args.live_bench
         db_path = Path(args.db) if args.db else None
-        print(f"[*] Running live benchmark {target_task} ({args.arm} #{args.run_index}, model={args.model})...")
+        print(f"[*] Running live benchmark {target_task} ({args.mode or args.arm} #{args.run_index}, model={args.model})...")
         res = run_benchmark_live(
             task_id=target_task,
             arm=args.arm,
@@ -1874,6 +1890,7 @@ def main():
             cli_cmd=args.cli,
             timeout_seconds=args.timeout,
             db_path=db_path,
+            mode=args.mode,
         )
         print(f"✓ Live benchmark finished: status={res['execution_status']} verify={res['verification_status']} cost_status={res['cost_status']} rolled_back={res['rolled_back']}")
         if res.get("quota_exhausted"):

@@ -1967,7 +1967,7 @@ def backfill_tool_metrics_from_evidence(
 
 
 _ORPHAN_EVIDENCE_RE = re.compile(
-    r"^live_(?P<task_id>[A-Za-z0-9-]+?)(?:_(?P<model_slug>[a-z0-9][a-z0-9._-]+))?_(?P<arm>baseline|icm|icm-subagents|delegation)_run(?P<run_idx>\d+)_(?P<epoch>\d+)\.ndjson$"
+    r"^live_(?P<task_id>[A-Za-z0-9-]+?)(?:_(?P<model_slug>[a-z0-9][a-z0-9._-]+))?_(?P<arm>baseline|icm|icm_lite|icm-subagents|delegation)_run(?P<run_idx>\d+)_(?P<epoch>\d+)\.ndjson$"
 )
 
 
