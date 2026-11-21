@@ -46,6 +46,8 @@ class RaftNode:
             return False
         if self.role is not Role.CANDIDATE or not reply.granted:
             return False
+        if reply.term != self.current_term:
+            return False
         self._votes.add(reply.voter_id)
         if len(self._votes) >= self.quorum:
             self.role = Role.LEADER
@@ -98,6 +100,11 @@ class RaftNode:
     def on_append_reply(self, reply):
         """Leader tracks match indexes; a majority match on a current-term
         entry advances commit_index."""
+        if reply.term > self.current_term:
+            self.current_term = reply.term
+            self.role = Role.FOLLOWER
+            self.voted_for = None
+            return False
         if self.role is not Role.LEADER or not reply.success:
             return False
         self.match_index[reply.follower_id] = reply.match_index

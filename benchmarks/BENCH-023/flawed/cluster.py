@@ -1,5 +1,6 @@
 """Deterministic cluster: synchronous message routing between nodes."""
-from models import AppendEntries, AppendReply, RequestVote, VoteReply
+from models import (AppendEntries, AppendReply, RequestVote, Role,
+                    VoteReply)
 
 
 class Cluster:
@@ -18,6 +19,8 @@ class Cluster:
         raise ValueError(f"unknown message {type(message).__name__}")
 
     def broadcast(self, sender_id, messages):
+        if sender_id in self.blocked:
+            return []
         replies = []
         for target_id, msg in zip(
                 [p for p in self.nodes if p != sender_id], messages):
@@ -33,9 +36,8 @@ class Cluster:
             candidate_id, candidate.start_election())
         for reply in replies:
             if isinstance(reply, VoteReply):
-                if candidate.on_vote_reply(reply):
-                    return candidate_id
-        return None
+                candidate.on_vote_reply(reply)
+        return candidate_id if candidate.role is Role.LEADER else None
 
     def replicate(self, leader_id, command):
         """Append a command on the leader and deliver to followers,
@@ -43,6 +45,8 @@ class Cluster:
         leader = self.nodes[leader_id]
         msgs = leader.append_command(command)
         commit_at_send = leader.commit_index
+        if leader_id in self.blocked:
+            return commit_at_send
         for target_id, msg in zip(
                 [p for p in self.nodes if p != leader_id], msgs):
             prev_index = msg.prev_index
