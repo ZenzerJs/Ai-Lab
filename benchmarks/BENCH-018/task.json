@@ -1,0 +1,13 @@
+{
+  "task_id": "BENCH-018",
+  "name": "Multi-Currency Ledger and FX Reconciliation Engine",
+  "category": "state_and_precision",
+  "target_files": [
+    "models.py",
+    "rates.py",
+    "ledger.py",
+    "reconciler.py"
+  ],
+  "description": "Repair exact Decimal half-even rounding, effective-timestamp FX lookup, balanced multi-leg journal validation, and deterministic discrepancy reconciliation.",
+  "expected_broken_reason": "ledger_fx_invariant_violation"
+}

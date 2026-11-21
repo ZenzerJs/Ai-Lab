@@ -1,0 +1,13 @@
+{
+  "task_id": "BENCH-017",
+  "name": "Cron Expression Parser and Timezone-Aware Scheduler",
+  "category": "scheduling",
+  "target_files": [
+    "models.py",
+    "parser.py",
+    "matcher.py",
+    "scheduler.py"
+  ],
+  "description": "Repair 5-field cron parsing, day-of-month/weekday match semantics, and DST-safe next-run scheduling over zoneinfo.",
+  "expected_broken_reason": "cron_schedule_invariant_violation"
+}
