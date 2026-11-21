@@ -749,6 +749,7 @@ def build_data_payload(
             quality_block = None
 
         payload = {
+            "schema_version": "1.0",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "build_identity": get_build_identity(),
             "has_data": has_data,
@@ -804,6 +805,7 @@ def main():
             # Emit a minimal valid placeholder so the dashboard renders without errors
             out_path.parent.mkdir(parents=True, exist_ok=True)
             placeholder = {
+                "schema_version": "1.0",
                 "generated_at": datetime.now(timezone.utc).isoformat(),
                 "build_identity": get_build_identity(),
                 "has_data": False,

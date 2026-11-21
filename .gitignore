@@ -16,6 +16,7 @@ Thumbs.db
 .coverage
 htmlcov/
 dist/
+tmp/
 
 # Runtime Data & Dashboard Exports
 data/*.db

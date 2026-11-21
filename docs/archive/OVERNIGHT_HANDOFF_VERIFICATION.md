@@ -1,3 +1,11 @@
+---
+type: report
+title: Overnight Handoff & Governance Verification Ledger
+description: Archived governance audit record reconciling stale benchmark claims with measured live evidence.
+status: archived
+verified: human-reviewed
+---
+
 # Antigravity AI-Lab: Overnight Handoff & Governance Verification Ledger
 
 **Audit Date:** 2026-09-10 (Audited & Reconciled: 2026-10-04)  
