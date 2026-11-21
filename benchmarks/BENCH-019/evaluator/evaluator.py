@@ -64,12 +64,22 @@ def run_checks():
                 with open(path3, "ab") as handle:
                     handle.write(b"GARBAGE!")
                 assert wal.replay(path3) == [Record("put", "k", b"v")]
-                assert wal.truncate(path3) == 1
-                assert len(path3.read_bytes()) == len(encode(Record("put", "k", b"v")))
-                # Appends land after the corrupt tail and stay replayable.
+                # append() itself drops the corrupt tail: the new record
+                # lands on the valid prefix and stays replayable.
                 wal.append(path3, Record("put", "late", b"7"))
                 assert wal.replay(path3) == [Record("put", "k", b"v"),
                                              Record("put", "late", b"7")]
+                assert len(path3.read_bytes()) == (
+                    len(encode(Record("put", "k", b"v")))
+                    + len(encode(Record("put", "late", b"7"))))
+                # truncate() on a still-corrupt file returns records kept.
+                wal.append(path3, Record("put", "k", b"v"))
+                with open(path3, "ab") as handle:
+                    handle.write(b"GARBAGE!")
+                assert wal.truncate(path3) == 3
+                assert wal.replay(path3) == [Record("put", "k", b"v"),
+                                             Record("put", "late", b"7"),
+                                             Record("put", "k", b"v")]
                 assert wal.replay(Path(tmp) / "absent.wal") == []
                 assert wal.truncate(Path(tmp) / "absent.wal") == 0
 

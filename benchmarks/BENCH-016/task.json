@@ -9,5 +9,6 @@
     "pipeline.py"
   ],
   "description": "Repair streaming row parsing, schema validation and coercion, dead-letter error isolation, and deterministic summary metrics across four modules.",
-  "expected_broken_reason": "etl_invariant_violation"
+  "expected_broken_reason": "etl_invariant_violation",
+  "planted_defect": "malformed JSONL aborts instead of dead-lettering, CSV line numbers off-by-one, bool and non-finite coercion accepted"
 }

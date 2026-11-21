@@ -9,5 +9,6 @@
     "reconciler.py"
   ],
   "description": "Repair exact Decimal half-even rounding, effective-timestamp FX lookup, balanced multi-leg journal validation, and deterministic discrepancy reconciliation.",
-  "expected_broken_reason": "ledger_fx_invariant_violation"
+  "expected_broken_reason": "ledger_fx_invariant_violation",
+  "planted_defect": "float intermediary in as_decimal, ROUND_HALF_UP instead of HALF_EVEN, latest-rate instead of effective-at lookup, unbalanced journals accepted, non-deterministic reconciliation"
 }

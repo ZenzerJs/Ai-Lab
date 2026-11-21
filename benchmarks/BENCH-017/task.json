@@ -9,5 +9,6 @@
     "scheduler.py"
   ],
   "description": "Repair 5-field cron parsing, day-of-month/weekday match semantics, and DST-safe next-run scheduling over zoneinfo.",
-  "expected_broken_reason": "cron_schedule_invariant_violation"
+  "expected_broken_reason": "cron_schedule_invariant_violation",
+  "planted_defect": "cron_weekday off-by-one (Mon=0 vs Sun=0), AND instead of OR dom/dow semantics, missing range validation, DST-unsafe next-run scan"
 }
