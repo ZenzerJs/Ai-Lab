@@ -78,6 +78,35 @@ test('simulation uses the same explicitly selected Lite arm in savings and timel
   assert.equal(data.runs[2].arm, 'icm_lite');
 });
 
+test('simulation honors mixed governed arms across tasks in one dataset', () => {
+  const run = (task_id, arm, input) => ({
+    id: `${task_id}-${arm}`, task_id, run_index: 1, arm, model: 'original',
+    input_tokens: input, output_tokens: 0, cache_read_tokens: 0,
+    total_tokens: input, cost_usd: input, cost_status: 'complete', is_comparison_eligible: true,
+  });
+  const runs = [
+    run('HEAVY-001', 'baseline', 100), run('HEAVY-001', 'icm', 60),
+    run('MICRO-001', 'baseline', 50), run('MICRO-001', 'icm_lite', 40),
+  ];
+  const task = (task_id, governed_arm, base, gov) => ({
+    task_id, governed_arm, savings: {},
+    arms: {
+      baseline: { mean_cost_usd: base, mean_total_tokens: base, runs: [run(task_id, 'baseline', base)] },
+      [governed_arm]: { mean_cost_usd: gov, mean_total_tokens: gov, runs: [run(task_id, governed_arm, gov)] },
+    },
+  });
+  const data = {
+    ...snapshot, runs,
+    tasks: [task('HEAVY-001', 'icm', 100, 60), task('MICRO-001', 'icm_lite', 50, 40)],
+    pricing: [{ model: 'test-model', input_usd_per_mtok: 1000000, output_usd_per_mtok: 0, cache_read_usd_per_mtok: 0 }],
+  };
+  const simulated = deriveDataForModel(data, 'test-model');
+  assert.equal(simulated.tasks[0].savings.mean_savings_percent, 40);
+  assert.equal(simulated.tasks[1].savings.mean_savings_percent, 20);
+  assert.deepEqual(simulated.timeline.map((p) => p.governed_arm), ['icm', 'icm_lite']);
+  assert.equal(simulated.cumulative.cumulative_savings_usd, 50);
+});
+
 test('routing callout describes policy boundaries as deterministic routing rules', () => {
   const AdaptiveICM = require('../src/components/workspace/AdaptiveICM.tsx').default;
   const markup = renderToStaticMarkup(React.createElement(AdaptiveICM));

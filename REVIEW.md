@@ -6,9 +6,12 @@ empirical evidence.
 
 ## Published dashboard snapshot
 
-- Preserve `dashboard/public/data.json`, the published 134-run empirical snapshot.
+- Preserve `dashboard/public/data.json`, the published 162-run empirical snapshot.
   Never regenerate or overwrite it without an explicit request and a verified,
   complete `data/usage.db`. A fixture-only or empty database is not sufficient.
+- Pull requests that change `dashboard/public/data.json` must carry the
+  `data-publish` label; CI rejects snapshot diffs without it. Only a deliberate
+  ledger republish should update the snapshot.
 - Keep old snapshots readable: new payload fields must be optional or have safe
   defaults. Preserve missing-cost, evidence eligibility, and simulation semantics.
 - Distinguish routing guidance and projected savings from measured results. Do
@@ -37,6 +40,11 @@ empirical evidence.
   on a clean tree for offline compatibility verification.
 - Keep fixture, imported, live, simulated, excluded, and cost-incomplete evidence
   separate, with source provenance and comparison eligibility intact.
+- Live runs must ship genuine `.ndjson` event logs under `experiments/evidence/`
+  recording tool calls, errors, durations, pre/post/restored hashes, and the
+  evaluator verdict. Never fabricate or hardcode synthetic pass metrics; keep
+  `evidence_status`, `source_kind`, and `cost_status` honest when native token
+  counters are absent (`unavailable`, not invented numbers).
 
 ## OKF v0.2 and repository discipline
 
