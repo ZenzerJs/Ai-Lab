@@ -9,5 +9,6 @@
     "client.py"
   ],
   "description": "Repair injectable-clock circuit breaker transitions, half-open probe gating, concurrency bulkhead limits, and idempotent-only retry with recorded backoff.",
-  "expected_broken_reason": "resilience_invariant_violation"
+  "expected_broken_reason": "resilience_invariant_violation",
+  "planted_defect": "open->closed transition skips half-open, unlimited probes, bulkhead acquire always succeeds, retries non-idempotent calls, linear backoff instead of exponential"
 }
