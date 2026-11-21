@@ -1,0 +1,15 @@
+{
+  "task_id": "BENCH-025",
+  "name": "Recursive-Descent Expression Language",
+  "category": "parsing",
+  "target_files": [
+    "models.py",
+    "lexer.py",
+    "parser.py",
+    "env.py",
+    "eval.py"
+  ],
+  "description": "Repair tokenization offsets, strict precedence climbing, EOF checks, scoped name resolution, and guarded integer division across a five-file interpreter.",
+  "expected_broken_reason": "evaluation_invariant_violation",
+  "planted_defect": "unknown characters skipped, flat precedence, trailing garbage accepted, float division allowed, env parent ignored"
+}

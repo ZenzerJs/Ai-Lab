@@ -1,0 +1,16 @@
+{
+  "task_id": "BENCH-022",
+  "name": "Multi-Window Rate Limiter and Quota Rule Chain",
+  "category": "rate_limiting",
+  "target_files": [
+    "models.py",
+    "clock.py",
+    "windows.py",
+    "bucket.py",
+    "limiter.py",
+    "chain.py"
+  ],
+  "description": "Repair quota validation, fixed-window boundary strictness, sliding-log cutoff, capped lazy bucket refill, per-subject atomic limiting, and deny-precedence rule chains.",
+  "expected_broken_reason": "quota_invariant_violation",
+  "planted_defect": "unvalidated quotas, fixed-window count sums every bucket, sliding log includes the cutoff boundary, bucket refill uncapped, counters keyed globally not per-subject, denied requests still consume quota, first-match-wins lets allow beat deny"
+}

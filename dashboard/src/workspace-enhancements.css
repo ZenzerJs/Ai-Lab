@@ -92,6 +92,18 @@
 .adaptive-note .badge {
   margin-right: 8px;
 }
+.adaptive-measured {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.adaptive-arm-chip {
+  color: var(--muted);
+  font-size: 12px;
+}
 .adaptive-arrow {
   align-self: center;
   flex-shrink: 0;

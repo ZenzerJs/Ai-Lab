@@ -1,0 +1,15 @@
+{
+  "task_id": "BENCH-024",
+  "name": "Priority DAG Scheduler with Bounded Resources",
+  "category": "scheduling",
+  "target_files": [
+    "models.py",
+    "graph.py",
+    "resources.py",
+    "ready.py",
+    "scheduler.py"
+  ],
+  "description": "Repair task validation, cycle detection with named cycle paths, deterministic (priority, id) ready ordering, all-or-nothing resource acquisition, failure-propagation skipping, and deadlock reporting.",
+  "expected_broken_reason": "scheduling_invariant_violation",
+  "planted_defect": "FIFO order ignores priority, cycles silently undetected, partial resource acquisition leaks, dependents run after dependency failure, deadlocks return silently"
+}
