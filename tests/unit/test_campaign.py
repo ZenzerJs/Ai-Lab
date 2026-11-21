@@ -27,6 +27,7 @@ def test_rep_01_matrix_planner_generation():
         arms=arms,
         repetitions=repetitions,
         random_seed=seed,
+        campaign_id="rep-01-deterministic",
     )
 
     # 1. Total scheduled attempts: 2 tasks × 2 arms × 2 repetitions = 8 unique attempts
@@ -51,6 +52,7 @@ def test_rep_01_matrix_planner_generation():
         arms=arms,
         repetitions=repetitions,
         random_seed=seed,
+        campaign_id="rep-01-deterministic",
     )
     assert manifest.manifest_hash == manifest2.manifest_hash
     assert [s.arm for s in manifest.slots] == [s.arm for s in manifest2.slots]
