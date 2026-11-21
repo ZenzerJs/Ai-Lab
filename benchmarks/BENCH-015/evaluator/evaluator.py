@@ -1,5 +1,6 @@
 """Protected deterministic checks for BENCH-015."""
 import hashlib
+import hmac
 import sys
 
 
@@ -37,7 +38,10 @@ def run_checks():
     def signer_checks():
         signer = Signer("sekret", tolerance_seconds=300, clock=lambda: 1000)
         payload = b'{"a": 1}'
+        expected_hex = hmac.new(b"sekret", b"990." + payload,
+                                hashlib.sha256).hexdigest()
         sig = signer.sign(payload, 990)
+        assert sig == expected_hex
         assert sig == signer.sign(payload, 990)
         assert signer.verify(payload, 990, sig)
         assert signer.verify(payload, 700, signer.sign(payload, 700))
@@ -51,7 +55,8 @@ def run_checks():
         other = Signer("other", tolerance_seconds=300, clock=lambda: 1000)
         assert not other.verify(payload, 990, sig)
         for args in (("str", 990, sig), (payload, True, sig), (payload, "990", sig),
-                     (payload, 990, ""), (payload, 990, 123), (payload, 990, None)):
+                     (payload, 990, ""), (payload, 990, 123), (payload, 990, None),
+                     (payload, 990, "éé"), (payload, 990, sig.encode())):
             assert not signer.verify(*args)
         rejected(ValueError, lambda: Signer(""))
         rejected(ValueError, lambda: Signer("k", tolerance_seconds=-1))

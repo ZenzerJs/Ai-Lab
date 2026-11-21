@@ -32,4 +32,7 @@ class Signer:
         if abs(now - timestamp) >= self.tolerance:
             return False
         expected = self.sign(payload, timestamp)
-        return hmac.compare_digest(signature, expected)
+        try:
+            return hmac.compare_digest(signature, expected)
+        except TypeError:
+            return False
