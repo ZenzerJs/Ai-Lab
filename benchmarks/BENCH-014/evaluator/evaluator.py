@@ -89,7 +89,8 @@ def run_checks():
                      "NOT c = 1", "(a = 1 OR c = 2) AND b = 3"):
             rejected(ValueError, lambda: validator.validate(parse(text)))
         rejected(ValueError, lambda: Validator({"a"}).validate(parse("b = 1 AND a = 2")))
-        rejected(ValueError, lambda: Validator(set()).validate(parse("z = 1")))
+        for text in ("z = 1", "a = 1", "b = 1"):
+            rejected(ValueError, lambda: Validator(set()).validate(parse(text)))
         assert Validator({"a", "b"}).validate(node) is node
 
     def compiler_checks():
