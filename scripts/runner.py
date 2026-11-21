@@ -17,6 +17,7 @@ import argparse
 import copy
 from contextlib import contextmanager
 import dataclasses
+import difflib
 import hashlib
 import json
 import os
@@ -31,7 +32,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
 
 # Ensure UTF-8 output encoding
 if hasattr(sys.stdout, "reconfigure"):
@@ -47,7 +48,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import stat
 import ledger
-from complexity_router import MODES, build_mode_prompt, resolve_mode
+from complexity_router import MODES, RoutingDecision, build_mode_prompt, classify_mode, resolve_mode
 
 DEFAULT_FIXTURES_PATH = WORKSPACE_ROOT / "experiments" / "fixtures" / "mock_stream.ndjson"
 DEFAULT_EVIDENCE_DIR = WORKSPACE_ROOT / "experiments" / "evidence"
@@ -329,6 +330,70 @@ def _hash_directory_tree(root_dir: Path) -> str:
         h.update(p.read_bytes())
         h.update(b"\x00")
     return h.hexdigest()
+
+
+def _tree_files(root_dir: Path) -> Dict[str, Path]:
+    """Map relative POSIX paths to files, ignoring transient caches like _hash_directory_tree."""
+    files: Dict[str, Path] = {}
+    if not root_dir.exists():
+        return files
+    for p in sorted(root_dir.rglob("*")):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(root_dir)
+        if "__pycache__" in rel.parts or ".pytest_cache" in rel.parts or p.suffix in (".pyc", ".pyo"):
+            continue
+        files[rel.as_posix()] = p
+    return files
+
+
+def _count_changed_lines(before: Path, after: Path) -> int:
+    """Count lines added or removed between two versions of a file."""
+    try:
+        old_lines = before.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        old_lines = []
+    try:
+        new_lines = after.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        new_lines = []
+    return sum(
+        1
+        for line in difflib.unified_diff(old_lines, new_lines, lineterm="")
+        if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
+    )
+
+
+def scope_telemetry(workspace_dir: Path, snapshot_dir: Path, metadata: Mapping[str, Any]) -> Dict[str, Any]:
+    """Compare a post-run workspace to its snapshot and flag scope drift.
+
+    Returns the files the run actually touched, total added/removed lines, and a
+    scope_mismatch flag when the touched set differs from the declared target_files.
+    """
+    after = _tree_files(workspace_dir)
+    before = _tree_files(snapshot_dir)
+    touched: Dict[str, Dict[str, Any]] = {}
+    for rel in sorted(set(before) | set(after)):
+        old = before.get(rel)
+        new = after.get(rel)
+        if old is not None and new is not None and old.read_bytes() == new.read_bytes():
+            continue
+        if old is None:
+            kind = "added"
+        elif new is None:
+            kind = "removed"
+        else:
+            kind = "modified"
+        touched[rel] = {"kind": kind, "lines": (len(new.read_text(encoding="utf-8", errors="replace").splitlines()) if old is None else len(old.read_text(encoding="utf-8", errors="replace").splitlines()) if new is None else _count_changed_lines(old, new))}
+    declared = metadata.get("target_files")
+    declared_set = {str(Path(f).as_posix()) for f in declared} if isinstance(declared, list) else set()
+    scope_mismatch = set(touched) != declared_set if declared else bool(touched)
+    return {
+        "files_touched": touched,
+        "lines_touched": sum(entry["lines"] for entry in touched.values()),
+        "declared_files": sorted(declared_set),
+        "scope_mismatch": scope_mismatch,
+    }
 
 
 class DisposableWorkspace:
@@ -1074,8 +1139,9 @@ def _persist_run_lifecycle_events(
     rolled_back: bool,
     restored_hash: Optional[str],
     start_ts: Optional[str] = None,
+    scope: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """Persist start, tool transitions, verify, and optional rollback events to SQLite."""
+    """Persist start, tool transitions, verify, scope telemetry, and rollback events to SQLite."""
     seq = 1
     ledger.record_run_event(
         run_id=run_id,
@@ -1105,6 +1171,23 @@ def _persist_run_lifecycle_events(
             phase="verify",
             status=verif_status,
             diff_hash=post_hash,
+            conn=conn,
+        )
+    if scope is not None:
+        seq += 1
+        ledger.record_run_event(
+            run_id=run_id,
+            seq=seq,
+            phase="scope",
+            status="scope_mismatch" if scope.get("scope_mismatch") else "scope_ok",
+            target_path=json.dumps(
+                {
+                    "files_touched": scope.get("files_touched"),
+                    "lines_touched": scope.get("lines_touched"),
+                    "declared_files": scope.get("declared_files"),
+                    "loc_source": scope.get("loc_source"),
+                }
+            ),
             conn=conn,
         )
     if rolled_back:
@@ -1602,13 +1685,22 @@ def run_benchmark_live(
     _validate_identifier(task_id, "task_id")
     task_dir = WORKSPACE_ROOT / "benchmarks" / task_id
     snapshot_dir = task_dir / "workspace"
-    if mode is not None:
-        metadata_path = task_dir / "task.json"
-        metadata = {}
-        if mode == "auto" and metadata_path.is_file():
+    metadata: Dict[str, Any] = {}
+    metadata_path = task_dir / "task.json"
+    if metadata_path.is_file():
+        try:
             metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        arm = resolve_mode(mode, metadata, snapshot_dir)
-        print(f"[*] Routing mode '{mode}' selected arm '{arm}'.")
+        except json.JSONDecodeError:
+            metadata = {}
+    routing_decision: Optional[RoutingDecision] = None
+    if mode is not None:
+        routing_decision = classify_mode(mode, metadata, snapshot_dir)
+        arm = routing_decision.arm
+        print(
+            f"[*] Routing mode '{mode}' selected arm '{arm}' "
+            f"(loc_source={routing_decision.loc_source}, loc={routing_decision.loc}, "
+            f"single_file={routing_decision.single_file}, target={routing_decision.target})."
+        )
     _validate_identifier(arm, "arm")
 
     evaluator_dir = task_dir / "evaluator"
@@ -1753,6 +1845,14 @@ def run_benchmark_live(
 
         post_hash = workspace.snapshot_tree_hash()
 
+        scope = scope_telemetry(workspace.path, snapshot_dir, metadata)
+        if routing_decision is not None:
+            scope["loc_source"] = routing_decision.loc_source
+        print(
+            f"[*] Scope telemetry: files_touched={list(scope['files_touched'])} "
+            f"lines_touched={scope['lines_touched']} scope_mismatch={scope['scope_mismatch']}."
+        )
+
         verif: Optional[VerificationResult] = None
         if execution_status == "completed":
             verif = evaluator.evaluate_workspace(workspace.path)
@@ -1818,6 +1918,7 @@ def run_benchmark_live(
                 rolled_back=rolled_back,
                 restored_hash=restored_hash,
                 start_ts=start_ts,
+                scope=scope,
             )
 
             row = dict(conn.execute("SELECT cost_status, cost_usd FROM runs WHERE id = ?", (run_id,)).fetchone())
@@ -1845,6 +1946,7 @@ def run_benchmark_live(
             "rolled_back": rolled_back,
             "quota_exhausted": quota_exhausted,
             "stderr_excerpt": stderr_text[:400],
+            "scope": scope,
         }
     finally:
         workspace.cleanup()
