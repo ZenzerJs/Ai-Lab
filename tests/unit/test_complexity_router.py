@@ -290,12 +290,13 @@ def test_scope_telemetry_tolerates_malformed_target_files(tmp_path):
     assert runner.scope_telemetry(workspace, snapshot, {"target_files": [None]})["scope_mismatch"] is True
 
 
-def test_tree_files_skips_symlinks_and_escapes(tmp_path):
+def test_tree_files_keeps_internal_symlinks_rejects_escapes(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
     (root / "real.py").write_text("a = 1\n", encoding="utf-8")
     outside = tmp_path / "outside.py"
     outside.write_text("secret = 1\n", encoding="utf-8")
+    (root / "inner_link.py").symlink_to(root / "real.py")
     (root / "link.py").symlink_to(outside)
     nested = tmp_path / "nested"
     nested.mkdir()
@@ -303,7 +304,7 @@ def test_tree_files_skips_symlinks_and_escapes(tmp_path):
     (root / "dir_link").symlink_to(nested, target_is_directory=True)
 
     files = runner._tree_files(root)
-    assert set(files) == {"real.py"}
+    assert set(files) == {"real.py", "inner_link.py"}
 
 
 def test_run_benchmark_live_warns_on_malformed_task_json(tmp_path, monkeypatch):

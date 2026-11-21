@@ -340,7 +340,7 @@ def _tree_files(root_dir: Path) -> Dict[str, Path]:
         return files
     root_res = root_dir.resolve()
     for p in sorted(root_dir.rglob("*")):
-        if p.is_symlink() or not p.is_file():
+        if not p.is_file():
             continue
         rel = p.relative_to(root_dir)
         if "__pycache__" in rel.parts or ".pytest_cache" in rel.parts or p.suffix in (".pyc", ".pyo"):
