@@ -4,6 +4,18 @@
  * and prevents fake $0.0000 / 0 tokens when numbers are null, undefined, or non-finite.
  */
 
+export function formatArm(arm: string | null | undefined): string {
+  const labels: Record<string, string> = {
+    baseline: "Baseline",
+    icm: "ICM",
+    icm_lite: "ICM-Lite",
+    "icm-subagents": "ICM + subagents",
+    delegation: "Delegation",
+    governed: "Governed",
+  };
+  return arm ? labels[arm] || arm : "Governed";
+}
+
 export function formatCurrency(val: number | null | undefined, precision?: number): string {
   if (val === null || val === undefined || typeof val !== 'number' || !Number.isFinite(val)) {
     return '—';

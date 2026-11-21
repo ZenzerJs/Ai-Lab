@@ -1,4 +1,5 @@
 import { DashboardPayload, RunRecord, TaskSummaryItem, ArmStats, TimelinePoint, CumulativeSummary } from '../types';
+import { selectGovernedArmName } from './workspace';
 
 export function deriveDataForModel(
   data: DashboardPayload | null,
@@ -69,14 +70,7 @@ export function deriveDataForModel(
     }
 
     const baselineArm = updatedArms.baseline;
-    const govArmName =
-      'icm-subagents' in updatedArms
-        ? 'icm-subagents'
-        : 'icm' in updatedArms
-        ? 'icm'
-        : 'delegation' in updatedArms
-        ? 'delegation'
-        : Object.keys(updatedArms).find((k) => k !== 'baseline');
+    const govArmName = selectGovernedArmName(updatedArms, t.governed_arm);
     const govArm = govArmName ? updatedArms[govArmName] : undefined;
 
     let newSavings = t.savings;
@@ -150,14 +144,8 @@ export function deriveDataForModel(
       const ridx = Number(ridxStr);
       const arms = indexes[ridx];
       const bRun = arms.baseline;
-      const gArmName =
-        'icm-subagents' in arms
-          ? 'icm-subagents'
-          : 'icm' in arms
-          ? 'icm'
-          : 'delegation' in arms
-          ? 'delegation'
-          : Object.keys(arms).find((k) => k !== 'baseline');
+      const preferred = data.tasks.find((task) => task.task_id === tid)?.governed_arm;
+      const gArmName = selectGovernedArmName(arms, preferred);
       const gRun = gArmName ? arms[gArmName] : undefined;
 
       if (bRun && gRun && bRun.cost_usd !== null && gRun.cost_usd !== null) {

@@ -17,13 +17,24 @@ export function readDestination(): Destination {
     : "overview";
 }
 
+// Match build_data.GOVERNED_ARMS and preserve the exporter-selected comparison.
+export function selectGovernedArmName(
+  arms: Record<string, unknown>,
+  preferred?: string,
+) {
+  if (preferred && preferred !== "baseline" && arms[preferred]) return preferred;
+  return ["icm-subagents", "icm", "delegation", "governed", "icm_lite"].find(
+    (key) => arms[key],
+  ) || Object.keys(arms).find((key) => key !== "baseline" && arms[key]);
+}
+
+export function governedArmName(task: TaskSummaryItem) {
+  return selectGovernedArmName(task.arms, task.governed_arm);
+}
+
 export function governedArm(task: TaskSummaryItem) {
-  const name =
-    task.governed_arm ||
-    ["icm-subagents", "icm", "delegation"].find((key) => task.arms[key]);
-  return name
-    ? task.arms[name]
-    : Object.entries(task.arms).find(([key]) => key !== "baseline")?.[1];
+  const name = governedArmName(task);
+  return name ? task.arms[name] : undefined;
 }
 
 export const experimentNames: Record<string, string> = {

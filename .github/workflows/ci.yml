@@ -49,9 +49,14 @@ jobs:
           python scripts/run_experiment.py --task MOCK-001 --dry-run
           python scripts/ledger.py summary MOCK-001
 
+      - name: Test Dashboard Arm Compatibility
+        working-directory: dashboard
+        run: |
+          npm ci
+          npm test
+
       - name: Build Dashboard Data & Compile Vite App
         run: |
           python dashboard/build_data.py
           cd dashboard
-          npm ci
           npm run build
