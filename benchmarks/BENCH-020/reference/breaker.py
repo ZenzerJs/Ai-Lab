@@ -1,4 +1,5 @@
 """Injectable-clock circuit breaker with half-open probing."""
+import threading
 import time
 
 from models import State
@@ -28,41 +29,46 @@ class CircuitBreaker:
         self._failures = 0
         self._opened_at = None
         self._probes = 0
+        self._lock = threading.RLock()
 
     @property
     def state(self):
-        if self._state is State.OPEN \
-                and self.clock() - self._opened_at >= self.recovery_timeout:
-            self._state = State.HALF_OPEN
-            self._probes = 0
-        return self._state
+        with self._lock:
+            if self._state is State.OPEN \
+                    and self.clock() - self._opened_at >= self.recovery_timeout:
+                self._state = State.HALF_OPEN
+                self._probes = 0
+            return self._state
 
     def allow(self):
         """True when a call may proceed now; consumes a half-open probe slot."""
-        current = self.state
-        if current is State.CLOSED:
+        with self._lock:
+            current = self.state
+            if current is State.CLOSED:
+                return True
+            if current is State.OPEN:
+                return False
+            if self._probes >= self.half_open_max_probes:
+                return False
+            self._probes += 1
             return True
-        if current is State.OPEN:
-            return False
-        if self._probes >= self.half_open_max_probes:
-            return False
-        self._probes += 1
-        return True
 
     def on_success(self):
-        self._state = State.CLOSED
-        self._failures = 0
-        self._opened_at = None
-        self._probes = 0
+        with self._lock:
+            self._state = State.CLOSED
+            self._failures = 0
+            self._opened_at = None
+            self._probes = 0
 
     def on_failure(self):
-        if self._state is State.HALF_OPEN:
-            self._state = State.OPEN
-            self._opened_at = self.clock()
-            self._probes = 0
-            return
-        self._failures += 1
-        if self._failures >= self.failure_threshold:
-            self._state = State.OPEN
-            self._opened_at = self.clock()
-            self._probes = 0
+        with self._lock:
+            if self._state is State.HALF_OPEN:
+                self._state = State.OPEN
+                self._opened_at = self.clock()
+                self._probes = 0
+                return
+            self._failures += 1
+            if self._failures >= self.failure_threshold:
+                self._state = State.OPEN
+                self._opened_at = self.clock()
+                self._probes = 0

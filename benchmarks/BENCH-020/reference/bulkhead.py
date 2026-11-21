@@ -1,4 +1,6 @@
 """Concurrency-limiting bulkhead."""
+import threading
+
 from models import BulkheadFull
 
 
@@ -10,6 +12,7 @@ class Bulkhead:
             raise ValueError("limit must be a positive int")
         self.limit = limit
         self._in_flight = 0
+        self._lock = threading.Lock()
 
     @property
     def in_flight(self):
@@ -17,15 +20,17 @@ class Bulkhead:
 
     def acquire(self):
         """True when a slot was taken; False when full."""
-        if self._in_flight >= self.limit:
-            return False
-        self._in_flight += 1
-        return True
+        with self._lock:
+            if self._in_flight >= self.limit:
+                return False
+            self._in_flight += 1
+            return True
 
     def release(self):
-        if self._in_flight <= 0:
-            raise ValueError("release without acquire")
-        self._in_flight -= 1
+        with self._lock:
+            if self._in_flight <= 0:
+                raise ValueError("release without acquire")
+            self._in_flight -= 1
 
     def run(self, fn):
         """Run `fn` under a slot; BulkheadFull when saturated."""
