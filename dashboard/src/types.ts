@@ -43,10 +43,12 @@ export interface OperationalBenchmark {
 
 export type ScaleMode = '1x' | '1m' | '10m' | '100m';
 
+export type ArmName = 'baseline' | 'icm' | 'icm_lite' | 'icm-subagents' | 'delegation' | (string & {});
+
 export interface RunRecord {
   id: number;
   task_id: string;
-  arm: 'baseline' | 'icm' | 'icm-subagents' | 'delegation' | string;
+  arm: ArmName;
   model: string;
   run_index: number;
   timestamp: string;
@@ -146,7 +148,7 @@ export interface TaskSummaryItem {
   imported_runs_count?: number;
   simulated_runs_count?: number;
   excluded_runs?: RunRecord[];
-  governed_arm?: string;
+  governed_arm?: ArmName;
   cost_eligible_count?: number;
   scheduled_count?: number;
   completed_count?: number;
@@ -159,6 +161,7 @@ export interface TaskSummaryItem {
   arms: {
     baseline?: ArmStats;
     icm?: ArmStats;
+    icm_lite?: ArmStats;
     [key: string]: ArmStats | undefined;
   };
   savings?: TaskSavings | null;

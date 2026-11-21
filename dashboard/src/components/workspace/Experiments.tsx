@@ -7,8 +7,9 @@ import {
   Search,
 } from "lucide-react";
 import { DashboardPayload } from "../../types";
-import { experimentNames, finite, governedArm } from "../../lib/workspace";
-import { formatCurrency, formatTokens } from "../../lib/formatters";
+import { experimentNames, finite, governedArm, governedArmName } from "../../lib/workspace";
+import { formatArm, formatCurrency, formatTokens } from "../../lib/formatters";
+import AdaptiveICM from "./AdaptiveICM";
 
 export default function Experiments({ data }: { data: DashboardPayload }) {
   const [query, setQuery] = useState("");
@@ -73,6 +74,7 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
           {data.tasks?.length || 0} series · {uniqueTaskCount} tasks
         </span>
       </div>
+      <AdaptiveICM />
       <div className="toolbar">
         <label className="search-field">
           <Search size={18} />
@@ -170,6 +172,8 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
                       {cardModel ? ` · ${cardModel}` : ""}
                     </span>
                     <h2>{experimentNames[task.task_id] || task.task_id}</h2>
+                    <span className="badge badge-neutral">Baseline</span>{" "}
+                    <span className="badge badge-purple">{formatArm(governedArmName(task))}</span>
                   </div>
                 </div>
                 <span
@@ -191,7 +195,7 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
                       <strong>{formatTokens(bTok)}</strong>
                     </div>
                     <div>
-                      <span>Governed tok / pass</span>
+                      <span>{formatArm(governedArmName(task))} tok / pass</span>
                       <strong>{formatTokens(gTok)}</strong>
                     </div>
                     <div>
@@ -227,7 +231,7 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
                       <strong>{formatCurrency(baseline?.mean_cost_usd)}</strong>
                     </div>
                     <div>
-                      <span>Governed cost / run</span>
+                      <span>{formatArm(governedArmName(task))} cost / run</span>
                       <strong>{formatCurrency(governed?.mean_cost_usd)}</strong>
                     </div>
                     <div>
@@ -274,7 +278,7 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
                       <tr>
                         <th scope="col">Per-run measure</th>
                         <th scope="col">Baseline</th>
-                        <th scope="col">Governed</th>
+                        <th scope="col">{formatArm(governedArmName(task))}</th>
                       </tr>
                     </thead>
                     <tbody>

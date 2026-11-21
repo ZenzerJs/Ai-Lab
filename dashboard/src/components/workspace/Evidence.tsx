@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { DashboardPayload } from "../../types";
 import { downloadJson, snapshotDate } from "../../lib/workspace";
-import { formatCurrency, formatTokens } from "../../lib/formatters";
+import { formatArm, formatCurrency, formatTokens } from "../../lib/formatters";
 import { ProviderIcon } from "./ProviderIcon";
 
 export default function Evidence({ data }: { data: DashboardPayload }) {
@@ -34,7 +34,7 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
             (source === "all" || (run.source_kind || "unknown") === source) &&
             (evidence === "all" ||
               (run.evidence_status || "missing") === evidence) &&
-            `${run.id} ${run.task_id} ${run.model} ${run.evidence_ref || ""} ${run.notes || ""}`
+            `${run.id} ${run.task_id} ${run.model} ${run.arm} ${formatArm(run.arm)} ${run.evidence_ref || ""} ${run.notes || ""}`
               .toLowerCase()
               .includes(query.toLowerCase()),
         )
@@ -183,7 +183,7 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
                 </option>
                 {filter.values.sort().map((value) => (
                   <option value={value} key={value}>
-                    {value}
+                    {filter.label === "Arm" ? formatArm(value) : value}
                   </option>
                 ))}
               </select>
@@ -243,7 +243,7 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
                     <span
                       className={`badge ${run.arm === "baseline" ? "badge-neutral" : "badge-purple"}`}
                     >
-                      {run.arm}
+                      {formatArm(run.arm)}
                     </span>
                     <span className="cell-subtitle">
                       {run.source_kind || "unknown"}

@@ -31,6 +31,78 @@
   width: 28px;
   height: 28px;
 }
+.adaptive-icm {
+  margin: 24px 0;
+  padding: 24px;
+  background: var(--panel-lavender, var(--iris-soft));
+}
+.adaptive-heading,
+.adaptive-regimes {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+.adaptive-heading h2 {
+  margin: 8px 0 0;
+  font-size: 23px;
+}
+.adaptive-heading .eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.adaptive-regimes {
+  margin: 24px 0 20px;
+  align-items: stretch;
+}
+.adaptive-regimes > div {
+  flex: 1;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+.adaptive-regimes h3 {
+  margin: 12px 0 8px;
+  font-size: 16px;
+}
+.adaptive-regimes p {
+  margin: 0 0 8px;
+  color: var(--ink);
+}
+.adaptive-detail,
+.adaptive-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.adaptive-note {
+  margin: 0;
+}
+.adaptive-note .badge {
+  margin-right: 8px;
+}
+.adaptive-arrow {
+  align-self: center;
+  flex-shrink: 0;
+  color: var(--iris);
+}
+@media (max-width: 700px) {
+  .adaptive-heading,
+  .adaptive-regimes {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .adaptive-heading > .badge {
+    align-self: flex-start;
+  }
+  .adaptive-arrow {
+    transform: rotate(90deg);
+  }
+}
+
 .badge {
   border-radius: 4px;
   background: transparent;

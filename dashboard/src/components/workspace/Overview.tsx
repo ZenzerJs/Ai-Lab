@@ -16,8 +16,9 @@ import {
   RunRecord,
   TaskSummaryItem,
 } from "../../types";
-import { formatCurrency, formatTokens } from "../../lib/formatters";
-import { experimentNames, finite, governedArm } from "../../lib/workspace";
+import { formatArm, formatCurrency, formatTokens } from "../../lib/formatters";
+import { experimentNames, finite, governedArm, governedArmName } from "../../lib/workspace";
+import AdaptiveICM from "./AdaptiveICM";
 
 function ContextOrbit() {
   return (
@@ -340,6 +341,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
         </div>
         <ContextOrbit />
       </section>
+      <AdaptiveICM />
       <div className="section-heading results-heading">
         <h2>What the evidence says</h2>
         <span>
@@ -443,7 +445,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
                         }}
                       />
                       <span className="bar-value">
-                        <span className="sr-only">Governed </span>
+                        <span className="badge badge-purple">{formatArm(governedArmName(task))}</span>{" "}
                         {formatCurrency(governed)}
                       </span>
                     </div>
@@ -700,7 +702,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
                         }}
                       />
                       <span className="bar-value">
-                        <span className="sr-only">Governed </span>
+                        <span className="badge badge-purple">{formatArm(governedArmName(task))}</span>{" "}
                         {formatTokens(gTok)}
                         {gPass}
                       </span>
