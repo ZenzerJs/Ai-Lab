@@ -75,11 +75,18 @@ class BTree:
     def _rebalance(self, path, node):
         if not path:
             # Root: shrink an emptied internal root; an empty leaf is fine.
-            if not node.is_leaf and not node.keys:
-                self.root = node.children[0]
+            if not node.is_leaf:
+                self._refresh_node_keys(node)
+                if not node.keys:
+                    self.root = node.children[0]
             return
+        # Refresh ancestors and this node's own separators first: borrows
+        # and merges rotate separator values between nodes, so they must be
+        # current before any rotation reads them.
+        self._refresh_separators(path)
+        if not node.is_leaf:
+            self._refresh_node_keys(node)
         if len(node.keys) >= self.config.min_keys:
-            self._refresh_separators(path)
             return
         parent, pos = path[-1]
         left = parent.children[pos - 1] if pos > 0 else None
@@ -98,6 +105,7 @@ class BTree:
                 node.keys.insert(0, sep)
                 node.children.insert(0, left.children.pop())
                 parent.keys[pos - 1] = left.keys.pop()
+                self._refresh_node_keys(node)
             self._refresh_separators(path)
             return
         if right is not None and len(right.keys) > min_keys:
@@ -110,6 +118,7 @@ class BTree:
                 node.keys.append(sep)
                 node.children.append(right.children.pop(0))
                 parent.keys[pos] = right.keys.pop(0)
+                self._refresh_node_keys(node)
             return
 
         if left is not None:
@@ -123,6 +132,7 @@ class BTree:
                 left.keys.append(sep)
                 left.keys.extend(node.keys)
                 left.children.extend(node.children)
+                self._refresh_node_keys(left)
             parent.keys.pop(pos - 1)
             parent.children.pop(pos)
         else:
@@ -136,6 +146,7 @@ class BTree:
                 node.keys.append(sep)
                 node.keys.extend(right.keys)
                 node.children.extend(right.children)
+                self._refresh_node_keys(node)
             parent.keys.pop(pos)
             parent.children.pop(pos + 1)
         self._rebalance(path[:-1], parent)
@@ -143,8 +154,14 @@ class BTree:
     def _refresh_separators(self, path):
         """Recompute separator keys along the descent path after a change."""
         for parent, pos in path:
-            for i in range(len(parent.keys)):
-                parent.keys[i] = self._min_key(parent.children[i + 1])
+            self._refresh_node_keys(parent)
+
+    def _refresh_node_keys(self, node):
+        """Recompute an internal node's separators from its children."""
+        if node.is_leaf:
+            return
+        for i in range(len(node.keys)):
+            node.keys[i] = self._min_key(node.children[i + 1])
 
     def _min_key(self, node):
         while not node.is_leaf:
