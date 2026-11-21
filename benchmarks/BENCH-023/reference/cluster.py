@@ -57,6 +57,10 @@ class Cluster:
                     break
                 if isinstance(reply, AppendReply):
                     leader.on_append_reply(reply)
+                    # A higher-term reply demotes the leader; stop
+                    # replicating — a follower must not send appends.
+                    if leader.role is not Role.LEADER:
+                        return leader.commit_index
                     if reply.success:
                         break
                 prev_index -= 1
