@@ -11,7 +11,8 @@ Use Python stdlib only; no network, sleeps, or paid services.
   expires_at strictly after acquired_at. Violations raise ValueError.
 - models also defines LockConflictError, StaleTokenError (ValueError subclass),
   and OwnershipError (PermissionError subclass).
-- clock.Clock(source=time.monotonic) wraps an injected callable. now() returns
+- clock.Clock(source=None) wraps an injected callable, defaulting to integer
+  monotonic time (int(time.monotonic())). now() returns
   the source's current instant as an int; falsy readings like 0 are valid and
   must NOT fall back to a real clock. The source is called on every now().
 - lock_store.LockStore(clock) holds locks keyed by resource. Fencing tokens are

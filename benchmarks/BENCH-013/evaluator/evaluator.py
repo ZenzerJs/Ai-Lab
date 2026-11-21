@@ -131,7 +131,8 @@ def run_checks():
         except Exception as exc:
             raise AssertionError(f"stale hold raised {type(exc).__name__}")
         assert store.owner("r") == "bob"
-        assert store._locks["r"].fencing_token == new_record.fencing_token
+        renewed = store.renew("r", "bob", new_record.fencing_token, 10)
+        assert renewed.fencing_token == new_record.fencing_token
         store.release("r", "bob", new_record.fencing_token)
 
     for check in (model_checks, clock_checks, lifecycle_checks,

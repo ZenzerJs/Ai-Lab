@@ -1,4 +1,6 @@
 """In-memory lease store issuing monotonic fencing tokens."""
+import threading
+
 from models import LockConflictError, LockRecord, OwnershipError, StaleTokenError
 
 
@@ -7,6 +9,7 @@ class LockStore:
         self.clock = clock
         self._locks = {}
         self._next_token = 1
+        self._mutex = threading.Lock()
 
     def _live(self, resource):
         record = self._locks.get(resource)
@@ -20,13 +23,14 @@ class LockStore:
 
     def acquire(self, resource, owner, ttl):
         self._check_ttl(ttl)
-        if self._live(resource) is not None:
-            raise LockConflictError(resource)
-        now = self.clock.now()
-        record = LockRecord(resource, owner, self._next_token, now, now + ttl)
-        self._locks[resource] = record
-        self._next_token += 1
-        return record
+        with self._mutex:
+            if self._live(resource) is not None:
+                raise LockConflictError(resource)
+            now = self.clock.now()
+            record = LockRecord(resource, owner, self._next_token, now, now + ttl)
+            self._locks[resource] = record
+            self._next_token += 1
+            return record
 
     def _lookup(self, resource, owner, token):
         record = self._live(resource)

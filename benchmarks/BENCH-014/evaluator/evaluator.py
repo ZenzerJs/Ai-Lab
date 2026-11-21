@@ -68,8 +68,18 @@ def run_checks():
                     "a = 1)", "a = 'x", "a = [1]", "a AND b = 1",
                     "a = 1 or b = 2", "a > 's'", "like = 1"):
             rejected(ValueError, lambda: parse(bad))
+        def flatten(node):
+            if isinstance(node, And):
+                out = []
+                for child in node.children:
+                    out.extend(flatten(child))
+                return out
+            return [node]
         node = parse("a = 1 AND b = 2 AND c = 3")
-        assert isinstance(node, And) and len(node.children) == 3
+        assert isinstance(node, And)
+        leaves = flatten(node)
+        assert len(leaves) == 3 and all(isinstance(leaf, Comparison)
+                                        for leaf in leaves)
 
     def validator_checks():
         validator = Validator({"a", "b"})
@@ -79,7 +89,8 @@ def run_checks():
                      "NOT c = 1", "(a = 1 OR c = 2) AND b = 3"):
             rejected(ValueError, lambda: validator.validate(parse(text)))
         rejected(ValueError, lambda: Validator({"a"}).validate(parse("b = 1 AND a = 2")))
-        assert Validator(set()).allowed == frozenset()
+        rejected(ValueError, lambda: Validator(set()).validate(parse("z = 1")))
+        assert Validator({"a", "b"}).validate(node) is node
 
     def compiler_checks():
         compiler = SQLCompiler({"a", "b", "c", "name"})
