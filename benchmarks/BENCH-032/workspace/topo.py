@@ -10,5 +10,6 @@ def dependents(cells):
 
 
 def topo_order(dirty):
-    # arbitrary set order — no dependency ranking (glitchy!)
-    return list(dirty)
+    # BUG: reverse insertion order — dependents compute before deps
+    # (deterministically stale reads / glitches)
+    return list(reversed(dirty))

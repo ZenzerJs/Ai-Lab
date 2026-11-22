@@ -103,8 +103,22 @@ def solver_checks():
     assert s2.solve() is None, "cyclic before-chain is unsatisfiable"
 
 
+def branch_checks():
+    """pick_branch must choose the SMALLEST non-singleton label."""
+    from network import Network
+    from search import pick_branch
+    n = Network(["a", "b", "c", "d"])
+    n.set_label("a", "b", {"b", "m"})
+    n.set_label("c", "d", {"b", "m", "o"})
+    assert pick_branch(n) == ("a", "b"), \
+        f"must branch on the smallest label, got {pick_branch(n)}"
+    n2 = Network(["a", "b"])
+    n2.set_label("a", "b", {"b"})
+    assert pick_branch(n2) is None, "all-singleton network has no branch"
+
+
 for fn in (relation_checks, converse_checks, compose_table_checks,
            network_checks, pc2_checks, inconsistent_checks,
-           solver_checks):
+           solver_checks, branch_checks):
     check(fn)
 print("ALL CHECKS PASSED")
