@@ -390,3 +390,55 @@ def test_build_data_shims_are_minimal_wrappers():
     assert len(sh) <= 5
     assert any("build_data.py" in line for line in ps1)
     assert any("build_data.py" in line for line in sh)
+
+
+def test_ts_export_wrappers_do_not_double_count_ast_symbols(tmp_path):
+    ts = tmp_path / "exports.ts"
+    ts.write_text(
+        "".join(f"export function fn{i}(): number {{ return {i}; }}\n" for i in range(5)),
+        encoding="utf-8",
+    )
+    assert count_ast_symbols(ts) == 5
+    decision = classify_mode("auto", {"target_files": ["exports.ts"]}, tmp_path)
+    assert decision.arm == ICM_LITE
+
+
+def test_scope_telemetry_counts_only_diff_touched_ast_symbols(tmp_path):
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "mod.py").write_text(
+        "# header\n"
+        "def keep_a():\n    return 1\n\n"
+        "def keep_b():\n    return 2\n\n"
+        "def removed_fn():\n    return 3\n",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "workspace"
+    shutil.copytree(snapshot, workspace)
+
+    # Comment-only edit outside any symbol -> 0 touched symbols
+    (workspace / "mod.py").write_text(
+        "# updated header\n"
+        "def keep_a():\n    return 1\n\n"
+        "def keep_b():\n    return 2\n\n"
+        "def removed_fn():\n    return 3\n",
+        encoding="utf-8",
+    )
+    scope_comment = runner.scope_telemetry(workspace, snapshot, {"target_files": ["mod.py"]})
+    assert scope_comment["actual_scope"]["ast_symbols_touched"] == 0
+
+    # Delete removed_fn without touching keep_a or keep_b -> 1 touched symbol
+    (workspace / "mod.py").write_text(
+        "# header\n"
+        "def keep_a():\n    return 1\n\n"
+        "def keep_b():\n    return 2\n",
+        encoding="utf-8",
+    )
+    scope_delete = runner.scope_telemetry(workspace, snapshot, {"target_files": ["mod.py"]})
+    assert scope_delete["actual_scope"]["ast_symbols_touched"] == 1
+
+
+def test_governed_arms_priority_matches_ledger_for_icm_v2_and_icm_lite():
+    arms = {"baseline": {}, ICM_LITE: {}, ICM_V2: {}}
+    assert build_data._governed_key(arms) == ICM_V2
+
