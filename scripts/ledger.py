@@ -2868,6 +2868,10 @@ def cumulative_savings(
     total_icm_cost = 0.0
     total_baseline_tokens = 0
     total_icm_tokens = 0
+    total_token_paired_baseline_cost = 0.0
+    total_token_paired_icm_cost = 0.0
+    total_token_paired_baseline_tokens = 0
+    total_token_paired_icm_tokens = 0
     total_baseline_cache_read = 0
     total_baseline_input = 0
     total_icm_cache_read = 0
@@ -2922,8 +2926,15 @@ def cumulative_savings(
                 if b_r.get("cost_usd") is not None and g_r.get("cost_usd") is not None:
                     total_baseline_cost += b_r["cost_usd"]
                     total_icm_cost += g_r["cost_usd"]
-                    total_baseline_tokens += (b_r.get("total_tokens") or 0)
-                    total_icm_tokens += (g_r.get("total_tokens") or 0)
+                    b_tok = b_r.get("total_tokens") or 0
+                    g_tok = g_r.get("total_tokens") or 0
+                    total_baseline_tokens += b_tok
+                    total_icm_tokens += g_tok
+                    if b_tok > 0 and g_tok > 0:
+                        total_token_paired_baseline_cost += b_r["cost_usd"]
+                        total_token_paired_icm_cost += g_r["cost_usd"]
+                        total_token_paired_baseline_tokens += b_tok
+                        total_token_paired_icm_tokens += g_tok
                     total_baseline_cache_read += (b_r.get("cache_read_tokens") or 0)
                     total_baseline_input += (b_r.get("input_tokens") or 0)
                     total_icm_cache_read += (g_r.get("cache_read_tokens") or 0)
@@ -2937,8 +2948,16 @@ def cumulative_savings(
             if total_baseline_cost > 0
             else None
         )
-        cost_per_mtok_base = (total_baseline_cost / total_baseline_tokens * 1_000_000) if total_baseline_tokens > 0 else None
-        cost_per_mtok_icm = (total_icm_cost / total_icm_tokens * 1_000_000) if total_icm_tokens > 0 else None
+        cost_per_mtok_base = (
+            (total_token_paired_baseline_cost / total_token_paired_baseline_tokens * 1_000_000)
+            if total_token_paired_baseline_tokens > 0
+            else None
+        )
+        cost_per_mtok_icm = (
+            (total_token_paired_icm_cost / total_token_paired_icm_tokens * 1_000_000)
+            if total_token_paired_icm_tokens > 0
+            else None
+        )
         savings_usd_per_mtok = (cost_per_mtok_base - cost_per_mtok_icm) if (cost_per_mtok_base is not None and cost_per_mtok_icm is not None) else None
         total_icm_all_in = total_icm_input + total_icm_cache_read
         total_base_all_in = total_baseline_input + total_baseline_cache_read
