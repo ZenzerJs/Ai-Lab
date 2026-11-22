@@ -455,21 +455,6 @@ def validate_and_parse_telemetry(
         if raw_devin_id:
             devin_session_id = str(raw_devin_id)
 
-        raw_acus = event.get("acus_consumed")
-        if raw_acus is None and isinstance(event.get("usage"), dict):
-            raw_acus = event["usage"].get("acus_consumed")
-        if raw_acus is None and isinstance(event.get("devin_session"), dict):
-            raw_acus = event["devin_session"].get("acus_consumed")
-        if raw_acus is not None:
-            try:
-                acus_consumed = validate_acus_consumed(raw_acus)
-            except ValueError as exc:
-                raise TelemetryValidationError(
-                    f"Line {idx}: Invalid 'acus_consumed': {exc}",
-                    line_number=idx,
-                    event_data=event,
-                ) from exc
-
         if "run_index" in event and event["run_index"] is not None:
             try:
                 ridx = int(event["run_index"])
@@ -579,6 +564,26 @@ def validate_and_parse_telemetry(
             seen_event_lines.add(event_hash)
 
         ev_type = str(event.get("type") or event.get("event") or "").lower()
+
+        raw_acus = event.get("acus_consumed")
+        if raw_acus is None and isinstance(event.get("usage"), dict):
+            raw_acus = event["usage"].get("acus_consumed")
+        if raw_acus is None and isinstance(event.get("devin_session"), dict):
+            raw_acus = event["devin_session"].get("acus_consumed")
+        if raw_acus is None and isinstance(event.get("result"), dict):
+            res_dict = event["result"]
+            raw_acus = res_dict.get("acus_consumed")
+            if raw_acus is None and isinstance(res_dict.get("usage"), dict):
+                raw_acus = res_dict["usage"].get("acus_consumed")
+        if raw_acus is not None:
+            try:
+                acus_consumed = validate_acus_consumed(raw_acus)
+            except ValueError as exc:
+                raise TelemetryValidationError(
+                    f"Line {idx}: Invalid 'acus_consumed': {exc}",
+                    line_number=idx,
+                    event_data=event,
+                ) from exc
 
         # Turn event
         if ev_type == "turn" or "turn" in event:
