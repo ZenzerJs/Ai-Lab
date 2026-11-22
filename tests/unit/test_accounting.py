@@ -502,3 +502,48 @@ def test_pricing_unknown_model_never_invents_rates(tmp_path: Path):
 
     conn.close()
 
+
+def test_pricing_suffix_hit_does_not_reseed(tmp_path: Path, monkeypatch):
+    """
+    Suffixed lookup resolves against the already-seeded table without running
+    seed_pricing again — no 19-row write transaction per read.
+    """
+    db_file = tmp_path / "no_reseed.db"
+    conn = ledger.get_connection(db_file)
+    ledger.seed_pricing(conn=conn)
+
+    calls = []
+    monkeypatch.setattr(ledger, "seed_pricing", lambda *a, **kw: calls.append(1))
+
+    rates = ledger.get_pricing("gemini-4-argon-low", conn=conn)
+    assert rates["model"] == "gemini-4-argon"
+    assert calls == []
+
+    conn.close()
+
+
+@pytest.mark.parametrize("bad_model", [None, 123])
+def test_pricing_invalid_model_raises_value_error(tmp_path: Path, bad_model):
+    """get_pricing(None)/non-string raises ValueError cleanly, not AttributeError."""
+    db_file = tmp_path / "bad_model.db"
+    conn = ledger.get_connection(db_file)
+
+    with pytest.raises(ValueError):
+        ledger.get_pricing(bad_model, conn=conn)
+
+    conn.close()
+
+
+@pytest.mark.parametrize(
+    "model,expected",
+    [
+        (None, None),
+        (123, 123),
+        ("-low", "-low"),
+        ("gemini-4-argon-low", "gemini-4-argon"),
+        ("claude-sonnet-5-5", "claude-sonnet-5-5"),
+    ],
+)
+def test_base_model_id_edge_cases(model, expected):
+    assert ledger.base_model_id(model) == expected
+

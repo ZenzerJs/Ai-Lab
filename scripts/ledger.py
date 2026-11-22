@@ -36,8 +36,10 @@ EFFORT_SUFFIXES = frozenset({"low", "medium", "high", "xhigh"})
 
 def base_model_id(model: str) -> str:
     """Strip one trailing effort suffix for pricing fallback lookups."""
+    if not isinstance(model, str):
+        return model
     base, sep, suffix = model.rpartition("-")
-    if sep and suffix.lower() in EFFORT_SUFFIXES:
+    if sep and base and suffix.lower() in EFFORT_SUFFIXES:
         return base
     return model
 
@@ -1338,20 +1340,26 @@ def get_pricing(model: str, conn: Optional[sqlite3.Connection] = None, db_path: 
     row = cursor.fetchone()
 
     if not row:
+        # Effort-suffixed ids resolve to the base model's rate card; check the
+        # existing table first so suffixed reads don't trigger a seed write.
+        base = base_model_id(model)
+        if base != model:
+            cursor.execute("SELECT * FROM pricing WHERE model = ?", (base,))
+            row = cursor.fetchone()
+
+    if not row:
         # Attempt auto-seed from config/PRICING.json
         try:
             seed_pricing(conn=conn)
             cursor.execute("SELECT * FROM pricing WHERE model = ?", (model,))
             row = cursor.fetchone()
+            if not row:
+                base = base_model_id(model)
+                if base != model:
+                    cursor.execute("SELECT * FROM pricing WHERE model = ?", (base,))
+                    row = cursor.fetchone()
         except Exception:
             pass
-
-    if not row:
-        # Effort-suffixed ids resolve to the base model's rate card.
-        base = base_model_id(model)
-        if base != model:
-            cursor.execute("SELECT * FROM pricing WHERE model = ?", (base,))
-            row = cursor.fetchone()
 
     if not row:
         if should_close:
