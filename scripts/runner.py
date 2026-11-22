@@ -681,13 +681,21 @@ WORKSPACE_GIT_ENV = {
     "GIT_COMMITTER_EMAIL": "ailab@local",
     "GIT_AUTHOR_DATE": "2026-01-01T00:00:00Z",
     "GIT_COMMITTER_DATE": "2026-01-01T00:00:00Z",
+    # Block system/global git config from leaking into the isolated repo.
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": os.devnull,
 }
 
 
 def _pid_alive(pid: int) -> bool:
     """Return True iff a process with the given pid is currently running."""
+    if pid <= 0:
+        return False
     try:
         os.kill(pid, 0)
+        return True
+    except PermissionError:
+        # The process exists under another UID.
         return True
     except OSError:
         return False
@@ -710,6 +718,8 @@ def _init_workspace_git(ws_dir: Path) -> None:
         return
     git_env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     git_env.update(WORKSPACE_GIT_ENV)
+    # Never fall back to a repository above the workspace's parent dir.
+    git_env["GIT_CEILING_DIRECTORIES"] = str(ws_dir.parent)
     for cmd in (
         ["git", "init"],
         ["git", "add", "-A"],
@@ -775,28 +785,18 @@ class WorkspaceManager:
 
         canonical_label: Optional[str] = None
         if canonical_workspace:
+            if task_id is not None:
+                _validate_identifier(task_id, "task_id")
             canonical_label = re.sub(
                 r"[^a-zA-Z0-9_-]", "-", task_id or snapshot_dir.parent.name
             )
             _validate_identifier(canonical_label, "task_id")
 
-        if not base_temp.exists():
-            base_temp.mkdir(parents=True, mode=0o700)
-        # A workspace root other local accounts can control is untrusted: they
-        # could substitute the tree the evaluator grades.
-        base_stat = base_temp.stat()
-        if hasattr(os, "getuid") and base_stat.st_uid != os.getuid():
-            raise RuntimeError(
-                f"Refusing to use workspace root '{base_temp}': owned by another local account."
-            )
-        if os.name == "posix" and stat.S_IMODE(base_stat.st_mode) & 0o022:
-            raise RuntimeError(
-                f"Refusing to use workspace root '{base_temp}': writable by group/other local accounts."
-            )
         ws_name = f"{canonical_label}_{arm}" if canonical_workspace else f"{run_id}_{arm}"
         ws_dir = (base_temp / ws_name).resolve()
 
-        # Enforce strict path containment within base_temp
+        # Enforce strict path containment within base_temp (pure path math — no
+        # disk state yet, so rejected paths never create directories).
         try:
             ws_dir.relative_to(base_temp)
         except ValueError:
@@ -820,6 +820,20 @@ class WorkspaceManager:
                     f"Workspace directory '{ws_dir}' lies inside the host checkout "
                     f"outside '{tmp_dir}': backup and cleanup would refuse it."
                 )
+
+        if not base_temp.exists():
+            base_temp.mkdir(parents=True, mode=0o700)
+        # A workspace root other local accounts can control is untrusted: they
+        # could substitute the tree the evaluator grades.
+        base_stat = base_temp.stat()
+        if hasattr(os, "getuid") and base_stat.st_uid != os.getuid():
+            raise RuntimeError(
+                f"Refusing to use workspace root '{base_temp}': owned by another local account."
+            )
+        if os.name == "posix" and stat.S_IMODE(base_stat.st_mode) & 0o022:
+            raise RuntimeError(
+                f"Refusing to use workspace root '{base_temp}': writable by group/other local accounts."
+            )
 
         if ws_dir == base_temp:
             raise ValueError(f"Workspace path cannot be the root directory '{base_temp}'")

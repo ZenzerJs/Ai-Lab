@@ -346,13 +346,14 @@ def test_canonical_workspace_refuses_overwrite_while_owner_alive(tmp_path: Path)
 
 def test_workspace_inside_checkout_outside_tmp_refused(tmp_path: Path, monkeypatch):
     """base_temp inside WORKSPACE_ROOT but outside tmp/ is rejected outright."""
-    monkeypatch.setenv(
-        "AI_LAB_WORKSPACE_ROOT", str(runner.WORKSPACE_ROOT / "nested_ws_root")
-    )
+    rejected_root = runner.WORKSPACE_ROOT / "nested_ws_root"
+    monkeypatch.setenv("AI_LAB_WORKSPACE_ROOT", str(rejected_root))
     with pytest.raises(ValueError, match="inside the host checkout"):
         runner.WorkspaceManager.prepare_arm_workspace(
             snapshot_dir=_make_snapshot(tmp_path), arm="baseline", run_id="r",
         )
+    # Rejection happens before mkdir: the refused root is never created on disk
+    assert not rejected_root.exists()
 
 
 def test_workspace_inside_checkout_tmp_warns(tmp_path: Path, monkeypatch):
@@ -402,3 +403,55 @@ def test_group_writable_workspace_root_refused(tmp_path: Path):
             snapshot_dir=_make_snapshot(tmp_path), arm="baseline",
             workspace_root=writable_root, run_id="r",
         )
+
+
+def test_pid_alive_edge_cases(monkeypatch):
+    """_pid_alive: non-positive pids are dead; PermissionError means alive under another UID."""
+    assert runner._pid_alive(0) is False
+    assert runner._pid_alive(-5) is False
+    assert runner._pid_alive(os.getpid()) is True
+
+    def _raise_perm(pid, sig):
+        raise PermissionError("not our process")
+
+    monkeypatch.setattr(runner.os, "kill", _raise_perm)
+    assert runner._pid_alive(424242) is True
+
+
+def test_explicit_invalid_task_id_rejected(tmp_path: Path):
+    """canonical_workspace validates an explicit task_id before deriving the dir name."""
+    with pytest.raises(ValueError, match="Invalid task_id"):
+        runner.WorkspaceManager.prepare_arm_workspace(
+            snapshot_dir=_make_snapshot(tmp_path), arm="baseline",
+            workspace_root=tmp_path / "workspaces", run_id="r",
+            canonical_workspace=True, task_id="BAD TASK!!",
+        )
+
+
+def test_canonical_workspace_reclaimed_after_owner_dies(tmp_path: Path):
+    """A canonical dir whose marker pid is dead is safely reclaimed by a new run."""
+    import json as _json
+
+    ws_root = tmp_path / "workspaces"
+    snapshot_dir = _make_snapshot(tmp_path)
+    ws1 = runner.WorkspaceManager.prepare_arm_workspace(
+        snapshot_dir=snapshot_dir, arm="baseline",
+        workspace_root=ws_root, run_id="run_dead",
+        canonical_workspace=True, task_id="BENCH-042", init_git=False,
+    )
+    marker = ws_root / f".ai_lab_marker_{ws1.path.name}.json"
+    # Simulate a crashed run: rewrite the marker pid to a definitely-dead pid
+    payload = _json.loads(marker.read_text(encoding="utf-8"))
+    payload["pid"] = 2 ** 30
+    marker.write_text(_json.dumps(payload), encoding="utf-8")
+
+    ws2 = runner.WorkspaceManager.prepare_arm_workspace(
+        snapshot_dir=snapshot_dir, arm="baseline",
+        workspace_root=ws_root, run_id="run_new",
+        canonical_workspace=True, task_id="BENCH-042", init_git=False,
+    )
+    try:
+        assert ws2.path == ws1.path
+        assert ws2.path.exists()
+    finally:
+        ws2.cleanup()
