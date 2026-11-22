@@ -1,10 +1,14 @@
 import { ArrowRight, Layers3 } from "lucide-react";
-import { formatArm, formatCurrency } from "../../lib/formatters";
+import { formatArm, formatCurrency, formatSignedPercent } from "../../lib/formatters";
+import { matchedArmComparison } from "../../lib/analytics";
 import { armNames, finite } from "../../lib/workspace";
 import { DashboardPayload } from "../../types";
 
 /** Routing guidance, deliberately separate from the recorded benchmark results. */
 export default function AdaptiveICM({ data }: { data?: DashboardPayload }) {
+  const liteMatched = data?.tasks
+    ? matchedArmComparison(data.tasks, "icm_lite", "baseline", "all")
+    : null;
   const armTotals = new Map<string, { runs: number; cost: number; n: number }>();
   for (const task of data?.tasks || []) {
     for (const name of armNames(task)) {
@@ -75,6 +79,15 @@ export default function AdaptiveICM({ data }: { data?: DashboardPayload }) {
               </span>
             );
           })}
+          {liteMatched && liteMatched.sharedTaskIds.length > 0 && (
+            <span className="adaptive-arm-chip">
+              <span className="badge badge-blue">Matched {formatArm("icm_lite")} vs {formatArm("baseline")}</span>
+              {" "}{liteMatched.sharedTaskIds.length} shared tasks
+              {liteMatched.tokenStats?.meanDeltaPct != null
+                ? ` · ${formatSignedPercent(liteMatched.tokenStats.meanDeltaPct)} tokens (n=${liteMatched.tokenStats.n})`
+                : ""}
+            </span>
+          )}
         </div>
       )}
     </section>

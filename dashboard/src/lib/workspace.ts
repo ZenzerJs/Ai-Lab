@@ -81,8 +81,8 @@ export function bootstrapPercentCI(
   ];
 }
 
-// Per-suite bootstrap CI for one arm vs baseline: pairs runs by run_index
-// on cost_usd (finite, comparison-eligible preferred).
+// Per-suite bootstrap CI for one arm vs baseline: strictly pairs
+// comparison-eligible priced runs on (task_id, model, run_index, evaluator_hash).
 export function suiteBootstrapCI(
   task: TaskSummaryItem,
   armName: string,
@@ -91,13 +91,16 @@ export function suiteBootstrapCI(
   const gov = task.arms[armName]?.runs || [];
   const eligible = (r: RunRecord) =>
     r.is_comparison_eligible !== false && finite(r.cost_usd);
-  const baseByIdx = new Map(
-    base.filter(eligible).map((r) => [r.run_index, r.cost_usd as number]),
+  const key = (r: RunRecord) =>
+    `${r.task_id || task.task_id}\0${r.model || task.model || ""}\0${r.run_index}\0${r.evaluator_hash ?? ""}`;
+  const baseByKey = new Map(
+    base.filter(eligible).map((r) => [key(r), r.cost_usd as number]),
   );
   const pairs: [number, number][] = [];
   for (const r of gov) {
-    const b = baseByIdx.get(r.run_index);
-    if (b !== undefined && eligible(r)) pairs.push([b, r.cost_usd as number]);
+    if (!eligible(r)) continue;
+    const b = baseByKey.get(key(r));
+    if (b !== undefined) pairs.push([b, r.cost_usd as number]);
   }
   return bootstrapPercentCI(pairs);
 }
