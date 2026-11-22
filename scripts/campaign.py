@@ -52,7 +52,7 @@ import runner
 # Constants & Arm Configurations
 # ---------------------------------------------------------------------------
 
-SUPPORTED_ARMS = ("baseline", "icm", "delegation")
+SUPPORTED_ARMS = ("baseline", "icm", "delegation", "icm_lite", "icm_v2", "icm_v3", "icm_staged")
 
 DEFAULT_ARM_CONFIGS: Dict[str, Dict[str, Any]] = {
     "baseline": {
@@ -79,9 +79,48 @@ DEFAULT_ARM_CONFIGS: Dict[str, Dict[str, Any]] = {
         "skills": ["ai-lab", "build-agents"],
         "subagents": ["planner", "coder", "evaluator"],
     },
+    "icm_lite": {
+        "arm": "icm_lite",
+        "model": "gemini-2.5-pro",
+        "description": "Arm D: ICM-Lite (lightweight staged contract for scoped tasks)",
+        "governance_instructions": "Enforce ICM-Lite contract: scoped intake -> plan -> diff-only exec -> verify.",
+        "skills": ["ai-lab"],
+        "subagents": [],
+    },
+    "icm_v2": {
+        "arm": "icm_v2",
+        "model": "gemini-2.5-pro",
+        "description": "Arm E: ICM v2 (AST symbol-map governed contract)",
+        "governance_instructions": "Enforce ICM v2 contract with pre-injected compact AST repo map.",
+        "skills": ["ai-lab"],
+        "subagents": [],
+    },
+    "icm_v3": {
+        "arm": "icm_v3",
+        "model": "gemini-2.5-pro",
+        "description": "Arm F: ICM v3 (next-generation staged governance)",
+        "governance_instructions": "Enforce ICM v3 staged governance contract.",
+        "skills": ["ai-lab"],
+        "subagents": [],
+    },
+    "icm_staged": {
+        "arm": "icm_staged",
+        "model": "gemini-2.5-pro",
+        "description": "Arm G: ICM staged pipeline with explicit stage checkpoints",
+        "governance_instructions": "Enforce ICM staged pipeline with explicit per-stage checkpoints.",
+        "skills": ["ai-lab"],
+        "subagents": [],
+    },
 }
 
 CACHE_CONDITIONS = ("cold", "warm")
+
+# Arms with a dedicated runner routing contract (runner.run_benchmark_live `mode`).
+# Arms absent here keep the runner's default prompt semantics for their arm name.
+ARM_ROUTING_MODES: Dict[str, str] = {
+    "icm_lite": "icm-lite",
+    "icm_v2": "icm-v2",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -553,6 +592,212 @@ def execute_campaign_mock(
             db_conn.close()
 
     return manifest_copy
+
+
+# ---------------------------------------------------------------------------
+# Live Campaign Batch Execution (REP-01, REP-02, REP-09)
+# ---------------------------------------------------------------------------
+
+def execute_campaign_batch(
+    manifest: CampaignManifest,
+    db_path: Optional[Path] = None,
+    dry_run: bool = False,
+    cli_cmd: str = "agy",
+    timeout_seconds: int = 180,
+    run_callable: Optional[Callable] = None,
+) -> Dict[str, Any]:
+    """
+    Execute a pre-planned campaign manifest batch in strictly ascending ``planned_order``.
+
+    - Verifies ``manifest.verify_integrity()`` before any slot is touched; raises
+      ``ValueError`` on a tampered or unsigned manifest (Finding 4).
+    - Iterates slots in ascending ``slot.planned_order`` so the predeclared
+      randomized arm ordering (REP-01) and ``cache_condition`` stratification
+      (REP-09) are preserved exactly as scheduled.
+    - ``dry_run=True`` makes zero provider/subprocess calls and returns the exact
+      ordered execution plan.
+    - ``dry_run=False`` invokes ``run_callable`` (default
+      ``runner.run_benchmark_live``) per slot with ``task_id``, ``arm``,
+      ``run_index=slot.repetition_index``, ``model=slot.model``, ``db_path``,
+      ``cli_cmd`` and ``timeout_seconds``. ``manifest_id`` and ``planned_order``
+      are recorded into every slot outcome, and failed/timed-out attempts are
+      never dropped (REP-02).
+
+    Returns a dict with the execution plan, per-slot outcomes, aggregate status
+    counts, and (for live runs) the updated manifest copy.
+    """
+    if not manifest.manifest_hash or not manifest.verify_integrity():
+        raise ValueError(
+            "Campaign manifest integrity verification failed: manifest_hash is missing "
+            "or does not match the computed plan hash. Refusing to execute a tampered manifest."
+        )
+
+    ordered_slots = sorted(manifest.slots, key=lambda s: s.planned_order)
+    execution_plan: List[Dict[str, Any]] = [
+        {
+            "slot_id": s.slot_id,
+            "planned_order": s.planned_order,
+            "task_id": s.task_id,
+            "arm": s.arm,
+            "model": s.model,
+            "cache_condition": s.cache_condition,
+        }
+        for s in ordered_slots
+    ]
+
+    if dry_run:
+        return {
+            "manifest_id": manifest.campaign_id,
+            "manifest_hash": manifest.manifest_hash,
+            "dry_run": True,
+            "total_slots": len(ordered_slots),
+            "execution_plan": execution_plan,
+        }
+
+    runner_fn = run_callable if run_callable is not None else runner.run_benchmark_live
+    executed_manifest = copy.deepcopy(manifest)
+    slots_by_id = {s.slot_id: s for s in executed_manifest.slots}
+
+    results: List[Dict[str, Any]] = []
+    status_counts: Dict[str, int] = {}
+
+    for slot in ordered_slots:
+        outcome: Dict[str, Any] = {
+            "slot_id": slot.slot_id,
+            "planned_order": slot.planned_order,
+            "manifest_id": manifest.campaign_id,
+            "task_id": slot.task_id,
+            "arm": slot.arm,
+            "model": slot.model,
+            "cache_condition": slot.cache_condition,
+            "repetition_index": slot.repetition_index,
+        }
+        target_slot = slots_by_id[slot.slot_id]
+        try:
+            call_kwargs: Dict[str, Any] = {
+                "task_id": slot.task_id,
+                "arm": slot.arm,
+                "run_index": slot.repetition_index,
+                "model": slot.model,
+                "db_path": db_path,
+                "cli_cmd": cli_cmd,
+                "timeout_seconds": timeout_seconds,
+            }
+            # Arms with a dedicated routing contract dispatch through `mode` so the
+            # runner builds that arm's prompt instead of the generic ICM contract.
+            routing_mode = ARM_ROUTING_MODES.get(slot.arm)
+            if routing_mode is not None:
+                call_kwargs["mode"] = routing_mode
+            res = runner_fn(**call_kwargs)
+            exec_status = str(res.get("execution_status") or "completed")
+            outcome.update({
+                "execution_status": exec_status,
+                "verification_status": res.get("verification_status"),
+                "run_id": res.get("run_id"),
+                "cost_usd": res.get("cost_usd"),
+                "cost_status": res.get("cost_status"),
+                "evidence_ref": res.get("evidence_ref"),
+                "evidence_hash": res.get("evidence_hash"),
+                "error_message": None,
+                "result": res,
+            })
+            target_slot.status = exec_status
+            target_slot.execution_status = exec_status
+            target_slot.verification_status = res.get("verification_status")
+            target_slot.run_id = res.get("run_id")
+            target_slot.cost_usd = res.get("cost_usd")
+            target_slot.cost_status = res.get("cost_status")
+            target_slot.source_kind = "live"
+            if res.get("observed_cache_condition"):
+                target_slot.observed_cache_condition = str(res["observed_cache_condition"])
+            target_slot.evidence_ref = res.get("evidence_ref")
+            target_slot.evidence_hash = res.get("evidence_hash")
+            usage = res.get("usage")
+            if isinstance(usage, dict):
+                target_slot.input_tokens = usage.get("input_tokens")
+                target_slot.output_tokens = usage.get("output_tokens")
+                target_slot.thinking_tokens = usage.get("thinking_tokens")
+                target_slot.cache_read_tokens = usage.get("cache_read_tokens")
+                target_slot.total_tokens = usage.get("total_tokens")
+
+            # Link the recorded ledger run to this slot so campaign reports reconcile it
+            # (REP-02/Finding 4): manifest_id + notes.slot_id/planned_order/cache strata.
+            run_id = res.get("run_id")
+            if db_path is not None and run_id is not None:
+                try:
+                    link_conn = ledger.get_connection(db_path)
+                    try:
+                        row = link_conn.execute(
+                            "SELECT notes FROM runs WHERE id = ?", (run_id,)
+                        ).fetchone()
+                        parsed_notes: Dict[str, Any] = {}
+                        if row is not None and isinstance(row["notes"], str):
+                            try:
+                                loaded_notes = json.loads(row["notes"])
+                                if isinstance(loaded_notes, dict):
+                                    parsed_notes = loaded_notes
+                            except json.JSONDecodeError:
+                                pass
+                        parsed_notes.update({
+                            "slot_id": slot.slot_id,
+                            "campaign_id": manifest.campaign_id,
+                            "planned_order": slot.planned_order,
+                            "cache_condition": slot.cache_condition,
+                            "intended_cache_condition": slot.intended_cache_condition,
+                            # Honest observation: only what the runner actually measured.
+                            # Never substitute the planned condition (REP-09).
+                            "observed_cache_condition": target_slot.observed_cache_condition,
+                        })
+                        link_conn.execute(
+                            "UPDATE runs SET manifest_id = ?, notes = ? WHERE id = ?",
+                            (manifest.campaign_id, json.dumps(parsed_notes), run_id),
+                        )
+                        link_conn.commit()
+                    finally:
+                        link_conn.close()
+                except sqlite3.Error:
+                    pass  # Bookkeeping failure must never drop an executed attempt.
+        except subprocess.TimeoutExpired as exc:
+            outcome.update({
+                "execution_status": "timed_out",
+                "verification_status": None,
+                "run_id": None,
+                "cost_usd": None,
+                "cost_status": None,
+                "error_message": f"Timed out after {timeout_seconds}s: {exc}",
+                "result": None,
+            })
+            target_slot.status = "timed_out"
+            target_slot.execution_status = "timed_out"
+            target_slot.error_message = outcome["error_message"]
+        except Exception as exc:  # REP-02: failed attempts are retained, never dropped.
+            outcome.update({
+                "execution_status": "failed",
+                "verification_status": None,
+                "run_id": None,
+                "cost_usd": None,
+                "cost_status": None,
+                "error_message": f"{type(exc).__name__}: {exc}",
+                "result": None,
+            })
+            target_slot.status = "failed"
+            target_slot.execution_status = "failed"
+            target_slot.error_message = outcome["error_message"]
+
+        status_counts[outcome["execution_status"]] = status_counts.get(outcome["execution_status"], 0) + 1
+        results.append(outcome)
+
+    return {
+        "manifest_id": manifest.campaign_id,
+        "manifest_hash": manifest.manifest_hash,
+        "dry_run": False,
+        "total_slots": len(ordered_slots),
+        "executed_count": len(results),
+        "status_counts": status_counts,
+        "execution_plan": execution_plan,
+        "results": results,
+        "manifest": executed_manifest,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1675,6 +1920,24 @@ def main() -> None:
     plan_parser.add_argument("--model", default="gemini-2.5-pro", help="Target model identifier")
     plan_parser.add_argument("--output", default="campaign_manifest.json", help="Path to write manifest JSON")
 
+    # Command: plan-batch (alias/wrapper for plan)
+    plan_batch_parser = subparsers.add_parser("plan-batch", help="Alias for 'plan': generate immutable campaign evaluation matrix (REP-01)")
+    plan_batch_parser.add_argument("--tasks", required=True, help="Comma-separated task IDs (e.g. BENCH-001,BENCH-002)")
+    plan_batch_parser.add_argument("--arms", default="baseline,icm", help="Comma-separated arms (default: baseline,icm)")
+    plan_batch_parser.add_argument("--repetitions", type=int, default=1, help="Repetitions per task-arm slot")
+    plan_batch_parser.add_argument("--seed", type=int, default=42, help="Seed for randomized arm ordering")
+    plan_batch_parser.add_argument("--cache-conditions", default="cold", help="Comma-separated cache conditions (cold,warm)")
+    plan_batch_parser.add_argument("--model", default="gemini-2.5-pro", help="Target model identifier")
+    plan_batch_parser.add_argument("--output", default="campaign_manifest.json", help="Path to write manifest JSON")
+
+    # Command: execute-batch
+    exec_parser = subparsers.add_parser("execute-batch", help="Execute campaign batch in ascending planned_order via live runner (REP-01/REP-02)")
+    exec_parser.add_argument("--manifest", required=True, help="Path to campaign manifest JSON")
+    exec_parser.add_argument("--db", default=None, help="Path to SQLite database")
+    exec_parser.add_argument("--dry-run", action="store_true", help="Print ordered execution plan without any provider calls")
+    exec_parser.add_argument("--cli", default="agy", help="CLI executable for live runs (default: agy)")
+    exec_parser.add_argument("--timeout", type=int, default=180, help="Timeout seconds per run (default: 180)")
+
     # Command: report
     report_parser = subparsers.add_parser("report", help="Generate campaign report from manifest or database")
     report_parser.add_argument("--manifest", help="Path to campaign manifest JSON")
@@ -1685,7 +1948,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.command == "plan":
+    if args.command in ("plan", "plan-batch"):
         task_list = [t.strip() for t in args.tasks.split(",") if t.strip()]
         arm_list = [a.strip() for a in args.arms.split(",") if a.strip()]
         cond_list = [c.strip() for c in args.cache_conditions.split(",") if c.strip()]
@@ -1702,6 +1965,34 @@ def main() -> None:
         manifest.save(out_p)
         print(f"✓ Campaign manifest created with {len(manifest.slots)} scheduled slots: {out_p.resolve()}")
         print(f"  Manifest SHA-256: {manifest.manifest_hash}")
+
+    elif args.command == "execute-batch":
+        manifest_path = Path(args.manifest)
+        manifest = CampaignManifest.load(manifest_path)
+        try:
+            result = execute_campaign_batch(
+                manifest=manifest,
+                db_path=Path(args.db) if args.db else None,
+                dry_run=args.dry_run,
+                cli_cmd=args.cli,
+                timeout_seconds=args.timeout,
+            )
+        except ValueError as exc:
+            print(f"✗ {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        if args.dry_run:
+            print(json.dumps(result, indent=2))
+        else:
+            # Persist per-slot outcomes (incl. failed/timed-out attempts and error
+            # details) so reports can recover them (REP-02). Status fields are not
+            # covered by manifest_hash, so integrity verification still passes.
+            result["manifest"].save(manifest_path)
+            print(
+                f"✓ Executed {result['executed_count']}/{result['total_slots']} slots "
+                f"for campaign {result['manifest_id']}: {result['status_counts']}"
+            )
+            print(f"  Manifest updated with per-slot outcomes: {manifest_path.resolve()}")
 
     elif args.command == "report":
         manifest = None
