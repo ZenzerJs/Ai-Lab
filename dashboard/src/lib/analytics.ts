@@ -472,6 +472,9 @@ export function pairedDiffStats(
       pValue = studentTTwoSidedP(tStat, n - 1);
     } else if (meanDiff === 0) {
       pValue = 1;
+    } else {
+      // Constant nonzero paired differences: exact two-sided sign test p-value.
+      pValue = Math.pow(2, -(n - 1));
     }
   }
   const ci95 = bootstrapPercentCI(pairs);

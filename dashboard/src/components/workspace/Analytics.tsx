@@ -130,7 +130,7 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
     return applyFdrToRows(sorted);
   }, [data.tasks, scope, primaryMetric]);
   const significantCount = effectRows.filter(
-    (r) => r.stats.fdrSignificant ?? r.stats.significant,
+    (r) => r.stats.fdrSignificant === true,
   ).length;
   const totalDroppedPairs = effectRows.reduce((s, r) => s + r.pairMatch.droppedCount, 0);
   const totalHashMismatched = effectRows.reduce((s, r) => s + r.pairMatch.hashMismatchedCount, 0);
