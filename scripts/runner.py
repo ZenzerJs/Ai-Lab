@@ -385,7 +385,7 @@ def _hash_directory_tree(root_dir: Path) -> str:
         if not p.is_file():
             continue
         rel_path = p.relative_to(root_dir)
-        if "__pycache__" in rel_path.parts or ".pytest_cache" in rel_path.parts or p.suffix in (".pyc", ".pyo"):
+        if "__pycache__" in rel_path.parts or ".pytest_cache" in rel_path.parts or ".git" in rel_path.parts or p.suffix in (".pyc", ".pyo"):
             continue
         h.update(rel_path.as_posix().encode("utf-8"))
         h.update(b"\x00")
@@ -404,7 +404,7 @@ def _tree_files(root_dir: Path) -> Dict[str, Path]:
         if not p.is_file():
             continue
         rel = p.relative_to(root_dir)
-        if "__pycache__" in rel.parts or ".pytest_cache" in rel.parts or p.suffix in (".pyc", ".pyo"):
+        if "__pycache__" in rel.parts or ".pytest_cache" in rel.parts or ".git" in rel.parts or p.suffix in (".pyc", ".pyo"):
             continue
         try:
             p.resolve().relative_to(root_res)
@@ -552,16 +552,21 @@ class DisposableWorkspace:
         return self.path.parent / f".backup_{self.path.name}"
 
     def _is_safe_host_target(self) -> bool:
-        """Return True iff self.path does not point at host repo files outside tmp/."""
+        """Return True iff self.path does not point at host repo files outside tmp/.
+
+        Paths inside the host checkout are only allowed under WORKSPACE_ROOT/"tmp";
+        OS-temp disposable workspaces outside WORKSPACE_ROOT are always safe.
+        """
         p_res = self.path.resolve()
         ws_res = WORKSPACE_ROOT.resolve()
+        tmp_dir = (WORKSPACE_ROOT / "tmp").resolve()
+        try:
+            p_res.relative_to(tmp_dir)
+            return True
+        except ValueError:
+            pass
         if p_res == ws_res or ws_res in p_res.parents or p_res in ws_res.parents:
-            tmp_dir = (WORKSPACE_ROOT / "tmp").resolve()
-            try:
-                p_res.relative_to(tmp_dir)
-                return True
-            except ValueError:
-                return False
+            return False
         return True
 
     def snapshot_tree_hash(self) -> str:
@@ -580,7 +585,7 @@ class DisposableWorkspace:
         shutil.copytree(
             self.path,
             bdir,
-            ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc", "*.pyo"),
+            ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc", "*.pyo", ".git"),
             dirs_exist_ok=True,
         )
         return bdir
@@ -595,6 +600,9 @@ class DisposableWorkspace:
 
         if self.path.exists():
             for item in list(self.path.iterdir()):
+                if item.name == ".git":
+                    # Preserve the workspace's isolated git repo across rollback.
+                    continue
                 if item.is_dir() and not item.is_symlink():
                     _safe_rmtree(item)
                 else:
@@ -609,7 +617,7 @@ class DisposableWorkspace:
         shutil.copytree(
             bdir,
             self.path,
-            ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc", "*.pyo"),
+            ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc", "*.pyo", ".git"),
             dirs_exist_ok=True,
         )
         return self.snapshot_tree_hash()
@@ -665,6 +673,52 @@ def _validate_identifier(identifier: str, field_name: str) -> None:
         )
 
 
+# Deterministic identity/timestamps for the isolated workspace snapshot commit.
+WORKSPACE_GIT_ENV = {
+    "GIT_AUTHOR_NAME": "Ai-Lab",
+    "GIT_AUTHOR_EMAIL": "ailab@local",
+    "GIT_COMMITTER_NAME": "Ai-Lab",
+    "GIT_COMMITTER_EMAIL": "ailab@local",
+    "GIT_AUTHOR_DATE": "2026-01-01T00:00:00Z",
+    "GIT_COMMITTER_DATE": "2026-01-01T00:00:00Z",
+}
+
+
+def _init_workspace_git(ws_dir: Path) -> None:
+    """Create an isolated .git repository inside a disposable workspace.
+
+    Runs `git init`, `git add -A`, and `git commit -m "snapshot"` with fixed
+    author/committer env vars so the snapshot commit is fully deterministic and
+    `git rev-parse --show-toplevel` resolves to the workspace itself.
+
+    Uses subprocess.Popen rather than subprocess.run so harness tests that
+    monkeypatch subprocess.run to fake the agent CLI cannot intercept this.
+    """
+    if shutil.which("git") is None:
+        warnings.warn("git executable not found; skipping disposable workspace .git initialization")
+        return
+    git_env = os.environ.copy()
+    git_env.update(WORKSPACE_GIT_ENV)
+    for cmd in (
+        ["git", "init"],
+        ["git", "add", "-A"],
+        ["git", "commit", "--allow-empty", "-m", "snapshot"],
+    ):
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(ws_dir),
+            env=git_env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        _, err = proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"git initialization failed in workspace '{ws_dir}' "
+                f"({' '.join(cmd)}): {err.decode('utf-8', errors='replace').strip()}"
+            )
+
+
 class WorkspaceManager:
     """Manages creation and cleanup of disposable workspaces."""
 
@@ -674,11 +728,22 @@ class WorkspaceManager:
         arm: str,
         workspace_root: Optional[Path] = None,
         run_id: Optional[str] = None,
+        init_git: bool = True,
+        canonical_workspace: bool = False,
+        task_id: Optional[str] = None,
     ) -> DisposableWorkspace:
         """
         Prepare an isolated disposable workspace directory from a pinned task snapshot (RUN-01, RUN-03).
         Preserves user uncommitted files and repository state completely.
         Validates identifiers, enforces path containment within workspace root, and verifies ownership.
+
+        When workspace_root is None the workspace is placed under the OS temp
+        directory (or AI_LAB_WORKSPACE_ROOT), never inside the host checkout, so
+        agent CLIs cannot inherit the host AGENTS.md or host .git repository.
+        With init_git=True (default) the workspace receives its own isolated
+        .git repository containing a deterministic "snapshot" commit.
+        With canonical_workspace=True the directory name is deterministic per
+        (task_id, arm) instead of the volatile PID/timestamp run_id.
         """
         if not snapshot_dir.exists():
             raise FileNotFoundError(f"Snapshot directory not found: {snapshot_dir}")
@@ -690,12 +755,23 @@ class WorkspaceManager:
         _validate_identifier(arm, "arm")
 
         if workspace_root is None:
-            base_temp = (WORKSPACE_ROOT / "tmp" / "disposable_workspaces").resolve()
+            base_temp = Path(
+                os.environ.get("AI_LAB_WORKSPACE_ROOT")
+                or (Path(tempfile.gettempdir()) / "ai_lab_disposable_workspaces")
+            ).resolve()
         else:
             base_temp = Path(workspace_root).resolve()
 
+        canonical_label: Optional[str] = None
+        if canonical_workspace:
+            canonical_label = re.sub(
+                r"[^a-zA-Z0-9_-]", "-", task_id or snapshot_dir.parent.name
+            )
+            _validate_identifier(canonical_label, "task_id")
+
         base_temp.mkdir(parents=True, exist_ok=True)
-        ws_dir = (base_temp / f"{run_id}_{arm}").resolve()
+        ws_name = f"{canonical_label}_{arm}" if canonical_workspace else f"{run_id}_{arm}"
+        ws_dir = (base_temp / ws_name).resolve()
 
         # Enforce strict path containment within base_temp
         try:
@@ -719,7 +795,16 @@ class WorkspaceManager:
                 )
             try:
                 marker_data = json.loads(marker.read_text(encoding="utf-8"))
-                if marker_data.get("run_id") != run_id or marker_data.get("arm") != arm:
+                if marker_data.get("arm") != arm:
+                    raise RuntimeError(
+                        f"Refusing to delete existing directory '{ws_dir}': marker ownership mismatch."
+                    )
+                if canonical_workspace:
+                    if marker_data.get("task_id") != canonical_label:
+                        raise RuntimeError(
+                            f"Refusing to delete existing directory '{ws_dir}': marker ownership mismatch."
+                        )
+                elif marker_data.get("run_id") != run_id:
                     raise RuntimeError(
                         f"Refusing to delete existing directory '{ws_dir}': marker ownership mismatch."
                     )
@@ -741,15 +826,18 @@ class WorkspaceManager:
 
         # Write external ownership marker file (stored outside ws_dir to preserve snapshot files)
         external_marker = base_temp / f".ai_lab_marker_{ws_dir.name}.json"
-        external_marker.write_text(
-            json.dumps({
-                "run_id": run_id,
-                "arm": arm,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "disposable": True,
-            }),
-            encoding="utf-8",
-        )
+        marker_payload = {
+            "run_id": run_id,
+            "arm": arm,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "disposable": True,
+        }
+        if canonical_workspace:
+            marker_payload["task_id"] = canonical_label
+        external_marker.write_text(json.dumps(marker_payload), encoding="utf-8")
+
+        if init_git and not (ws_dir / ".git").exists():
+            _init_workspace_git(ws_dir)
 
         return DisposableWorkspace(
             path=ws_dir,
@@ -1825,6 +1913,7 @@ def run_benchmark_live(
     devin_org_id: Optional[str] = None,
     devin_api_key: Optional[str] = None,
     acus_consumed: Optional[float] = None,
+    canonical_workspace: bool = False,
 ) -> Dict[str, Any]:
     """
     Execute a live benchmark task using the agy CLI in an isolated DisposableWorkspace.
@@ -1880,6 +1969,8 @@ def run_benchmark_live(
         arm=arm,
         workspace_root=workspace_root,
         run_id=run_uid,
+        canonical_workspace=canonical_workspace,
+        task_id=task_id,
     )
 
     try:
@@ -2160,6 +2251,7 @@ def main():
     parser.add_argument("--cli", default="agy", help="CLI executable for --live-bench (default: agy)")
     parser.add_argument("--timeout", type=int, default=180, help="Timeout seconds for --live-bench (default: 180)")
     parser.add_argument("--db", default=None, help="Custom database path for smoke or runner execution")
+    parser.add_argument("--canonical-workspace", action="store_true", help="Use a deterministic disposable workspace directory per (task_id, arm) for --live-bench")
     args = parser.parse_args()
     if args.mode is not None and (args.smoke or args.live_bench is None):
         parser.error("--mode requires --live-bench without --smoke")
@@ -2184,6 +2276,7 @@ def main():
             timeout_seconds=args.timeout,
             db_path=db_path,
             mode=args.mode,
+            canonical_workspace=args.canonical_workspace,
         )
         print(f"✓ Live benchmark finished: status={res['execution_status']} verify={res['verification_status']} cost_status={res['cost_status']} rolled_back={res['rolled_back']}")
         if res.get("quota_exhausted"):
