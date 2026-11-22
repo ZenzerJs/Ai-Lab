@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 import pytest
 import sqlite3
+import subprocess
+import sys
 
 import campaign
 import ledger
@@ -696,4 +698,278 @@ def test_macro_average_paired_differences():
     # Macro-average of ($0.50 + $0.02) / 2 = $0.26
     assert paired["mean_paired_cost_difference_usd"] == pytest.approx(0.26)
     assert paired["pooling_method"] == "macro_average"
+
+
+# ---------------------------------------------------------------------------
+# PR 1.3: Expanded Arm Support & Randomized Live Campaign Batch Runner
+# ---------------------------------------------------------------------------
+
+def test_expanded_arms_accepted_by_plan_campaign():
+    """
+    icm_lite, icm_v2, icm_v3, icm_staged are supported arms alongside
+    baseline, icm, delegation. Existing defaults remain backward-compatible.
+    """
+    new_arms = ["icm_lite", "icm_v2", "icm_v3", "icm_staged"]
+
+    # 1. Registered in SUPPORTED_ARMS and DEFAULT_ARM_CONFIGS
+    for arm in new_arms:
+        assert arm in campaign.SUPPORTED_ARMS
+        assert arm in campaign.DEFAULT_ARM_CONFIGS
+        assert campaign.DEFAULT_ARM_CONFIGS[arm]["arm"] == arm
+
+    # 2. Existing arms untouched (backward-compatible defaults)
+    assert campaign.DEFAULT_ARM_CONFIGS["baseline"]["model"] == "gemini-2.5-pro"
+    assert campaign.DEFAULT_ARM_CONFIGS["icm"]["governance_instructions"] == (
+        "Enforce ICM 5-stage pipeline: 01_intake -> 02_plan -> 03_exec -> 04_verify -> 05_retro."
+    )
+    assert campaign.DEFAULT_ARM_CONFIGS["delegation"]["subagents"] == ["planner", "coder", "evaluator"]
+
+    # 3. plan_campaign accepts each new arm and produces deterministic manifests
+    for arm in new_arms:
+        manifest = campaign.plan_campaign(
+            tasks=["BENCH-01"],
+            arms=[arm],
+            repetitions=1,
+            random_seed=7,
+        )
+        assert len(manifest.slots) == 1
+        assert manifest.slots[0].arm == arm
+        assert arm in manifest.arm_configs
+        assert manifest.verify_integrity()
+
+    # 4. All seven arms can be mixed in one campaign
+    manifest_all = campaign.plan_campaign(
+        tasks=["BENCH-01"],
+        arms=list(campaign.SUPPORTED_ARMS),
+        repetitions=1,
+        random_seed=7,
+    )
+    assert len(manifest_all.slots) == len(campaign.SUPPORTED_ARMS)
+    assert sorted(s.arm for s in manifest_all.slots) == sorted(campaign.SUPPORTED_ARMS)
+
+
+def test_execute_batch_dry_run_ordered_plan_no_provider_calls():
+    """
+    execute_campaign_batch(dry_run=True) emits the exact randomized planned_order
+    execution plan with zero provider/subprocess calls.
+    """
+    manifest = campaign.plan_campaign(
+        tasks=["BENCH-01", "BENCH-02"],
+        arms=["baseline", "icm", "icm_lite", "icm_v2"],
+        repetitions=2,
+        random_seed=2026,
+        cache_conditions=["cold", "warm"],
+    )
+    expected_slots = sorted(manifest.slots, key=lambda s: s.planned_order)
+
+    def _forbidden_callable(**kwargs):  # noqa: ANN001
+        raise AssertionError("dry_run=True must not invoke the run callable")
+
+    result = campaign.execute_campaign_batch(
+        manifest,
+        dry_run=True,
+        run_callable=_forbidden_callable,
+    )
+
+    assert result["dry_run"] is True
+    assert result["manifest_id"] == manifest.campaign_id
+    assert result["manifest_hash"] == manifest.manifest_hash
+    assert result["total_slots"] == len(manifest.slots)
+
+    plan = result["execution_plan"]
+    assert [p["planned_order"] for p in plan] == list(range(1, len(manifest.slots) + 1))
+    for plan_entry, slot in zip(plan, expected_slots):
+        assert plan_entry["slot_id"] == slot.slot_id
+        assert plan_entry["planned_order"] == slot.planned_order
+        assert plan_entry["task_id"] == slot.task_id
+        assert plan_entry["arm"] == slot.arm
+        assert plan_entry["model"] == slot.model
+        assert plan_entry["cache_condition"] == slot.cache_condition
+
+
+def test_execute_batch_runs_in_planned_order_and_retains_failures():
+    """
+    execute_campaign_batch invokes run_callable in ascending planned_order and
+    retains failed/timed-out attempts (REP-02). No live provider calls are made.
+    """
+    manifest = campaign.plan_campaign(
+        tasks=["BENCH-01"],
+        arms=["baseline", "icm", "delegation"],
+        repetitions=2,
+        random_seed=99,
+        cache_conditions=["cold", "warm"],
+    )
+    ordered = sorted(manifest.slots, key=lambda s: s.planned_order)
+
+    calls: list = []
+
+    def fake_run(task_id, arm, run_index, model, db_path, cli_cmd, timeout_seconds):
+        calls.append({
+            "task_id": task_id,
+            "arm": arm,
+            "run_index": run_index,
+            "model": model,
+            "db_path": db_path,
+            "cli_cmd": cli_cmd,
+            "timeout_seconds": timeout_seconds,
+        })
+        if arm == "icm":
+            raise subprocess.TimeoutExpired(cmd=cli_cmd, timeout=timeout_seconds)
+        if arm == "delegation":
+            raise RuntimeError("simulated provider failure")
+        return {
+            "run_id": 5000 + run_index,
+            "execution_status": "completed",
+            "verification_status": "passed",
+            "cost_usd": 0.01,
+            "cost_status": "usage_estimate",
+            "usage": {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+            "evidence_ref": "evidence/live_fake.ndjson",
+            "evidence_hash": "deadbeef",
+        }
+
+    result = campaign.execute_campaign_batch(
+        manifest,
+        dry_run=False,
+        run_callable=fake_run,
+        cli_cmd="agy",
+        timeout_seconds=60,
+    )
+
+    # 1. Callable invoked exactly once per slot, in ascending planned_order
+    assert len(calls) == len(ordered)
+    for call, slot in zip(calls, ordered):
+        assert call["task_id"] == slot.task_id
+        assert call["arm"] == slot.arm
+        assert call["run_index"] == slot.repetition_index
+        assert call["model"] == slot.model
+        assert call["cli_cmd"] == "agy"
+        assert call["timeout_seconds"] == 60
+
+    # 2. Every attempt retained in results with manifest_id + planned_order (REP-02)
+    assert result["executed_count"] == len(ordered)
+    assert len(result["results"]) == len(ordered)
+    for outcome, slot in zip(result["results"], ordered):
+        assert outcome["slot_id"] == slot.slot_id
+        assert outcome["manifest_id"] == manifest.campaign_id
+        assert outcome["planned_order"] == slot.planned_order
+
+    statuses = [o["execution_status"] for o in result["results"]]
+    assert statuses.count("completed") == 4  # 2 baseline reps x 2 cache conditions
+    assert statuses.count("timed_out") == 4  # icm slots
+    assert statuses.count("failed") == 4     # delegation slots
+    assert result["status_counts"] == {"completed": 4, "timed_out": 4, "failed": 4}
+
+    timed_out = [o for o in result["results"] if o["execution_status"] == "timed_out"]
+    assert all("Timed out" in o["error_message"] for o in timed_out)
+    failed = [o for o in result["results"] if o["execution_status"] == "failed"]
+    assert all("simulated provider failure" in o["error_message"] for o in failed)
+
+    # 3. Executed manifest copy reflects per-slot statuses without mutating input
+    assert all(s.status == "scheduled" for s in manifest.slots)
+    exec_manifest = result["manifest"]
+    by_id = {s.slot_id: s for s in exec_manifest.slots}
+    assert by_id[ordered[0].slot_id].status == result["results"][0]["execution_status"]
+    assert len(exec_manifest.slots) == len(ordered)
+
+
+def test_execute_batch_tampered_manifest_rejected_before_any_slot():
+    """A tampered manifest raises ValueError before any slot executes."""
+    manifest = campaign.plan_campaign(
+        tasks=["BENCH-01"],
+        arms=["baseline", "icm_lite"],
+        repetitions=1,
+        random_seed=42,
+    )
+    manifest.slots[0].model = "unauthorized-tampered-model"
+    assert not manifest.verify_integrity()
+
+    calls: list = []
+
+    def fake_run(**kwargs):  # noqa: ANN001
+        calls.append(kwargs)
+        return {"execution_status": "completed"}
+
+    with pytest.raises(ValueError):
+        campaign.execute_campaign_batch(manifest, dry_run=False, run_callable=fake_run)
+    assert calls == []
+
+    with pytest.raises(ValueError):
+        campaign.execute_campaign_batch(manifest, dry_run=True, run_callable=fake_run)
+
+    # Unsigned manifest (missing hash) is also rejected
+    manifest2 = campaign.plan_campaign(tasks=["BENCH-01"], arms=["baseline"], repetitions=1)
+    manifest2.manifest_hash = ""
+    with pytest.raises(ValueError):
+        campaign.execute_campaign_batch(manifest2, dry_run=True)
+
+
+def test_cli_plan_batch_and_execute_batch_dry_run(tmp_path: Path):
+    """CLI `plan-batch` writes an integrity-verified manifest and `execute-batch --dry-run` emits the ordered plan."""
+    workspace_root = Path(__file__).resolve().parents[2]
+    script = workspace_root / "scripts" / "campaign.py"
+    manifest_path = tmp_path / "batch_manifest.json"
+
+    # plan-batch
+    plan_proc = subprocess.run(
+        [
+            sys.executable, str(script), "plan-batch",
+            "--tasks", "BENCH-01,BENCH-02",
+            "--arms", "baseline,icm_lite,icm_v2,icm_v3,icm_staged",
+            "--repetitions", "1",
+            "--seed", "42",
+            "--cache-conditions", "cold,warm",
+            "--model", "gemini-2.5-pro",
+            "--output", str(manifest_path),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(workspace_root),
+        check=False,
+    )
+    assert plan_proc.returncode == 0, plan_proc.stderr
+    assert manifest_path.is_file()
+
+    loaded = campaign.CampaignManifest.load(manifest_path)
+    assert loaded.verify_integrity()
+    assert len(loaded.slots) == 2 * 5 * 2  # tasks x arms x cache conditions
+    assert set(s.arm for s in loaded.slots) == {
+        "baseline", "icm_lite", "icm_v2", "icm_v3", "icm_staged"
+    }
+    assert set(s.cache_condition for s in loaded.slots) == {"cold", "warm"}
+
+    # execute-batch --dry-run
+    exec_proc = subprocess.run(
+        [
+            sys.executable, str(script), "execute-batch",
+            "--manifest", str(manifest_path),
+            "--dry-run",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(workspace_root),
+        check=False,
+    )
+    assert exec_proc.returncode == 0, exec_proc.stderr
+    payload = json.loads(exec_proc.stdout)
+    assert payload["dry_run"] is True
+    assert payload["manifest_id"] == loaded.campaign_id
+    assert payload["total_slots"] == len(loaded.slots)
+    assert [p["planned_order"] for p in payload["execution_plan"]] == list(
+        range(1, len(loaded.slots) + 1)
+    )
+
+    # execute-batch on a tampered manifest exits non-zero before executing
+    loaded.slots[0].model = "tampered-model"
+    tampered_path = tmp_path / "tampered_manifest.json"
+    loaded.save(tampered_path)
+    bad_proc = subprocess.run(
+        [sys.executable, str(script), "execute-batch", "--manifest", str(tampered_path), "--dry-run"],
+        capture_output=True,
+        text=True,
+        cwd=str(workspace_root),
+        check=False,
+    )
+    assert bad_proc.returncode == 1
+    assert "integrity" in bad_proc.stderr.lower()
 
