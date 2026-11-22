@@ -1,0 +1,22 @@
+{
+  "task_id": "BENCH-034",
+  "name": "Interval Algebra Constraint Solver",
+  "category": "constraint_solving",
+  "target_files": [
+    "relations.py",
+    "algebra.py",
+    "network.py",
+    "propagate.py",
+    "search.py",
+    "solver.py"
+  ],
+  "description": "Repair an Allen interval-algebra constraint solver: the 13-relation classifier must get converse pairs right, converse labels must actually map through the converse table, reverse edges must be written, path consistency must intersect (not union) composed labels and detect empties, and branching must pick the smallest non-singleton edge deterministically.",
+  "expected_broken_reason": "consistency_violation",
+  "planted_defect": [
+    "relations.relation_of returns F for the FI case",
+    "algebra.converse_set returns the label unconversed",
+    "network.set_label never writes the converse reverse edge",
+    "propagate.pc2 unions instead of intersecting (no tightening, no empty detection)",
+    "search.pick_branch picks the largest label"
+  ]
+}
