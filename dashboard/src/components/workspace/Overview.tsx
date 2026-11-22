@@ -366,8 +366,8 @@ export function Overview({ data }: { data: DashboardPayload }) {
         <h2>What the evidence says</h2>
         <span>
           {headlineScope
-            ? `${headlineScope.unique_task_count} tasks · ${headlineScope.total_run_count} runs · ${headlineScope.priced_run_count} priced runs · ${headlineScope.pooling_method} pooling`
-            : `${uniqueTasksCount} tasks · ${totalRunsCount} runs · ${pricedRunsCount} priced runs · macro_average pooling`}
+            ? `${headlineScope.unique_task_count} tasks · ${headlineScope.total_run_count} runs · ${headlineScope.priced_run_count} priced runs · ${headlineScope.pooling_note || headlineScope.pooling_method}`
+            : `${uniqueTasksCount} tasks · ${totalRunsCount} runs · ${pricedRunsCount} priced runs · pooled_sum (macro_average noted per task)`}
           {archivedRunsCount > 0
             ? ` (${liveRunsCount} live · ${archivedRunsCount} archived)`
             : ""}

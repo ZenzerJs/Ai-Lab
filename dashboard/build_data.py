@@ -340,6 +340,7 @@ def build_headline_block(
     if valid_tasks and cum.get("has_measured_data"):
         b_costs = []
         i_costs = []
+        task_savings_pcts = []
         n_paired_tasks = 0
         for t, gov_key in task_arms:
             # Only tasks whose arms share run_index pairs feed the paired cost
@@ -354,6 +355,10 @@ def build_headline_block(
             if not paired:
                 continue
             n_paired_tasks += 1
+            t_b = sum(b for b, _ in paired)
+            t_g = sum(g for _, g in paired)
+            if t_b > 0:
+                task_savings_pcts.append((t_b - t_g) / t_b * 100.0)
             # Weight the bootstrap by pair, matching cumulative_savings'
             # totals: every matched run counts equally, not every task.
             for b, g in paired:
@@ -363,22 +368,35 @@ def build_headline_block(
         tot_b = cum.get("total_baseline_cost_usd")
         tot_i = cum.get("total_icm_cost_usd")
         if tot_b is not None and tot_i is not None and tot_b > 0:
+            def _signed_cost(savings_pct: float) -> str:
+                if savings_pct < 0:
+                    return f"+{abs(savings_pct):.1f}% cost"
+                if savings_pct > 0:
+                    return f"-{abs(savings_pct):.1f}% savings"
+                return "0.0% cost"
+
             pct = round((tot_b - tot_i) / tot_b * 100.0, 1)
             cost_delta_pct = round((tot_i - tot_b) / tot_b * 100.0, 1)
-            if pct < 0:
-                signed_cost_label = f"+{abs(pct):.1f}% cost"
-            elif pct > 0:
-                signed_cost_label = f"-{abs(pct):.1f}% savings"
-            else:
-                signed_cost_label = "0.0% cost"
+            signed_cost_label = _signed_cost(pct)
+            macro_avg_pct = (
+                round(sum(task_savings_pcts) / len(task_savings_pcts), 1)
+                if task_savings_pcts
+                else None
+            )
+            macro_note = (
+                f"macro_average across {len(task_savings_pcts)} tasks: {_signed_cost(macro_avg_pct)}"
+                if macro_avg_pct is not None
+                else "macro_average unavailable"
+            )
             ci = compute_bootstrap_ci(b_costs, i_costs)
             scope = {
                 "unique_task_count": unique_task_count,
                 "paired_priced_task_count": n_paired_tasks,
                 "total_run_count": total_run_count,
                 "priced_run_count": priced_run_count,
-                "pooling_method": "macro_average",
-                "pooling_note": "macro_average pooling across tasks; cumulative USD totals sum matched priced pairs",
+                "pooling_method": "pooled_sum",
+                "macro_average_savings_pct": macro_avg_pct,
+                "pooling_note": f"pooled_sum across matched priced pairs ({macro_note})",
                 "signed_cost_label": signed_cost_label,
                 "cost_delta_pct": cost_delta_pct,
                 "savings_pct": pct,
@@ -397,7 +415,8 @@ def build_headline_block(
                 "ci95": ci,
                 "cost_delta_pct": cost_delta_pct,
                 "signed_cost_label": signed_cost_label,
-                "pooling_method": "macro_average",
+                "pooling_method": "pooled_sum",
+                "macro_average_savings_pct": macro_avg_pct,
                 "priced_run_count": priced_run_count,
                 "total_run_count": total_run_count,
             })
@@ -479,8 +498,8 @@ def build_headline_block(
         if first["id"] == "cost_reduction" and scope is not None:
             sentence = (
                 f"Across {scope['unique_task_count']} tasks ({scope['total_run_count']} runs; "
-                f"{scope['priced_run_count']} priced runs across {scope['paired_priced_task_count']} paired tasks, "
-                f"{scope['pooling_method']} pooling), the ICM harness resulted in "
+                f"{scope['priced_run_count']} priced runs across {scope['paired_priced_task_count']} paired tasks; "
+                f"{scope['pooling_note']}), the ICM harness resulted in "
                 f"{scope['signed_cost_label']} ({first['baseline']} vs {first['icm']})."
             )
         elif first["id"] == "defect_rate":

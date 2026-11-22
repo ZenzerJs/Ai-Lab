@@ -281,6 +281,7 @@ export interface HeadlineStat {
   cost_delta_pct?: number | null;
   signed_cost_label?: string | null;
   pooling_method?: string | null;
+  macro_average_savings_pct?: number | null;
   priced_run_count?: number | null;
   total_run_count?: number | null;
 }
@@ -291,6 +292,7 @@ export interface HeadlineScope {
   total_run_count: number;
   priced_run_count: number;
   pooling_method: string;
+  macro_average_savings_pct?: number | null;
   pooling_note: string;
   signed_cost_label?: string | null;
   cost_delta_pct?: number | null;

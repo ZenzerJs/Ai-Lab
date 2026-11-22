@@ -206,11 +206,17 @@ test('formatSignedCostChange produces unambiguous +X% cost vs -X% savings labels
   assert.equal(formatSignedCostChange(null), '—');
 });
 
-test('crossCheckBenchmarks labels 0-run suites as suite present, unmeasured', () => {
+test('crossCheckBenchmarks labels 0-run and fixture-only suites as suite present, unmeasured', () => {
   const checked = crossCheckBenchmarks(
     ['BENCH-001', 'BENCH-033', 'BENCH-034'],
-    [{ task_id: 'BENCH-001', total_runs: 6, arms: {} }],
-    [makeRun({ task_id: 'BENCH-001' })],
+    [
+      { task_id: 'BENCH-001', total_runs: 6, has_measured_data: true, arms: {} },
+      { task_id: 'BENCH-033', total_runs: 4, has_measured_data: false, is_simulation: true, arms: {} },
+    ],
+    [
+      makeRun({ task_id: 'BENCH-001', source_kind: 'live', evidence_status: 'verified' }),
+      makeRun({ task_id: 'BENCH-033', source_kind: 'fixture', evidence_status: 'verified' }),
+    ],
   );
   assert.deepEqual(checked, [
     { task_id: 'BENCH-001', measured_runs: 1, status: 'measured' },
@@ -242,7 +248,7 @@ test('UI components surface preliminary badges, n=, BH FDR, matched ICM-Lite, to
 
   const overviewHtml = renderToStaticMarkup(React.createElement(Overview, { data: enriched }));
   assert.match(overviewHtml, /\+10\.5% cost/);
-  assert.match(overviewHtml, /macro_average pooling/);
+  assert.match(overviewHtml, /macro_average/);
   assert.match(overviewHtml, /suite present, unmeasured/);
 
   const experimentsHtml = renderToStaticMarkup(React.createElement(Experiments, { data: enriched }));

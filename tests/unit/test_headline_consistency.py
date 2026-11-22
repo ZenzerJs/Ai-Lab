@@ -84,8 +84,11 @@ def test_headline_matches_recomputed_cumulative_for_cost_increase_and_savings(tm
     assert scope["unique_task_count"] == len({t["task_id"] for t in payload_more["tasks"]})
     assert scope["total_run_count"] == len(payload_more["runs"])
     assert scope["priced_run_count"] == sum(1 for r in payload_more["runs"] if r.get("cost_usd") is not None)
-    assert scope["pooling_method"] == "macro_average"
+    assert scope["pooling_method"] == "pooled_sum"
+    assert scope["macro_average_savings_pct"] == -25.0
+    assert "macro_average" in scope["pooling_note"]
     assert "+25.0% cost" in headline_more["sentence"]
+    assert "pooled_sum" in headline_more["sentence"]
     assert "macro_average" in headline_more["sentence"]
     assert f"{scope['unique_task_count']} tasks" in headline_more["sentence"]
     assert f"{scope['total_run_count']} runs" in headline_more["sentence"]
