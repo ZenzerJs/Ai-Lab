@@ -137,11 +137,27 @@ test('suitePairs matches baseline and governed runs by run_index on a metric', (
         ],
       },
     },
+    // Unpriced scale runs and failed attempts live in excluded_runs.
+    excluded_runs: [
+      run({ id: 8, arm: 'baseline', run_index: 5, cost_usd: null, cost_status: 'unavailable', is_comparison_eligible: false }),
+      run({ id: 9, arm: 'icm', run_index: 5, cost_usd: null, cost_status: 'unavailable', is_comparison_eligible: false }),
+      run({ id: 10, arm: 'icm', run_index: 6, cost_usd: 0.9, verification_status: 'failed', is_comparison_eligible: false }),
+    ],
   };
-  assert.deepEqual(suitePairs(task, 'icm'), [[0.1, 0.05]]);
-  // Token metric pairs eligible runs even without costs.
+  assert.deepEqual(suitePairs(task, 'icm'), [[0.1, 0.05], [0.3, 0.1]]);
+  // Token metric pairs runs with or without costs, including excluded_runs.
   const tokenPairs = suitePairs(task, 'icm', (r) => r.total_tokens);
-  assert.deepEqual(tokenPairs, [[110, 110], [110, 110]]);
+  assert.deepEqual(tokenPairs, [[110, 110], [110, 110], [110, 110], [110, 110]]);
+  // Scope isolates the pool: unpriced keeps only the excluded_runs pair.
+  assert.deepEqual(
+    suitePairs(task, 'icm', (r) => r.total_tokens, 'unpriced'),
+    [[110, 110]],
+  );
+  // Priced scope picks up priced attempts even when excluded (failed).
+  assert.deepEqual(suitePairs(task, 'icm', undefined, 'priced'), [
+    [0.1, 0.05],
+    [0.3, 0.1],
+  ]);
   assert.equal(suitePairs(task, 'missing').length, 0);
 });
 
@@ -207,6 +223,9 @@ test('Analytics page stays robust on empty and unpriced payloads', () => {
         runs: snapshot.runs.filter((r) => r.cost_usd == null),
         tasks: snapshot.tasks.map((t) => ({
           ...t,
+          excluded_runs: (t.excluded_runs || []).filter(
+            (r) => r.cost_usd == null,
+          ),
           arms: Object.fromEntries(
             Object.entries(t.arms).map(([n, a]) => [
               n,

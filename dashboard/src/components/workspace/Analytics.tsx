@@ -69,10 +69,10 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
     for (const task of data.tasks || []) {
       for (const name of armNames(task).filter((n) => n !== "baseline")) {
         const costStats = pairedDiffStats(
-          suitePairs(task, name, costMetric),
+          suitePairs(task, name, costMetric, scope),
         );
         const tokenStats = pairedDiffStats(
-          suitePairs(task, name, totalTokensMetric),
+          suitePairs(task, name, totalTokensMetric, scope),
         );
         const [stats, label] =
           scope === "priced"

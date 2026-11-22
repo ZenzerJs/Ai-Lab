@@ -135,25 +135,31 @@ export interface PairedStats {
 
 /**
  * Pair baseline and governed runs of one suite by run_index on `metric`
- * (e.g. cost_usd, total_tokens). Only pairs where both sides carry a finite
- * value are kept; comparison-eligible runs are preferred but not required so
- * unpriced token benches still yield a paired signal.
+ * (e.g. cost_usd, total_tokens). The pool is the arm's listed runs plus the
+ * task's excluded_runs for that arm — excluded records carry the unpriced
+ * scale runs (cost_unavailable) and failed attempts — filtered to `scope`.
+ * Only pairs where both sides carry a finite metric value are kept.
  */
 export function suitePairs(
   task: TaskSummaryItem,
   armName: ArmName | string,
   metric: (r: RunRecord) => number | null = (r) =>
     isPricedRun(r) ? (r.cost_usd as number) : null,
+  scope: CostScope = "all",
 ): [number, number][] {
+  const pool = (name: string) =>
+    scopeRuns(
+      [
+        ...(task.arms[name]?.runs || []),
+        ...(task.excluded_runs || []).filter((r) => r.arm === name),
+      ],
+      scope,
+    );
   const pairs: [number, number][] = [];
-  const base = task.arms.baseline?.runs || [];
-  const gov = task.arms[armName]?.runs || [];
-  const eligible = (r: RunRecord) => r.is_comparison_eligible !== false;
   const baseByIdx = new Map(
-    base.filter(eligible).map((r) => [r.run_index, metric(r)]),
+    pool("baseline").map((r) => [r.run_index, metric(r)]),
   );
-  for (const r of gov) {
-    if (!eligible(r)) continue;
+  for (const r of pool(armName)) {
     const b = baseByIdx.get(r.run_index);
     const g = metric(r);
     if (b != null && g != null && finite(b) && finite(g)) pairs.push([b, g]);

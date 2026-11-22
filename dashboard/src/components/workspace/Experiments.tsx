@@ -54,8 +54,12 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
           ? task.savings?.mean_savings_percent
           : tokDelta;
         const taskRuns = task.arms.baseline?.runs || [];
-        const priced = taskRuns.some(isPricedRun) ||
-          governedNames(task).some((n) => (task.arms[n]?.runs || []).some(isPricedRun));
+        const priced =
+          taskRuns.some(isPricedRun) ||
+          governedNames(task).some((n) =>
+            (task.arms[n]?.runs || []).some(isPricedRun),
+          ) ||
+          (task.excluded_runs || []).some(isPricedRun);
         return (
           matches &&
           (model === "all" || mdl === model) &&
