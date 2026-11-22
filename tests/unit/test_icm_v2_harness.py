@@ -442,3 +442,49 @@ def test_governed_arms_priority_matches_ledger_for_icm_v2_and_icm_lite():
     arms = {"baseline": {}, ICM_LITE: {}, ICM_V2: {}}
     assert build_data._governed_key(arms) == ICM_V2
 
+
+def test_exported_arrow_functions_trigger_complexity_escalation(tmp_path):
+    ts = tmp_path / "arrows.ts"
+    ts.write_text(
+        "".join(f"export const fn{i} = (x: number): number => x + {i};\n" for i in range(10)),
+        encoding="utf-8",
+    )
+    assert count_ast_symbols(ts) == 10
+    decision = classify_mode("auto", {"target_files": ["arrows.ts"]}, tmp_path)
+    assert decision.arm == "icm"
+
+
+def test_scope_telemetry_counts_decorator_and_typescript_body_edits(tmp_path):
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "dec.py").write_text(
+        "def dec(f):\n    return f\n\n"
+        "@dec\n"
+        "def target():\n    return 1\n",
+        encoding="utf-8",
+    )
+    (snapshot / "mod.ts").write_text(
+        "export function alpha(): number {\n  return 1;\n}\n\n"
+        "export function beta(): number {\n  return 2;\n}\n",
+        encoding="utf-8",
+    )
+    workspace = tmp_path / "workspace"
+    shutil.copytree(snapshot, workspace)
+
+    # Decorator-only edit on target() -> 1 touched symbol
+    (workspace / "dec.py").write_text(
+        "def dec(f):\n    return f\n\n"
+        "@dec  # updated\n"
+        "def target():\n    return 1\n",
+        encoding="utf-8",
+    )
+    # Body-only edit inside TypeScript alpha() -> 1 touched symbol
+    (workspace / "mod.ts").write_text(
+        "export function alpha(): number {\n  return 42;\n}\n\n"
+        "export function beta(): number {\n  return 2;\n}\n",
+        encoding="utf-8",
+    )
+    scope = runner.scope_telemetry(workspace, snapshot, {"target_files": ["dec.py", "mod.ts"]})
+    assert scope["actual_scope"]["ast_symbols_touched"] == 2
+
+
