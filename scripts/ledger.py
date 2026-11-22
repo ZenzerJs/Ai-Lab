@@ -1348,11 +1348,15 @@ def get_pricing(model: str, conn: Optional[sqlite3.Connection] = None, db_path: 
     row = cursor.fetchone()
 
     if not row:
-        # Seed only when the table is stale (missing models the config
-        # declares) so a suffixed read on a fresh table stays read-only.
+        # Seed only when a config-declared model that could satisfy this
+        # lookup (the id itself or its effort-stripped base) is missing from
+        # the table: a fresh table stays read-only and a table seeded from a
+        # custom rate card is never overwritten by the bundled card.
         try:
+            base = base_model_id(model)
             present = {r["model"] for r in cursor.execute("SELECT model FROM pricing")}
-            if _declared_pricing_models() - present:
+            missing = _declared_pricing_models() - present
+            if model in missing or base in missing:
                 seed_pricing(conn=conn)
                 cursor.execute("SELECT * FROM pricing WHERE model = ?", (model,))
                 row = cursor.fetchone()

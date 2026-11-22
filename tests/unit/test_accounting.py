@@ -540,6 +540,36 @@ def test_pricing_exact_match_on_stale_db(tmp_path: Path):
     conn.close()
 
 
+def test_pricing_suffix_fallback_preserves_custom_rates(tmp_path: Path, monkeypatch):
+    """
+    Custom rate card: table holds 'custom-model' with custom rates and lacks
+    the bundled models. A suffixed lookup must resolve to the custom base row
+    without re-seeding from the bundled card or overwriting custom rates.
+    """
+    db_file = tmp_path / "custom_rates.db"
+    conn = ledger.get_connection(db_file)
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO pricing (
+                model, input_usd_per_mtok, cache_read_usd_per_mtok, output_usd_per_mtok,
+                source_url, fetched_at, cache_accounting
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("custom-model", 9.0, 9.0, 9.0, "https://example.com/custom", "2026-01-01T00:00:00Z", "separate"),
+        )
+
+    calls = []
+    monkeypatch.setattr(ledger, "seed_pricing", lambda *a, **kw: calls.append(1))
+
+    rates = ledger.get_pricing("custom-model-low", conn=conn)
+    assert rates["model"] == "custom-model"
+    assert rates["input_usd_per_mtok"] == 9.0
+    assert calls == []
+
+    conn.close()
+
+
 @pytest.mark.parametrize("bad_model", [None, 123])
 def test_pricing_invalid_model_raises_value_error(tmp_path: Path, bad_model):
     """get_pricing(None)/non-string raises ValueError cleanly, not AttributeError."""
