@@ -7,7 +7,7 @@ import {
   Search,
 } from "lucide-react";
 import { ArmStats, DashboardPayload, TaskSummaryItem } from "../../types";
-import { armNames, experimentNames, finite, governedArm, suiteBootstrapCI } from "../../lib/workspace";
+import { armNames, experimentNames, finite, governedArm } from "../../lib/workspace";
 import { isPricedRun, pairedDiffStats, suitePairsDetailed } from "../../lib/analytics";
 import { formatArm, formatCurrency, formatSignedPercent, formatTokens } from "../../lib/formatters";
 import AdaptiveICM from "./AdaptiveICM";
@@ -174,9 +174,6 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
           const cardKey = task.series_id || `${task.task_id}::${cardModel}`;
           const arms = armNames(task);
           const governedNames = arms.filter((n) => n !== "baseline");
-          const ciByArm = Object.fromEntries(
-            governedNames.map((n) => [n, suiteBootstrapCI(task, n)]),
-          );
           const pairMatchByArm = Object.fromEntries(
             governedNames.map((n) => [
               n,
@@ -194,6 +191,9 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
               n,
               pairedDiffStats(pairMatchByArm[n].pairs),
             ]),
+          );
+          const ciByArm = Object.fromEntries(
+            governedNames.map((n) => [n, statsByArm[n]?.ci95 ?? null]),
           );
           const armBadges = (name: string) => {
             const st = statsByArm[name];
