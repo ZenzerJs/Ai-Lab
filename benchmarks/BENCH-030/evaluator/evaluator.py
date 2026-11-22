@@ -85,7 +85,10 @@ def run_checks():
             t.write("a", "1")
             t.write("b", "2")
             t.commit()
-            # Atomic single stamp: a snapshot taken before the commit
+            # One commit stamp for the whole write set: a commit that
+            # stamped each key separately would consume extra timestamps.
+            assert db.ts == 1
+            # Atomic visibility: a snapshot taken before the commit
             # sees neither write; one taken after sees both.
             assert pre.read("a") is None and pre.read("b") is None
             post = db.begin("post")
