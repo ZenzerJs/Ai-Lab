@@ -3,6 +3,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 import build_data
 import evaluate_all_quality
 import ledger
@@ -389,3 +391,187 @@ def test_import_orphan_evidence_runs_idempotent_and_excluded(tmp_path: Path):
     assert imported_rows[0]["evidence_status"] == "verified"
     assert imported_rows[0]["is_comparison_eligible"] is False
     conn.close()
+
+
+def test_iteration_lineage_multi_version_matched_cohort_and_model_isolation(tmp_path: Path, monkeypatch):
+    """iteration_lineage groups by (model, version), excludes noise, preserves schema, and computes matched deltas."""
+    monkeypatch.setattr(build_data, "OPS_DB_PATH", tmp_path / "missing.db")
+    monkeypatch.setattr(evaluate_all_quality, "evaluate_all", lambda **_: {"tasks": [], "quality_ci": {}})
+
+    db_file = tmp_path / "lineage.db"
+    conn = ledger.get_connection(db_file)
+    ledger.seed_pricing(conn=conn)
+
+    ev_file = tmp_path / "live.ndjson"
+    ev_file.write_text('{"event": "init"}\n{"event": "result"}\n', encoding="utf-8")
+    ev_hash = hashlib.sha256(ev_file.read_bytes()).hexdigest()
+
+    def _add(
+        task_id,
+        arm,
+        model,
+        inp,
+        out,
+        cache=0,
+        run_index=1,
+        llm_calls=None,
+        tpl=None,
+        busts=None,
+        cv=None,
+        source_kind="live",
+        evidence_status="verified",
+        is_sim=False,
+    ):
+        ledger.record_run(
+            task_id=task_id,
+            arm=arm,
+            model=model,
+            run_index=run_index,
+            timestamp="2026-11-22T12:00:00Z",
+            input_tokens=inp,
+            output_tokens=out,
+            cache_read_tokens=cache,
+            source_kind=source_kind,
+            evidence_status=evidence_status,
+            evidence_ref=str(ev_file) if source_kind == "live" else None,
+            evidence_hash=ev_hash if source_kind == "live" else None,
+            verification_status="passed",
+            llm_calls_count=llm_calls,
+            tools_per_llm_call=tpl,
+            cache_bust_count=busts,
+            contract_version=cv,
+            is_simulation=is_sim,
+            conn=conn,
+        )
+
+    # Model 1: gemini-2.5-pro (separate cache accounting)
+    # Baseline runs BENCH-001 (x2), BENCH-002, and extra unmatched BENCH-EXTRA-BASE
+    _add("BENCH-001", "baseline", "gemini-2.5-pro", 4000, 1000, cache=0, run_index=1, llm_calls=8, tpl=1.0, busts=2)
+    _add("BENCH-001", "baseline", "gemini-2.5-pro", 4000, 1000, cache=0, run_index=2, llm_calls=8, tpl=1.0, busts=2)
+    _add("BENCH-002", "baseline", "gemini-2.5-pro", 8000, 2000, cache=0, run_index=1, llm_calls=10, tpl=1.0, busts=1)
+    _add("BENCH-EXTRA-BASE", "baseline", "gemini-2.5-pro", 100000, 20000, cache=0, run_index=1, llm_calls=20, tpl=1.0, busts=4)
+
+    # icm (v1)
+    _add("BENCH-001", "icm", "gemini-2.5-pro", 3000, 800, cache=1000, llm_calls=6, tpl=1.5, busts=1)
+    _add("BENCH-002", "icm", "gemini-2.5-pro", 6000, 1600, cache=2000, llm_calls=6, tpl=1.5, busts=1)
+
+    # icm_v2
+    _add("BENCH-001", "icm_v2", "gemini-2.5-pro", 2000, 600, cache=4000, llm_calls=4, tpl=2.5, busts=0, cv="icm_v2")
+    _add("BENCH-002", "icm_v2", "gemini-2.5-pro", 4000, 1200, cache=8000, llm_calls=4, tpl=2.5, busts=0, cv="icm_v2")
+
+    # icm_v3 (includes unmatched BENCH-EXTRA-V3 that must not alter matched deltas)
+    _add("BENCH-001", "icm_v3", "gemini-2.5-pro", 1200, 500, cache=6000, llm_calls=3, tpl=3.0, busts=0, cv="icm_v3")
+    _add("BENCH-002", "icm_v3", "gemini-2.5-pro", 2400, 1000, cache=12000, llm_calls=3, tpl=3.0, busts=0, cv="icm_v3")
+    _add("BENCH-EXTRA-V3", "icm_v3", "gemini-2.5-pro", 10, 10, cache=0, llm_calls=1, tpl=1.0, busts=0, cv="icm_v3")
+
+    # icm_staged
+    _add("BENCH-001", "icm_staged", "gemini-2.5-pro", 1000, 400, cache=7000, llm_calls=2, tpl=4.0, busts=0, cv="icm_staged")
+    _add("BENCH-002", "icm_staged", "gemini-2.5-pro", 2000, 800, cache=14000, llm_calls=2, tpl=4.0, busts=0, cv="icm_staged")
+
+    # Model 2: claude-sonnet-5-5 (subset cache accounting)
+    _add("BENCH-001", "baseline", "claude-sonnet-5-5", 1000, 100, cache=200)
+    _add("BENCH-001", "icm_v3", "claude-sonnet-5-5", 500, 50, cache=400, cv="icm_v3")
+
+    # Model 3: unpriced-custom-model (must remain unpriced)
+    _add("BENCH-001", "icm_v3", "unpriced-custom-model", 500, 50, cache=0, cv="icm_v3")
+
+    # Noise: fixture, imported, simulation, unverified -> must be excluded from iteration_lineage
+    _add("BENCH-NOISE", "icm_v3", "gemini-2.5-pro", 999999, 999999, source_kind="fixture", evidence_status="unverified", cv="icm_v3")
+    _add("BENCH-NOISE", "icm_v3", "gemini-2.5-pro", 999999, 999999, source_kind="imported", evidence_status="verified", cv="icm_v3")
+    _add("BENCH-NOISE", "icm_v3", "gemini-2.5-pro", 999999, 999999, source_kind="live", evidence_status="verified", is_sim=True, cv="icm_v3")
+    _add("BENCH-NOISE", "icm_v3", "gemini-2.5-pro", 999999, 999999, source_kind="live", evidence_status="unverified", cv="icm_v3")
+    conn.close()
+
+    payload = build_data.build_data_payload(db_path=db_file)
+
+    # Existing top-level schema keys preserved
+    for key in (
+        "schema_version",
+        "generated_at",
+        "build_identity",
+        "has_data",
+        "is_demo_report",
+        "is_simulation",
+        "headline",
+        "declared_benchmarks",
+        "cumulative",
+        "tasks",
+        "runs",
+        "timeline",
+        "pricing",
+        "cascade",
+        "operational",
+        "quality_rubric",
+        "campaign",
+        "iteration_lineage",
+    ):
+        assert key in payload
+
+    lineage = payload["iteration_lineage"]
+    assert lineage["has_data"] is True
+    assert {c["id"] for c in lineage["contracts"]} >= {"icm_v1", "icm_lite", "icm_v2", "icm_v3", "icm_staged"}
+
+    gem_versions = [v for v in lineage["versions"] if v["model"] == "gemini-2.5-pro"]
+    assert [v["version"] for v in gem_versions] == ["baseline", "icm_v1", "icm_v2", "icm_v3", "icm_staged"]
+    gem_by_ver = {v["version"]: v for v in gem_versions}
+
+    # BENCH-NOISE excluded everywhere
+    for entry in lineage["versions"]:
+        assert "BENCH-NOISE" not in entry["task_ids"]
+
+    # Contract metadata populated from registry
+    assert gem_by_ver["icm_v3"]["parent_version"] == "icm_v2"
+    assert gem_by_ver["icm_v3"]["execution_strategy"] == "single_session"
+    assert gem_by_ver["icm_staged"]["parent_version"] == "icm_v3"
+    assert gem_by_ver["icm_staged"]["execution_strategy"] == "two_phase_staged"
+    assert gem_by_ver["icm_staged"]["hypothesis"]
+    assert len(gem_by_ver["icm_staged"]["changes_from_prev"]) > 0
+
+    # Matched-cohort deltas strictly exclude BENCH-EXTRA-BASE and BENCH-EXTRA-V3
+    assert gem_by_ver["icm_v3"]["task_ids"] == ["BENCH-001", "BENCH-002", "BENCH-EXTRA-V3"]
+    assert gem_by_ver["icm_v3"]["matched_baseline_task_ids"] == ["BENCH-001", "BENCH-002"]
+
+    # Verify exact per-task paired means vs baseline and vs parent_version
+    gem_rates = ledger.get_pricing("gemini-2.5-pro", db_path=db_file)
+
+    def _gem_cost(inp, out, cache):
+        return round(
+            (inp * gem_rates["input_usd_per_mtok"] + cache * gem_rates["cache_read_usd_per_mtok"] + out * gem_rates["output_usd_per_mtok"])
+            / 1_000_000.0,
+            6,
+        )
+
+    base_matched_mean = (_gem_cost(4000, 1000, 0) + _gem_cost(8000, 2000, 0)) / 2.0
+    v2_matched_mean = (_gem_cost(2000, 600, 4000) + _gem_cost(4000, 1200, 8000)) / 2.0
+    v3_matched_mean = (_gem_cost(1200, 500, 6000) + _gem_cost(2400, 1000, 12000)) / 2.0
+    staged_matched_mean = (_gem_cost(1000, 400, 7000) + _gem_cost(2000, 800, 14000)) / 2.0
+
+    expected_v3_vs_base = round((v3_matched_mean - base_matched_mean) / base_matched_mean * 100.0, 2)
+    expected_v3_vs_v2 = round((v3_matched_mean - v2_matched_mean) / v2_matched_mean * 100.0, 2)
+    expected_staged_vs_v3 = round((staged_matched_mean - v3_matched_mean) / v3_matched_mean * 100.0, 2)
+
+    assert gem_by_ver["baseline"]["cost_delta_vs_baseline_pct"] is None
+    assert gem_by_ver["icm_v1"]["cost_delta_vs_prev_version_pct"] is None
+    assert gem_by_ver["icm_v3"]["cost_delta_vs_baseline_pct"] == expected_v3_vs_base
+    assert gem_by_ver["icm_v3"]["savings_vs_baseline_pct"] == round(-expected_v3_vs_base, 2)
+    assert gem_by_ver["icm_v3"]["cost_delta_vs_prev_version_pct"] == expected_v3_vs_v2
+    assert gem_by_ver["icm_staged"]["cost_delta_vs_prev_version_pct"] == expected_staged_vs_v3
+
+    # Diagnostics & separate cache accounting
+    assert gem_by_ver["icm_v2"]["mean_llm_calls"] == 4.0
+    assert gem_by_ver["icm_v2"]["mean_tools_per_call"] == 2.5
+    assert gem_by_ver["icm_v2"]["total_cache_busts"] == 0
+    assert gem_by_ver["icm_v2"]["mean_cache_hit_ratio"] == pytest.approx(12000 / (6000 + 12000))
+
+    # Model isolation + subset cache accounting (claude-sonnet-5-5)
+    claude_v3 = next(v for v in lineage["versions"] if v["model"] == "claude-sonnet-5-5" and v["version"] == "icm_v3")
+    assert claude_v3["mean_cache_hit_ratio"] == pytest.approx(400 / 500)
+    assert claude_v3["cost_delta_vs_prev_version_pct"] is None  # no claude icm_v2 parent
+
+    # Unpriced model never blended into dollar averages
+    unpriced_v3 = next(v for v in lineage["versions"] if v["model"] == "unpriced-custom-model" and v["version"] == "icm_v3")
+    assert unpriced_v3["n_runs"] == 1
+    assert unpriced_v3["priced_n_runs"] == 0
+    assert unpriced_v3["mean_cost_usd"] is None
+    assert unpriced_v3["cost_per_passing_patch_usd"] is None
+    assert unpriced_v3["cost_delta_vs_baseline_pct"] is None

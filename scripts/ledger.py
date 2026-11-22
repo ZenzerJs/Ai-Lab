@@ -2203,7 +2203,7 @@ def backfill_cache_diagnostics_from_evidence(
 
 
 _ORPHAN_EVIDENCE_RE = re.compile(
-    r"^live_(?P<task_id>[A-Za-z0-9-]+?)(?:_(?P<model_slug>[a-z0-9][a-z0-9._-]+))?_(?P<arm>baseline|icm|icm_lite|icm_v2|icm-subagents|delegation)_run(?P<run_idx>\d+)_(?P<epoch>\d+)\.ndjson$"
+    r"^live_(?P<task_id>[A-Za-z0-9-]+?)(?:_(?P<model_slug>[a-z0-9][a-z0-9._-]+))?_(?P<arm>baseline|icm|icm_lite|icm_v2|icm_v3|icm_staged|icm-subagents|delegation)(?:_(?P<phase>phase[12]))?_run(?P<run_idx>\d+)_(?P<epoch>\d+)\.ndjson$"
 )
 
 
@@ -2244,7 +2244,7 @@ def import_orphan_evidence_runs(
                 continue
 
             m = _ORPHAN_EVIDENCE_RE.match(p.name)
-            if not m:
+            if not m or m.group("phase"):
                 continue
             task_id = m.group("task_id")
             arm = m.group("arm")
@@ -2512,7 +2512,7 @@ def import_run(
 
 
 def _compute_arm_efficiency_metrics(arm_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Compute pass-rate, cost/tokens per passing patch, and tool/loop metrics over arm rows."""
+    """Compute pass-rate, cost/tokens per passing patch, and tool/loop/cache metrics over arm rows."""
     verified_count = len([r for r in arm_rows if r.get("verification_status") == "passed"])
     pass_rate = (verified_count / len(arm_rows)) if arm_rows else None
     # Compute per-pass metrics over telemetry-bearing rows only, so runs with
@@ -2538,6 +2538,21 @@ def _compute_arm_efficiency_metrics(arm_rows: List[Dict[str, Any]]) -> Dict[str,
         int(r["tool_errors_count"]) for r in arm_rows if r.get("tool_errors_count") is not None
     )
     loop_runs_count = sum(1 for r in arm_rows if bool(r.get("loop_detected")))
+
+    llm_vals = [float(r["llm_calls_count"]) for r in arm_rows if r.get("llm_calls_count") is not None]
+    tpl_vals = [float(r["tools_per_llm_call"]) for r in arm_rows if r.get("tools_per_llm_call") is not None]
+    fresh_vals = [
+        float(r["avg_fresh_input_per_call"])
+        for r in arm_rows
+        if r.get("avg_fresh_input_per_call") is not None
+    ]
+    peak_vals = [
+        int(r["peak_context_tokens"])
+        for r in arm_rows
+        if r.get("peak_context_tokens") is not None
+    ]
+    bust_vals = [int(r["cache_bust_count"]) for r in arm_rows if r.get("cache_bust_count") is not None]
+
     return {
         "passed_count": verified_count,
         "pass_rate": pass_rate,
@@ -2546,6 +2561,11 @@ def _compute_arm_efficiency_metrics(arm_rows: List[Dict[str, Any]]) -> Dict[str,
         "total_tool_calls": total_tool_calls,
         "total_tool_errors": total_tool_errors,
         "loop_runs_count": loop_runs_count,
+        "mean_llm_calls": (sum(llm_vals) / len(llm_vals)) if llm_vals else None,
+        "mean_tools_per_llm_call": (sum(tpl_vals) / len(tpl_vals)) if tpl_vals else None,
+        "mean_avg_fresh_input_per_call": (sum(fresh_vals) / len(fresh_vals)) if fresh_vals else None,
+        "peak_context_tokens": max(peak_vals) if peak_vals else None,
+        "total_cache_busts": sum(bust_vals) if bust_vals else None,
     }
 
 
@@ -2763,6 +2783,11 @@ def _compute_task_summary_with_rows(
             "total_tool_calls": eff["total_tool_calls"],
             "total_tool_errors": eff["total_tool_errors"],
             "loop_runs_count": eff["loop_runs_count"],
+            "mean_llm_calls": eff["mean_llm_calls"],
+            "mean_tools_per_llm_call": eff["mean_tools_per_llm_call"],
+            "mean_avg_fresh_input_per_call": eff["mean_avg_fresh_input_per_call"],
+            "peak_context_tokens": eff["peak_context_tokens"],
+            "total_cache_busts": eff["total_cache_busts"],
             "failed_count": len([r for r in all_arm_rows if r.get("verification_status") in ("failed", "evaluator_error") or r.get("execution_status") == "failed"]),
             "excluded_count": len([r for r in all_arm_rows if not r.get("is_comparison_eligible")]),
             "cost_eligible_count": len([r for r in all_arm_rows if r.get("is_measurement_eligible") and r.get("cost_usd") is not None]),
@@ -2793,7 +2818,7 @@ def _compute_task_summary_with_rows(
 
     # Compare baseline vs governed arm
     gov_arm = None
-    for candidate in ("icm-subagents", "icm", "delegation", "icm_v2", "icm_lite"):
+    for candidate in ("icm-subagents", "icm", "delegation", "icm_v3", "icm_staged", "icm_v2", "icm_lite"):
         if candidate in summary["arms"] and summary["arms"][candidate]["n"] > 0:
             gov_arm = candidate
             break

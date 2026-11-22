@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.campaign import score_workspace, prepare_blind_ab_packet, compute_quality_ci
-from scripts.complexity_router import ICM_LITE, ICM_V2
+from scripts.complexity_router import ICM_LITE, ICM_STAGED, ICM_V2, ICM_V3
 
 
 def _count_ndjson_errors(pattern: str) -> int:
@@ -70,7 +70,7 @@ def _load_db_verdicts(db_path: Optional[Path] = None) -> Dict[Tuple[str, str], b
             arm_l = (arm or "").lower()
             if arm_l == "baseline":
                 bucket = "baseline"
-            elif arm_l in ("icm", "icm-subagents", "governed", "delegation", ICM_LITE, ICM_V2):
+            elif arm_l in ("icm", "icm-subagents", "governed", "delegation", ICM_LITE, ICM_V2, ICM_V3, ICM_STAGED):
                 bucket = "governed"
             else:
                 continue
@@ -95,6 +95,7 @@ def _run_pytest_target(target: Path, cwd: Path, pythonpath: Optional[Path] = Non
             [sys.executable, "-m", "pytest", str(target), "-q", "-p", "no:cacheprovider"],
             cwd=str(cwd),
             env=env,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=30,
