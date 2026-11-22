@@ -6,8 +6,9 @@ import {
   FlaskConical,
   Search,
 } from "lucide-react";
-import { ArmStats, DashboardPayload } from "../../types";
-import { armNames, experimentNames, finite, governedArm, governedArmName, suiteBootstrapCI } from "../../lib/workspace";
+import { ArmStats, DashboardPayload, TaskSummaryItem } from "../../types";
+import { armNames, experimentNames, finite, governedArm, suiteBootstrapCI } from "../../lib/workspace";
+import { isPricedRun, pairedDiffStats, suitePairs } from "../../lib/analytics";
 import { formatArm, formatCurrency, formatSignedPercent, formatTokens } from "../../lib/formatters";
 import AdaptiveICM from "./AdaptiveICM";
 
@@ -30,6 +31,8 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
     () => new Set((data.tasks || []).map((t) => t.task_id)).size,
     [data.tasks],
   );
+  const governedNames = (task: TaskSummaryItem) =>
+    armNames(task).filter((n) => n !== "baseline");
   const tasks = useMemo(
     () =>
       (data.tasks || []).filter((task) => {
@@ -50,11 +53,19 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
         const delta = finite(task.savings?.mean_savings_percent)
           ? task.savings?.mean_savings_percent
           : tokDelta;
+        const taskRuns = task.arms.baseline?.runs || [];
+        const priced =
+          taskRuns.some(isPricedRun) ||
+          governedNames(task).some((n) =>
+            (task.arms[n]?.runs || []).some(isPricedRun),
+          ) ||
+          (task.excluded_runs || []).some(isPricedRun);
         return (
           matches &&
           (model === "all" || mdl === model) &&
           (filter === "all" ||
-            (finite(delta) && (filter === "savings" ? delta > 0 : delta < 0)))
+            (filter === "priced" ? priced : filter === "unpriced" ? !priced :
+              finite(delta) && (filter === "savings" ? delta > 0 : delta < 0)))
         );
       }),
     [data.tasks, query, filter, model],
@@ -106,6 +117,8 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
             onChange={(event) => setFilter(event.target.value)}
           >
             <option value="all">All results</option>
+            <option value="priced">Priced only</option>
+            <option value="unpriced">Unpriced only</option>
             <option value="savings">Cost savings</option>
             <option value="overhead">Cost overhead</option>
           </select>
@@ -164,6 +177,41 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
           const ciByArm = Object.fromEntries(
             governedNames.map((n) => [n, suiteBootstrapCI(task, n)]),
           );
+          const statsByArm = Object.fromEntries(
+            governedNames.map((n) => [
+              n,
+              pairedDiffStats(
+                suitePairs(
+                  task,
+                  n,
+                  isTokenOnly
+                    ? (r) => (finite(r.total_tokens) ? r.total_tokens : null)
+                    : (r) => (isPricedRun(r) ? (r.cost_usd as number) : null),
+                ),
+              ),
+            ]),
+          );
+          const armBadges = (name: string) =>
+            statsByArm[name]?.effectSize ? (
+              <span className="effect-badges">
+                <span className="badge badge-blue">
+                  d<sub>z</sub>{" "}
+                  {statsByArm[name]!.cohensDz != null
+                    ? Math.abs(statsByArm[name]!.cohensDz!).toFixed(2)
+                    : "—"}{" "}
+                  · {statsByArm[name]!.effectSize}
+                </span>{" "}
+                {statsByArm[name]!.significant != null && (
+                  <span
+                    className={`badge ${statsByArm[name]!.significant ? "badge-green" : "badge-amber"}`}
+                  >
+                    {statsByArm[name]!.significant
+                      ? "significant"
+                      : "not significant"}
+                  </span>
+                )}
+              </span>
+            ) : null;
           return (
             <article key={cardKey} className="panel experiment-card">
               <div className="experiment-card-heading">
@@ -201,10 +249,15 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
                       <span>Baseline tok / pass</span>
                       <strong>{formatTokens(bTok)}</strong>
                     </div>
-                    <div>
-                      <span>{formatArm(governedArmName(task))} tok / pass</span>
-                      <strong>{formatTokens(gTok)}</strong>
-                    </div>
+                    {governedNames.map((name) => (
+                      <div key={name}>
+                        <span>{formatArm(name)} tok / pass</span>
+                        <strong>
+                          {formatTokens(task.arms[name]?.tokens_per_passing_patch)}
+                        </strong>
+                        {armBadges(name)}
+                      </div>
+                    ))}
                     <div>
                       <span>
                         {lower ? "Token reduction" : "Token overhead"}
@@ -250,6 +303,7 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
                               {formatSignedPercent(ci[1])}
                             </span>
                           )}
+                          {armBadges(name)}
                         </div>
                       );
                     })}

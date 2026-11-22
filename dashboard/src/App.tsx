@@ -14,6 +14,7 @@ import { Shell } from "./components/workspace/Shell";
 import { Overview } from "./components/workspace/Overview";
 
 const Experiments = lazy(() => import("./components/workspace/Experiments"));
+const Analytics = lazy(() => import("./components/workspace/Analytics"));
 const Simulator = lazy(() => import("./components/workspace/Simulator"));
 const Evidence = lazy(() => import("./components/workspace/Evidence"));
 const Workbench = lazy(() => import("./components/workspace/Workbench"));
@@ -188,6 +189,7 @@ export function App() {
                 <>
                   {page === "overview" && <Overview data={data} />}
                   {page === "tasks" && <Experiments data={data} />}
+                  {page === "analytics" && <Analytics data={data} />}
                   {page === "simulator" && <Simulator data={data} />}
                   {page === "audit" && <Evidence data={data} />}
                 </>

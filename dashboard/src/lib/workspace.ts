@@ -1,10 +1,11 @@
 import { RunRecord, TaskSummaryItem } from "../types";
 
 export type Destination =
-  "overview" | "tasks" | "simulator" | "sandboxes" | "audit";
+  "overview" | "tasks" | "simulator" | "sandboxes" | "audit" | "analytics";
 export const destinations: Destination[] = [
   "overview",
   "tasks",
+  "analytics",
   "simulator",
   "sandboxes",
   "audit",
