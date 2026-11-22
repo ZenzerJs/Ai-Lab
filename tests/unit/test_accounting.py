@@ -522,6 +522,24 @@ def test_pricing_suffix_hit_does_not_reseed(tmp_path: Path, monkeypatch):
     conn.close()
 
 
+def test_pricing_exact_match_on_stale_db(tmp_path: Path):
+    """
+    Stale table: 'gemini-3.8-flash-low' declared in config but its row was
+    deleted. Exact-match precedence must trigger a re-seed so the suffixed
+    id resolves to its own entry, not the base model's.
+    """
+    db_file = tmp_path / "stale.db"
+    conn = ledger.get_connection(db_file)
+    ledger.seed_pricing(conn=conn)
+    with conn:
+        conn.execute("DELETE FROM pricing WHERE model = ?", ("gemini-3.8-flash-low",))
+
+    rates = ledger.get_pricing("gemini-3.8-flash-low", conn=conn)
+    assert rates["model"] == "gemini-3.8-flash-low"
+
+    conn.close()
+
+
 @pytest.mark.parametrize("bad_model", [None, 123])
 def test_pricing_invalid_model_raises_value_error(tmp_path: Path, bad_model):
     """get_pricing(None)/non-string raises ValueError cleanly, not AttributeError."""

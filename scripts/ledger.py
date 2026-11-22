@@ -17,7 +17,7 @@ import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 # Ensure UTF-8 output encoding
 if hasattr(sys.stdout, "reconfigure"):
@@ -1328,6 +1328,14 @@ def seed_pricing(
     return count
 
 
+def _declared_pricing_models() -> Set[str]:
+    """Model ids declared in config/PRICING.json."""
+    with open(DEFAULT_PRICING_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    models = data.get("models") or {}
+    return set(models) if isinstance(models, dict) else set()
+
+
 def get_pricing(model: str, conn: Optional[sqlite3.Connection] = None, db_path: Optional[Path] = None) -> Dict[str, Any]:
     """Retrieve pricing rates for a given model from DB, auto-seeding if needed."""
     should_close = False
@@ -1340,26 +1348,23 @@ def get_pricing(model: str, conn: Optional[sqlite3.Connection] = None, db_path: 
     row = cursor.fetchone()
 
     if not row:
-        # Effort-suffixed ids resolve to the base model's rate card; check the
-        # existing table first so suffixed reads don't trigger a seed write.
+        # Seed only when the table is stale (missing models the config
+        # declares) so a suffixed read on a fresh table stays read-only.
+        try:
+            present = {r["model"] for r in cursor.execute("SELECT model FROM pricing")}
+            if _declared_pricing_models() - present:
+                seed_pricing(conn=conn)
+                cursor.execute("SELECT * FROM pricing WHERE model = ?", (model,))
+                row = cursor.fetchone()
+        except Exception:
+            pass
+
+    if not row:
+        # Effort-suffixed ids resolve to the base model's rate card.
         base = base_model_id(model)
         if base != model:
             cursor.execute("SELECT * FROM pricing WHERE model = ?", (base,))
             row = cursor.fetchone()
-
-    if not row:
-        # Attempt auto-seed from config/PRICING.json
-        try:
-            seed_pricing(conn=conn)
-            cursor.execute("SELECT * FROM pricing WHERE model = ?", (model,))
-            row = cursor.fetchone()
-            if not row:
-                base = base_model_id(model)
-                if base != model:
-                    cursor.execute("SELECT * FROM pricing WHERE model = ?", (base,))
-                    row = cursor.fetchone()
-        except Exception:
-            pass
 
     if not row:
         if should_close:
