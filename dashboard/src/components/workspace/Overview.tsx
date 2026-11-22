@@ -18,7 +18,7 @@ import {
 } from "../../types";
 import { formatArm, formatCurrency, formatTokens } from "../../lib/formatters";
 import {
-  costSourceBreakdown,
+  acuTelemetrySummary,
   formatSignedCostChange,
   isPricedRun,
 } from "../../lib/analytics";
@@ -268,7 +268,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
           (s, r) => s + (finite(r.tool_errors_count) ? r.tool_errors_count : 0),
           0,
         );
-        const breakdown = costSourceBreakdown(runs);
+        const acu = acuTelemetrySummary(runs);
         return {
           model,
           liveRuns: runs.length,
@@ -285,8 +285,8 @@ export function Overview({ data }: { data: DashboardPayload }) {
           govErrors,
           baseUsd: sumUsd(baseRuns),
           govUsd: sumUsd(govRuns),
-          costBasis: breakdown.costBasisLabel,
-          totalAcus: breakdown.totalAcus,
+          acuRuns: acu.runsWithAcus,
+          totalAcus: acu.totalAcus,
         };
       });
   }, [data.runs]);
@@ -585,7 +585,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
                   <th scope="col">Tokens / pass (Base → Gov)</th>
                   <th scope="col">Δ Tokens</th>
                   <th scope="col">Tool calls (err)</th>
-                  <th scope="col">Cost basis</th>
+                  <th scope="col">ACU (metadata)</th>
                   <th scope="col">Priced USD (Base → Gov)</th>
                 </tr>
               </thead>
@@ -621,24 +621,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
                       )
                     </td>
                     <td>
-                      <span
-                        className={`badge ${
-                          m.costBasis === "Direct Billed"
-                            ? "badge-green"
-                            : m.costBasis === "ACU Derived"
-                              ? "badge-blue"
-                              : m.costBasis === "Direct Billed + ACU Derived"
-                                ? "badge-purple"
-                                : "badge-neutral"
-                        }`}
-                      >
-                        {m.costBasis}
-                      </span>
-                      {m.totalAcus > 0 && (
-                        <span className="cell-subtitle">
-                          {m.totalAcus.toFixed(2)} ACU
-                        </span>
-                      )}
+                      {m.acuRuns > 0 ? `${m.totalAcus.toFixed(2)} ACU` : "—"}
                     </td>
                     <td>
                       {m.baseUsd != null && m.govUsd != null

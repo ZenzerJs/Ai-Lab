@@ -21,11 +21,9 @@ for (const extension of ['.ts', '.tsx']) {
 }
 
 const {
-  costSourceBreakdown,
-  formatCostSourceLabel,
-  getCostSource,
-  isAcuDerivedRun,
-  isDirectBilledRun,
+  acuTelemetrySummary,
+  hasAcuTelemetry,
+  isPricedRun,
   modelFamilySummaries,
   scopeRuns,
 } = require('../src/lib/analytics.ts');
@@ -47,7 +45,6 @@ const makeRun = (overrides) => ({
   duration_seconds: 10,
   cost_usd: 0.12,
   cost_status: 'usage_estimate',
-  cost_source: 'billed_direct',
   source_kind: 'live',
   evidence_status: 'verified',
   verification_status: 'passed',
@@ -55,60 +52,38 @@ const makeRun = (overrides) => ({
   ...overrides,
 });
 
-test('cost source classification separates Direct Billed, ACU Derived, and Unpriced runs', () => {
-  const direct = makeRun({ id: 1, cost_source: 'billed_direct', cost_usd: 0.15 });
-  const acu = makeRun({
+test('ACU metadata stays separate from priced cost_usd scope', () => {
+  const direct = makeRun({ id: 1, cost_usd: 0.15 });
+  const devinAcu = makeRun({
     id: 2,
     model: 'devin-session-v3',
     input_tokens: null,
     output_tokens: null,
     total_tokens: null,
     acus_consumed: 0.8,
-    acu_usd_rate: 2.25,
-    cost_usd: 1.8,
-    estimated_cost_usd: 1.8,
-    cost_status: 'estimated_acu_derived',
-    cost_source: 'estimated_acu_derived',
-  });
-  const unpriced = makeRun({
-    id: 3,
-    model: 'swe-2-max-lightning',
     cost_usd: null,
     cost_status: 'unavailable',
-    cost_source: 'unavailable',
   });
 
-  assert.equal(getCostSource(direct), 'billed_direct');
-  assert.equal(isDirectBilledRun(direct), true);
-  assert.equal(isAcuDerivedRun(direct), false);
-  assert.equal(formatCostSourceLabel(getCostSource(direct)), 'Direct Billed');
+  assert.equal(isPricedRun(direct), true);
+  assert.equal(hasAcuTelemetry(direct), false);
 
-  assert.equal(getCostSource(acu), 'estimated_acu_derived');
-  assert.equal(isDirectBilledRun(acu), false);
-  assert.equal(isAcuDerivedRun(acu), true);
-  assert.equal(formatCostSourceLabel(getCostSource(acu)), 'ACU Derived');
+  assert.equal(isPricedRun(devinAcu), false);
+  assert.equal(hasAcuTelemetry(devinAcu), true);
 
-  assert.equal(getCostSource(unpriced), 'unavailable');
-  assert.equal(formatCostSourceLabel(getCostSource(unpriced)), 'Unpriced');
+  const runs = [direct, devinAcu];
+  assert.deepEqual(scopeRuns(runs, 'priced').map((r) => r.id), [1]);
+  assert.deepEqual(scopeRuns(runs, 'unpriced').map((r) => r.id), [2]);
 
-  const runs = [direct, acu, unpriced];
-  assert.deepEqual(scopeRuns(runs, 'billed_direct').map((r) => r.id), [1]);
-  assert.deepEqual(scopeRuns(runs, 'estimated_acu_derived').map((r) => r.id), [2]);
-  assert.deepEqual(scopeRuns(runs, 'priced').map((r) => r.id), [1, 2]);
-  assert.deepEqual(scopeRuns(runs, 'unpriced').map((r) => r.id), [3]);
-
-  const breakdown = costSourceBreakdown(runs);
-  assert.equal(breakdown.directBilled, 1);
-  assert.equal(breakdown.acuDerived, 1);
-  assert.equal(breakdown.unpriced, 1);
-  assert.equal(breakdown.totalAcus, 0.8);
-  assert.equal(breakdown.costBasisLabel, 'Direct Billed + ACU Derived');
+  const summary = acuTelemetrySummary(runs);
+  assert.equal(summary.runsWithAcus, 1);
+  assert.equal(summary.totalAcus, 0.8);
 });
 
-test('modelFamilySummaries and Analytics UI explicitly label Direct Billed vs ACU Derived', () => {
+test('modelFamilySummaries and Analytics UI surface ACU metadata while keeping Devin runs Unpriced', () => {
   const runs = [
-    makeRun({ id: 1, model: 'gemini-3.8-flash', arm: 'baseline', cost_usd: 0.2, cost_source: 'billed_direct' }),
-    makeRun({ id: 2, model: 'gemini-3.8-flash', arm: 'icm', cost_usd: 0.15, cost_source: 'billed_direct' }),
+    makeRun({ id: 1, model: 'gemini-3.8-flash', arm: 'baseline', cost_usd: 0.2 }),
+    makeRun({ id: 2, model: 'gemini-3.8-flash', arm: 'icm', cost_usd: 0.15 }),
     makeRun({
       id: 3,
       model: 'devin-session-v3',
@@ -117,10 +92,8 @@ test('modelFamilySummaries and Analytics UI explicitly label Direct Billed vs AC
       output_tokens: null,
       total_tokens: null,
       acus_consumed: 1.0,
-      cost_usd: 2.25,
-      estimated_cost_usd: 2.25,
-      cost_status: 'estimated_acu_derived',
-      cost_source: 'estimated_acu_derived',
+      cost_usd: null,
+      cost_status: 'unavailable',
     }),
     makeRun({
       id: 4,
@@ -130,21 +103,21 @@ test('modelFamilySummaries and Analytics UI explicitly label Direct Billed vs AC
       output_tokens: null,
       total_tokens: null,
       acus_consumed: 0.75,
-      cost_usd: 1.6875,
-      estimated_cost_usd: 1.6875,
-      cost_status: 'estimated_acu_derived',
-      cost_source: 'estimated_acu_derived',
+      cost_usd: null,
+      cost_status: 'unavailable',
     }),
   ];
 
   const families = modelFamilySummaries(runs, 'all');
   const devin = families.find((f) => f.family === 'devin');
   const gemini = families.find((f) => f.family === 'gemini');
-  assert.equal(devin.costBasis, 'ACU Derived');
-  assert.equal(devin.acuDerivedRuns, 2);
+  assert.equal(devin.pricedRuns, 0);
+  assert.equal(devin.baselineCostUsd, null);
+  assert.equal(devin.governedCostUsd, null);
+  assert.equal(devin.acuRuns, 2);
   assert.equal(devin.totalAcus, 1.75);
-  assert.equal(gemini.costBasis, 'Direct Billed');
-  assert.equal(gemini.directBilledRuns, 2);
+  assert.equal(gemini.pricedRuns, 2);
+  assert.equal(gemini.acuRuns, 0);
 
   const markup = renderToStaticMarkup(
     React.createElement(Analytics, {
@@ -159,7 +132,7 @@ test('modelFamilySummaries and Analytics UI explicitly label Direct Billed vs AC
       },
     }),
   );
-  assert.match(markup, /Direct Billed only/);
-  assert.match(markup, /ACU Derived only/);
+  assert.match(markup, /ACU telemetry \(metadata\)/);
   assert.match(markup, /1\.75 ACU/);
+  assert.match(markup, /Unpriced/);
 });

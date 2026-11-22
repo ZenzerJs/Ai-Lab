@@ -1122,7 +1122,6 @@ class ManualExecutionAdapter:
         model: Optional[str] = None,
         manifest_id: Optional[str] = None,
         acus_consumed: Optional[float] = None,
-        acu_usd_rate: Optional[float] = None,
         db_path: Optional[Path] = None,
         conn: Optional[sqlite3.Connection] = None,
     ) -> Dict[str, Any]:
@@ -1146,7 +1145,7 @@ class ManualExecutionAdapter:
                 resolved_acus = parsed.get("acus_consumed")
             cost_status = None
         else:
-            # RUN-11: Lacks usage telemetry -> None (unknown), cost unavailable unless ACUs supplied
+            # RUN-11: Lacks usage telemetry -> None (unknown), cost unavailable
             u = {
                 "input_tokens": None,
                 "output_tokens": None,
@@ -1156,11 +1155,8 @@ class ManualExecutionAdapter:
             }
             num_turns = 1
             duration = 0.0
-            if resolved_acus is not None:
-                cost_status = None
-            else:
-                cost_status = "unavailable"
-                exclusion_reasons.append("missing_usage_telemetry")
+            cost_status = "unavailable"
+            exclusion_reasons.append("missing_usage_telemetry")
 
         if verif.reasons:
             for r in verif.reasons:
@@ -1187,7 +1183,6 @@ class ManualExecutionAdapter:
             exclusion_reasons=exclusion_reasons,
             cost_status=cost_status,
             acus_consumed=resolved_acus,
-            acu_usd_rate=acu_usd_rate,
             execution_status="completed",
             verification_status=verif.verification_status,
             manifest_id=manifest_id,
@@ -1760,7 +1755,6 @@ def run_benchmark_live(
     devin_org_id: Optional[str] = None,
     devin_api_key: Optional[str] = None,
     acus_consumed: Optional[float] = None,
-    acu_usd_rate: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Execute a live benchmark task using the agy CLI in an isolated DisposableWorkspace.
@@ -2012,7 +2006,6 @@ def run_benchmark_live(
                 evidence_hash=evidence_hash,
                 cost_status=cost_status,
                 acus_consumed=resolved_acus,
-                acu_usd_rate=acu_usd_rate,
                 execution_status=execution_status,
                 verification_status=verif_status,
                 evaluator_hash=ev_hash,
@@ -2038,8 +2031,7 @@ def run_benchmark_live(
 
             row = dict(
                 conn.execute(
-                    "SELECT cost_status, cost_usd, cost_source, acus_consumed, acu_usd_rate, estimated_cost_usd "
-                    "FROM runs WHERE id = ?",
+                    "SELECT cost_status, cost_usd, acus_consumed FROM runs WHERE id = ?",
                     (run_id,),
                 ).fetchone()
             )
@@ -2057,10 +2049,7 @@ def run_benchmark_live(
             "verification": verif,
             "cost_status": row["cost_status"],
             "cost_usd": row["cost_usd"],
-            "cost_source": row["cost_source"],
             "acus_consumed": row["acus_consumed"],
-            "acu_usd_rate": row["acu_usd_rate"],
-            "estimated_cost_usd": row["estimated_cost_usd"],
             "usage": usage,
             "tool_metrics": tool_metrics,
             "evidence_ref": evidence_ref,

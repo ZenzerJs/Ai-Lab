@@ -322,8 +322,6 @@ def build_headline_block(
     operational: Optional[Dict[str, Any]] = None,
     total_runs: Optional[int] = None,
     priced_runs: Optional[int] = None,
-    billed_direct_runs: Optional[int] = None,
-    acu_derived_runs: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Construct high-impact headline metrics with strict honesty invariants.
@@ -401,26 +399,11 @@ def build_headline_block(
                 else "macro_average unavailable"
             )
             ci = compute_bootstrap_ci(b_costs, i_costs)
-            direct_count = int(billed_direct_runs) if billed_direct_runs is not None else priced_run_count
-            acu_count = int(acu_derived_runs) if acu_derived_runs is not None else 0
-            unpriced_count = max(0, total_run_count - priced_run_count)
-            if direct_count > 0 and acu_count > 0:
-                cost_basis = "Direct Billed + ACU Derived"
-            elif acu_count > 0:
-                cost_basis = "ACU Derived"
-            elif direct_count > 0:
-                cost_basis = "Direct Billed"
-            else:
-                cost_basis = "Unpriced"
             scope = {
                 "unique_task_count": unique_task_count,
                 "paired_priced_task_count": n_paired_tasks,
                 "total_run_count": total_run_count,
                 "priced_run_count": priced_run_count,
-                "billed_direct_run_count": direct_count,
-                "estimated_acu_derived_run_count": acu_count,
-                "unpriced_run_count": unpriced_count,
-                "cost_basis": cost_basis,
                 "pooling_method": "pooled_sum",
                 "macro_average_savings_pct": macro_avg_pct,
                 "pooling_note": f"pooled_sum across matched priced pairs ({macro_note})",
@@ -439,7 +422,6 @@ def build_headline_block(
                 "n_icm": n_governed,
                 "n_tasks": n_paired_tasks,
                 "source": "live CLI",
-                "cost_basis": cost_basis,
                 "ci95": ci,
                 "cost_delta_pct": cost_delta_pct,
                 "signed_cost_label": signed_cost_label,
@@ -755,8 +737,6 @@ def build_data_payload(
                 db_path=db_path,
                 is_simulation=bool(r.get("is_simulation", 0)),
                 is_partial=is_row_partial,
-                acus_consumed=r.get("acus_consumed"),
-                acu_usd_rate=r.get("acu_usd_rate"),
             )
             if r.get("cost_status") in ("unavailable", "incomplete"):
                 pass
@@ -765,13 +745,6 @@ def build_data_payload(
 
             if r.get("cost_usd") is None:
                 r["cost_usd"] = cost_info["cost_usd"]
-
-            r["cost_source"] = r.get("cost_source") or cost_info.get("cost_source") or ledger.classify_cost_source(r)
-            if r["cost_source"] == ledger.COST_SOURCE_ESTIMATED_ACU_DERIVED:
-                if r.get("estimated_cost_usd") is None and r.get("cost_usd") is not None:
-                    r["estimated_cost_usd"] = r["cost_usd"]
-                if r.get("acu_usd_rate") is None and cost_info.get("acu_usd_rate") is not None:
-                    r["acu_usd_rate"] = cost_info["acu_usd_rate"]
 
             r["source_kind"] = r.get("source_kind") or "unknown"
             r["evidence_status"] = r.get("evidence_status") or "unverified"
@@ -880,20 +853,12 @@ def build_data_payload(
 
         ops_block = build_operational_block()
         priced_runs_total = sum(1 for r in processed_runs if r.get("cost_usd") is not None)
-        billed_direct_runs_total = sum(
-            1 for r in processed_runs if r.get("cost_source") == ledger.COST_SOURCE_BILLED_DIRECT
-        )
-        acu_derived_runs_total = sum(
-            1 for r in processed_runs if r.get("cost_source") == ledger.COST_SOURCE_ESTIMATED_ACU_DERIVED
-        )
         headline_block = build_headline_block(
             cum.get("tasks", []),
             cum,
             operational=ops_block,
             total_runs=len(processed_runs),
             priced_runs=priced_runs_total,
-            billed_direct_runs=billed_direct_runs_total,
-            acu_derived_runs=acu_derived_runs_total,
         )
         declared_benchmarks = build_declared_benchmarks(cum.get("tasks", []), processed_runs)
 
@@ -930,11 +895,6 @@ def build_data_payload(
             "runs": processed_runs,
             "timeline": timeline,
             "pricing": simulator_pricing_rows,
-            "acu_pricing": {
-                "devin_acu_usd_rate": ledger.get_devin_acu_usd_rate(),
-                "default_rate": ledger.DEFAULT_DEVIN_ACU_USD_RATE,
-                "currency": "USD",
-            },
             "cascade": cascade,
             "operational": ops_block,
             "quality_rubric": quality_block,

@@ -1,114 +1,45 @@
-import { ArmName, CostSource, RunRecord, TaskSummaryItem } from "../types";
+import { ArmName, RunRecord, TaskSummaryItem } from "../types";
 import { bootstrapPercentCI, finite } from "./workspace";
 
 /**
- * Cost coverage scope:
- * - "priced": runs with a finite cost_usd (either Direct Billed or ACU Derived)
- * - "billed_direct": direct API-billed runs (e.g. Gemini/OpenAI/Claude token pricing)
- * - "estimated_acu_derived": Devin sessions whose estimated_cost_usd is derived from acus_consumed
- * - "unpriced": runs without a recorded cost (cost_status unavailable/incomplete)
- * - "all": every run in the ledger
+ * Cost coverage scope: "priced" runs carry a finite cost_usd (cost-complete),
+ * "unpriced" runs are scale runs without a recorded cost (token-only or
+ * cost_status unavailable/incomplete). "all" keeps everything.
  */
-export type CostScope =
-  | "all"
-  | "priced"
-  | "billed_direct"
-  | "estimated_acu_derived"
-  | "unpriced";
+export type CostScope = "all" | "priced" | "unpriced";
 
 export function isPricedRun(run: RunRecord): boolean {
   return finite(run.cost_usd);
 }
 
-export function getCostSource(run: RunRecord): CostSource {
-  const raw = typeof run.cost_source === "string" ? run.cost_source.trim().toLowerCase() : "";
-  if (raw === "billed_direct" || raw === "estimated_acu_derived" || raw === "unavailable") {
-    return raw;
-  }
-  const status = typeof run.cost_status === "string" ? run.cost_status.trim().toLowerCase() : "";
-  if (status === "estimated_acu_derived") {
-    return "estimated_acu_derived";
-  }
-  if (
-    finite(run.acus_consumed) &&
-    isPricedRun(run) &&
-    !finite(run.input_tokens)
-  ) {
-    return "estimated_acu_derived";
-  }
-  if (
-    isPricedRun(run) &&
-    status !== "unavailable" &&
-    status !== "incomplete" &&
-    status !== "unknown"
-  ) {
-    return "billed_direct";
-  }
-  return "unavailable";
+export function hasAcuTelemetry(run: RunRecord): boolean {
+  return finite(run.acus_consumed);
 }
 
-export function isDirectBilledRun(run: RunRecord): boolean {
-  return isPricedRun(run) && getCostSource(run) === "billed_direct";
-}
-
-export function isAcuDerivedRun(run: RunRecord): boolean {
-  return isPricedRun(run) && getCostSource(run) === "estimated_acu_derived";
-}
-
-export function formatCostSourceLabel(source: CostSource): string {
-  if (source === "billed_direct") return "Direct Billed";
-  if (source === "estimated_acu_derived") return "ACU Derived";
-  return "Unpriced";
-}
-
-export interface CostSourceBreakdown {
-  total: number;
-  priced: number;
-  directBilled: number;
-  acuDerived: number;
-  unpriced: number;
+export interface AcuTelemetrySummary {
+  runsWithAcus: number;
   totalAcus: number;
-  costBasisLabel: string;
 }
 
-export function costSourceBreakdown(
+/**
+ * Summarize optional Devin ACU telemetry strictly as non-USD metadata.
+ * ACUs are never converted into synthetic dollar costs.
+ */
+export function acuTelemetrySummary(
   runs: RunRecord[] | undefined,
-): CostSourceBreakdown {
+): AcuTelemetrySummary {
   const list = runs || [];
-  let directBilled = 0;
-  let acuDerived = 0;
-  let unpriced = 0;
+  let runsWithAcus = 0;
   let totalAcus = 0;
   for (const r of list) {
     if (finite(r.acus_consumed)) {
+      runsWithAcus += 1;
       totalAcus += r.acus_consumed;
     }
-    const src = getCostSource(r);
-    if (isPricedRun(r) && src === "billed_direct") {
-      directBilled += 1;
-    } else if (isPricedRun(r) && src === "estimated_acu_derived") {
-      acuDerived += 1;
-    } else {
-      unpriced += 1;
-    }
   }
-  const priced = directBilled + acuDerived;
-  const costBasisLabel =
-    directBilled > 0 && acuDerived > 0
-      ? "Direct Billed + ACU Derived"
-      : acuDerived > 0
-        ? "ACU Derived"
-        : directBilled > 0
-          ? "Direct Billed"
-          : "Unpriced";
   return {
-    total: list.length,
-    priced,
-    directBilled,
-    acuDerived,
-    unpriced,
+    runsWithAcus,
     totalAcus: Number(totalAcus.toFixed(6)),
-    costBasisLabel,
   };
 }
 
@@ -118,8 +49,6 @@ export function scopeRuns(
 ): RunRecord[] {
   const list = runs || [];
   if (scope === "priced") return list.filter(isPricedRun);
-  if (scope === "billed_direct") return list.filter(isDirectBilledRun);
-  if (scope === "estimated_acu_derived") return list.filter(isAcuDerivedRun);
   if (scope === "unpriced") return list.filter((r) => !isPricedRun(r));
   return list;
 }
@@ -144,10 +73,8 @@ export interface ModelFamilySummary {
   models: string[];
   runs: number;
   pricedRuns: number;
-  directBilledRuns: number;
-  acuDerivedRuns: number;
+  acuRuns: number;
   totalAcus: number;
-  costBasis: string;
   baselineRuns: number;
   governedRuns: number;
   baselinePassed: number;
@@ -202,16 +129,14 @@ export function modelFamilySummaries(
       );
       const baselineCostUsd = meanCost(base);
       const governedCostUsd = meanCost(gov);
-      const breakdown = costSourceBreakdown(list);
+      const acu = acuTelemetrySummary(list);
       return {
         family,
         models: Array.from(new Set(list.map((r) => r.model))).sort(),
         runs: list.length,
-        pricedRuns: breakdown.priced,
-        directBilledRuns: breakdown.directBilled,
-        acuDerivedRuns: breakdown.acuDerived,
-        totalAcus: breakdown.totalAcus,
-        costBasis: breakdown.costBasisLabel,
+        pricedRuns: list.filter(isPricedRun).length,
+        acuRuns: acu.runsWithAcus,
+        totalAcus: acu.totalAcus,
         baselineRuns: base.length,
         governedRuns: gov.length,
         baselinePassed: passed(base),

@@ -8,13 +8,7 @@ import {
 } from "lucide-react";
 import { ArmStats, DashboardPayload, TaskSummaryItem } from "../../types";
 import { armNames, experimentNames, finite, governedArm, suiteBootstrapCI } from "../../lib/workspace";
-import {
-  isAcuDerivedRun,
-  isDirectBilledRun,
-  isPricedRun,
-  pairedDiffStats,
-  suitePairsDetailed,
-} from "../../lib/analytics";
+import { isPricedRun, pairedDiffStats, suitePairsDetailed } from "../../lib/analytics";
 import { formatArm, formatCurrency, formatSignedPercent, formatTokens } from "../../lib/formatters";
 import AdaptiveICM from "./AdaptiveICM";
 
@@ -59,27 +53,19 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
         const delta = finite(task.savings?.mean_savings_percent)
           ? task.savings?.mean_savings_percent
           : tokDelta;
-        const allTaskRuns = [
-          ...(task.arms.baseline?.runs || []),
-          ...governedNames(task).flatMap((n) => task.arms[n]?.runs || []),
-          ...(task.excluded_runs || []),
-        ];
-        const priced = allTaskRuns.some(isPricedRun);
-        const directBilled = allTaskRuns.some(isDirectBilledRun);
-        const acuDerived = allTaskRuns.some(isAcuDerivedRun);
+        const taskRuns = task.arms.baseline?.runs || [];
+        const priced =
+          taskRuns.some(isPricedRun) ||
+          governedNames(task).some((n) =>
+            (task.arms[n]?.runs || []).some(isPricedRun),
+          ) ||
+          (task.excluded_runs || []).some(isPricedRun);
         return (
           matches &&
           (model === "all" || mdl === model) &&
           (filter === "all" ||
-            (filter === "priced"
-              ? priced
-              : filter === "billed_direct"
-                ? directBilled
-                : filter === "estimated_acu_derived"
-                  ? acuDerived
-                  : filter === "unpriced"
-                    ? !priced
-                    : finite(delta) && (filter === "savings" ? delta > 0 : delta < 0)))
+            (filter === "priced" ? priced : filter === "unpriced" ? !priced :
+              finite(delta) && (filter === "savings" ? delta > 0 : delta < 0)))
         );
       }),
     [data.tasks, query, filter, model],
@@ -131,9 +117,7 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
             onChange={(event) => setFilter(event.target.value)}
           >
             <option value="all">All results</option>
-            <option value="priced">Priced only (Direct + ACU)</option>
-            <option value="billed_direct">Direct Billed only</option>
-            <option value="estimated_acu_derived">ACU Derived only</option>
+            <option value="priced">Priced only</option>
             <option value="unpriced">Unpriced only</option>
             <option value="savings">Cost savings</option>
             <option value="overhead">Cost overhead</option>
