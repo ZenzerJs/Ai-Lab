@@ -69,6 +69,8 @@ export interface RunRecord {
   is_simulation?: number | boolean;
   execution_status?: 'completed' | 'failed' | 'timed_out' | 'unexecuted' | 'interrupted' | string;
   verification_status?: 'passed' | 'failed' | 'evaluator_error' | 'not_run' | string;
+  evaluator_hash?: string | null;
+  manifest_id?: string | null;
   evidence_ref?: string;
   notes?: string;
   tool_calls_count?: number | null;
@@ -276,11 +278,35 @@ export interface HeadlineStat {
   n_tasks: number;
   source: string;
   ci95?: [number, number] | null;
+  cost_delta_pct?: number | null;
+  signed_cost_label?: string | null;
+  pooling_method?: string | null;
+  priced_run_count?: number | null;
+  total_run_count?: number | null;
+}
+
+export interface HeadlineScope {
+  unique_task_count: number;
+  paired_priced_task_count: number;
+  total_run_count: number;
+  priced_run_count: number;
+  pooling_method: string;
+  pooling_note: string;
+  signed_cost_label?: string | null;
+  cost_delta_pct?: number | null;
+  savings_pct?: number | null;
 }
 
 export interface HeadlineBlock {
   sentence: string | null;
+  scope?: HeadlineScope | null;
   stats: HeadlineStat[];
+}
+
+export interface DeclaredBenchmarkStatus {
+  task_id: string;
+  measured_runs: number;
+  status: string;
 }
 
 export interface QualityDimensionCI {
@@ -348,6 +374,7 @@ export interface DashboardPayload {
   is_demo_report?: boolean;
   is_simulation?: boolean;
   headline?: HeadlineBlock | null;
+  declared_benchmarks?: DeclaredBenchmarkStatus[] | null;
   campaign?: any;
   cumulative: CumulativeSummary;
   tasks: TaskSummaryItem[];

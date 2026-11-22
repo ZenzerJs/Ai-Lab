@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { ArmStats, DashboardPayload, TaskSummaryItem } from "../../types";
 import { armNames, experimentNames, finite, governedArm, suiteBootstrapCI } from "../../lib/workspace";
-import { isPricedRun, pairedDiffStats, suitePairs } from "../../lib/analytics";
+import { isPricedRun, pairedDiffStats, suitePairsDetailed } from "../../lib/analytics";
 import { formatArm, formatCurrency, formatSignedPercent, formatTokens } from "../../lib/formatters";
 import AdaptiveICM from "./AdaptiveICM";
 
@@ -177,41 +177,61 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
           const ciByArm = Object.fromEntries(
             governedNames.map((n) => [n, suiteBootstrapCI(task, n)]),
           );
-          const statsByArm = Object.fromEntries(
+          const pairMatchByArm = Object.fromEntries(
             governedNames.map((n) => [
               n,
-              pairedDiffStats(
-                suitePairs(
-                  task,
-                  n,
-                  isTokenOnly
-                    ? (r) => (finite(r.total_tokens) ? r.total_tokens : null)
-                    : (r) => (isPricedRun(r) ? (r.cost_usd as number) : null),
-                ),
+              suitePairsDetailed(
+                task,
+                n,
+                isTokenOnly
+                  ? (r) => (finite(r.total_tokens) ? r.total_tokens : null)
+                  : (r) => (isPricedRun(r) ? (r.cost_usd as number) : null),
               ),
             ]),
           );
-          const armBadges = (name: string) =>
-            statsByArm[name]?.effectSize ? (
+          const statsByArm = Object.fromEntries(
+            governedNames.map((n) => [
+              n,
+              pairedDiffStats(pairMatchByArm[n].pairs),
+            ]),
+          );
+          const armBadges = (name: string) => {
+            const st = statsByArm[name];
+            const pm = pairMatchByArm[name];
+            if (!st) return null;
+            return (
               <span className="effect-badges">
-                <span className="badge badge-blue">
-                  d<sub>z</sub>{" "}
-                  {statsByArm[name]!.cohensDz != null
-                    ? Math.abs(statsByArm[name]!.cohensDz!).toFixed(2)
-                    : "—"}{" "}
-                  · {statsByArm[name]!.effectSize}
-                </span>{" "}
-                {statsByArm[name]!.significant != null && (
+                {st.preliminary ? (
+                  <span className="badge badge-amber">
+                    preliminary (n={st.n})
+                  </span>
+                ) : st.displayEffectSize ? (
+                  <span className="badge badge-blue">
+                    d<sub>z</sub>{" "}
+                    {st.displayCohensDz != null
+                      ? Math.abs(st.displayCohensDz).toFixed(2)
+                      : "—"}{" "}
+                    · {st.displayEffectSize} (n={st.n})
+                  </span>
+                ) : null}{" "}
+                {st.significant != null && (
                   <span
-                    className={`badge ${statsByArm[name]!.significant ? "badge-green" : "badge-amber"}`}
+                    className={`badge ${st.significant ? "badge-green" : "badge-amber"}`}
                   >
-                    {statsByArm[name]!.significant
-                      ? "significant"
-                      : "not significant"}
+                    {st.significant ? "exploratory significant" : "not significant"}
+                  </span>
+                )}
+                {pm && pm.droppedCount > 0 && (
+                  <span className="badge badge-neutral">
+                    {pm.droppedCount} dropped
+                    {pm.hashMismatchedCount > 0
+                      ? ` (${pm.hashMismatchedCount} hash mismatch)`
+                      : ""}
                   </span>
                 )}
               </span>
-            ) : null;
+            );
+          };
           return (
             <article key={cardKey} className="panel experiment-card">
               <div className="experiment-card-heading">
@@ -617,6 +637,42 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
           </p>
         </section>
       )}
+      {(() => {
+        const unmeasured = (data.declared_benchmarks || []).filter(
+          (b) => b.measured_runs === 0 || b.status === "suite present, unmeasured",
+        );
+        if (!unmeasured.length) return null;
+        return (
+          <section
+            className="panel operational-panel"
+            aria-labelledby="unmeasured-suites-title"
+          >
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">BENCHMARK INVENTORY</span>
+                <h2 id="unmeasured-suites-title">Declared suites without runs</h2>
+                <p>
+                  Cross-checked against declared benchmark directories; suites
+                  with zero measured runs are labeled explicitly.
+                </p>
+              </div>
+              <span className="badge badge-amber">
+                {unmeasured.length} unmeasured
+              </span>
+            </div>
+            <div className="adaptive-measured">
+              {unmeasured.map((suite) => (
+                <span key={suite.task_id} className="adaptive-arm-chip">
+                  <strong>{suite.task_id}</strong>{" "}
+                  <span className="badge badge-amber">
+                    suite present, unmeasured
+                  </span>
+                </span>
+              ))}
+            </div>
+          </section>
+        );
+      })()}
     </>
   );
 }

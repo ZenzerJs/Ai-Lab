@@ -7,14 +7,19 @@ import {
   finite,
 } from "../../lib/workspace";
 import {
+  applyFdrToRows,
   CostScope,
   isPricedRun,
+  matchedArmComparison,
+  MIN_PAIRS_FOR_EFFECT,
   modelFamilySummaries,
   pairedDiffStats,
   PairedStats,
+  PairMatchResult,
   pricedShare,
+  primaryEffectMetric,
   scopeRuns,
-  suitePairs,
+  suitePairsDetailed,
 } from "../../lib/analytics";
 import { formatArm, formatCurrency, formatSignedPercent, formatTokens } from "../../lib/formatters";
 
@@ -26,26 +31,37 @@ interface SuiteEffectRow {
   arm: string;
   metricLabel: "Cost" | "Tokens";
   stats: PairedStats;
+  pairMatch: PairMatchResult;
   cardKey: string;
   rowModel: string;
 }
 
 function EffectBadges({ stats }: { stats: PairedStats }) {
-  const dz = stats.cohensDz;
+  const dz = stats.displayCohensDz;
+  const fdrSig = stats.fdrSignificant;
   return (
     <span className="effect-badges">
-      {stats.effectSize ? (
+      {stats.preliminary ? (
+        <span className="badge badge-amber">
+          preliminary (n={stats.n})
+        </span>
+      ) : stats.displayEffectSize ? (
         <span className="badge badge-blue">
           d<sub>z</sub> {dz != null ? Math.abs(dz).toFixed(2) : "—"} ·{" "}
-          {stats.effectSize}
+          {stats.displayEffectSize} (n={stats.n})
         </span>
       ) : (
-        <span className="badge badge-neutral">effect n/a</span>
+        <span className="badge badge-neutral">effect n/a (n={stats.n})</span>
       )}
-      {stats.significant === null ? (
+      {fdrSig != null ? (
+        <span className={`badge ${fdrSig ? "badge-green" : "badge-amber"}`}>
+          {fdrSig ? "FDR significant" : "FDR not significant"}
+          {stats.fdrAdjustedP != null ? ` (q=${stats.fdrAdjustedP.toFixed(3)})` : ""}
+        </span>
+      ) : stats.significant === null ? (
         <span className="badge badge-neutral">insufficient pairs</span>
       ) : stats.significant ? (
-        <span className="badge badge-green">significant</span>
+        <span className="badge badge-green">exploratory significant</span>
       ) : (
         <span className="badge badge-amber">not significant</span>
       )}
@@ -62,9 +78,14 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
     [runs],
   );
   const share = useMemo(() => pricedShare(runs), [runs]);
+  const primaryMetric = useMemo(() => primaryEffectMetric(share), [share]);
   const families = useMemo(
     () => modelFamilySummaries(runs, scope),
     [runs, scope],
+  );
+  const liteComparison = useMemo(
+    () => matchedArmComparison(data.tasks, "icm_lite", "baseline", scope),
+    [data.tasks, scope],
   );
   const effectRows = useMemo(() => {
     const rows: SuiteEffectRow[] = [];
@@ -78,31 +99,41 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
         "";
       for (const name of armNames(task).filter((n) => n !== "baseline")) {
         const cardKey = task.series_id || `${task.task_id}::${rowModel}`;
-        const costStats = pairedDiffStats(
-          suitePairs(task, name, costMetric, scope),
-        );
-        const tokenStats = pairedDiffStats(
-          suitePairs(task, name, totalTokensMetric, scope),
-        );
-        const [stats, label] =
-          scope === "priced"
-            ? [costStats, "Cost" as const]
-            : scope === "unpriced"
-              ? [tokenStats, "Tokens" as const]
-              : costStats
-                ? [costStats, "Cost" as const]
-                : [tokenStats, "Tokens" as const];
-        if (stats) rows.push({ task, arm: name, metricLabel: label, stats, cardKey, rowModel });
+        const costMatch = suitePairsDetailed(task, name, costMetric, scope);
+        const tokenMatch = suitePairsDetailed(task, name, totalTokensMetric, scope);
+        const costStats = pairedDiffStats(costMatch.pairs);
+        const tokenStats = pairedDiffStats(tokenMatch.pairs);
+        let chosen: [PairedStats | null, PairMatchResult, "Cost" | "Tokens"];
+        if (scope === "priced") {
+          chosen = [costStats, costMatch, "Cost"];
+        } else if (scope === "unpriced") {
+          chosen = [tokenStats, tokenMatch, "Tokens"];
+        } else if (primaryMetric === "Tokens") {
+          chosen = tokenStats
+            ? [tokenStats, tokenMatch, "Tokens"]
+            : [costStats, costMatch, "Cost"];
+        } else {
+          chosen = costStats
+            ? [costStats, costMatch, "Cost"]
+            : [tokenStats, tokenMatch, "Tokens"];
+        }
+        const [stats, pairMatch, label] = chosen;
+        if (stats) {
+          rows.push({ task, arm: name, metricLabel: label, stats, pairMatch, cardKey, rowModel });
+        }
       }
     }
-    return rows.sort((a, b) => {
+    const sorted = rows.sort((a, b) => {
       const d = (b.stats.meanDeltaPct ?? 0) - (a.stats.meanDeltaPct ?? 0);
       return d || a.task.task_id.localeCompare(b.task.task_id);
     });
-  }, [data.tasks, scope]);
+    return applyFdrToRows(sorted);
+  }, [data.tasks, scope, primaryMetric]);
   const significantCount = effectRows.filter(
-    (r) => r.stats.significant,
+    (r) => r.stats.fdrSignificant ?? r.stats.significant,
   ).length;
+  const totalDroppedPairs = effectRows.reduce((s, r) => s + r.pairMatch.droppedCount, 0);
+  const totalHashMismatched = effectRows.reduce((s, r) => s + r.pairMatch.hashMismatchedCount, 0);
 
   return (
     <>
@@ -170,12 +201,19 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
               Per-suite deltas vs baseline
             </h2>
             <p>
-              Runs paired by run_index · deterministic bootstrap 95% CI ·
-              Cohen&apos;s d<sub>z</sub> on paired differences
+              Strict pairing on (task_id, model, run_index, evaluator_hash) ·
+              primary metric: <strong>{primaryMetric}</strong>
+              {primaryMetric === "Tokens" && share != null && share < 100
+                ? ` (priced coverage ${share.toFixed(1)}% < 100%)`
+                : ""}{" "}
+              · Benjamini-Hochberg FDR across suites · unadjusted 95% CIs are exploratory
             </p>
           </div>
           <span className={`badge ${significantCount ? "badge-green" : "badge-neutral"}`}>
-            {effectRows.length} comparisons · {significantCount} significant
+            {effectRows.length} comparisons · {significantCount} FDR significant
+            {totalDroppedPairs > 0
+              ? ` · ${totalDroppedPairs} dropped (${totalHashMismatched} hash mismatch)`
+              : " · 0 dropped pairs"}
           </span>
         </div>
         <div
@@ -189,15 +227,15 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
               <tr>
                 <th scope="col">Suite · arm</th>
                 <th scope="col">Metric</th>
-                <th scope="col">Pairs</th>
+                <th scope="col">Pairs (dropped)</th>
                 <th scope="col">Baseline → governed</th>
                 <th scope="col">Mean Δ</th>
-                <th scope="col">95% CI Δ</th>
-                <th scope="col">Effect · significance</th>
+                <th scope="col">95% CI Δ (exploratory)</th>
+                <th scope="col">Effect · BH FDR significance</th>
               </tr>
             </thead>
             <tbody>
-              {effectRows.map(({ task, arm, metricLabel: label, stats, cardKey, rowModel }) => (
+              {effectRows.map(({ task, arm, metricLabel: label, stats, pairMatch, cardKey, rowModel }) => (
                 <tr key={`${cardKey}::${arm}`}>
                   <th scope="row">
                     {task.task_id}
@@ -208,7 +246,17 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
                     </span>
                   </th>
                   <td>{label}</td>
-                  <td>{stats.n}</td>
+                  <td>
+                    n={stats.n}
+                    {pairMatch.droppedCount > 0 && (
+                      <span className="cell-subtitle">
+                        {pairMatch.droppedCount} dropped
+                        {pairMatch.hashMismatchedCount > 0
+                          ? ` (${pairMatch.hashMismatchedCount} hash mismatch)`
+                          : ""}
+                      </span>
+                    )}
+                  </td>
                   <td>
                     {label === "Cost"
                       ? `${formatCurrency(stats.meanBaseline)} → ${formatCurrency(stats.meanGoverned)}`
@@ -244,12 +292,71 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
           </p>
         )}
         <p className="panel-note">
-          Significant means the bootstrap CI excludes zero; pairs below two
-          runs report a mean delta only. Cohen&apos;s d<sub>z</sub> uses the
-          standard deviation of paired differences; 0.2 / 0.5 / 0.8 mark
-          small, medium, and large effects.
+          Cohen&apos;s d<sub>z</sub> requires n ≥ {MIN_PAIRS_FOR_EFFECT} matched pairs; suites below{" "}
+          {MIN_PAIRS_FOR_EFFECT} pairs are marked preliminary. Significance uses
+          Benjamini-Hochberg FDR across suites; bootstrap 95% CIs are unadjusted
+          and exploratory.
         </p>
       </section>
+      {liteComparison.sharedTaskIds.length > 0 && (
+        <section
+          className="panel operational-panel"
+          aria-labelledby="icm-lite-matched-title"
+        >
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">MATCHED ARM COMPARISON</span>
+              <h2 id="icm-lite-matched-title">
+                ICM-Lite vs Baseline (matched shared tasks only)
+              </h2>
+              <p>
+                Restricted to the {liteComparison.sharedTaskIds.length} shared tasks
+                ({liteComparison.sharedTaskIds.join(", ")}) where both arms ran;{" "}
+                {liteComparison.excludedUnsharedTaskCount} unshared baseline tasks excluded.
+              </p>
+            </div>
+            <span className="badge badge-purple">
+              {liteComparison.sharedSeriesCount} shared series ·{" "}
+              {liteComparison.tokenPairs.pairs.length} token pairs
+              {liteComparison.tokenPairs.droppedCount > 0
+                ? ` · ${liteComparison.tokenPairs.droppedCount} dropped`
+                : ""}
+            </span>
+          </div>
+          <div className="ledger-summary" aria-label="Matched ICM-Lite summary">
+            <div>
+              <span>Matched token delta</span>
+              <strong>
+                {liteComparison.tokenStats?.meanDeltaPct != null
+                  ? formatSignedPercent(liteComparison.tokenStats.meanDeltaPct)
+                  : "—"}
+              </strong>
+              <span>n={liteComparison.tokenStats?.n ?? 0}</span>
+            </div>
+            <div>
+              <span>Matched cost delta</span>
+              <strong>
+                {liteComparison.costStats?.meanDeltaPct != null
+                  ? formatSignedPercent(liteComparison.costStats.meanDeltaPct)
+                  : "Unpriced"}
+              </strong>
+              <span>n={liteComparison.costStats?.n ?? 0}</span>
+            </div>
+            <div>
+              <span>Token effect</span>
+              <strong>
+                {liteComparison.tokenStats
+                  ? liteComparison.tokenStats.preliminary
+                    ? `preliminary (n=${liteComparison.tokenStats.n})`
+                    : liteComparison.tokenStats.displayEffectSize
+                      ? `dz ${Math.abs(liteComparison.tokenStats.displayCohensDz!).toFixed(2)} · ${liteComparison.tokenStats.displayEffectSize} (n=${liteComparison.tokenStats.n})`
+                      : `n/a (n=${liteComparison.tokenStats.n})`
+                  : "—"}
+              </strong>
+            </div>
+          </div>
+        </section>
+      )}
       <section
         className="panel operational-panel"
         aria-labelledby="model-family-title"
@@ -352,9 +459,9 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
         )}
       </section>
       <p className="panel-note">
-        <FlaskConical size={13} /> Pairing is by run_index within each suite
-        and arm; imported records are excluded from family totals. Inspect
-        per-run provenance in the{" "}
+        <FlaskConical size={13} /> Pairing requires matching (task_id, model,
+        run_index, evaluator_hash) within each suite and arm; imported records
+        are excluded from family totals. Inspect per-run provenance in the{" "}
         <a className="text-link" href="#audit">
           evidence ledger <ArrowUpRight size={13} />
         </a>

@@ -17,6 +17,7 @@ import {
   TaskSummaryItem,
 } from "../../types";
 import { formatArm, formatCurrency, formatTokens } from "../../lib/formatters";
+import { formatSignedCostChange, isPricedRun } from "../../lib/analytics";
 import { armNames, experimentNames, finite, governedArm, governedArmName } from "../../lib/workspace";
 import AdaptiveICM from "./AdaptiveICM";
 
@@ -117,12 +118,18 @@ function Metric({ stat }: { stat: HeadlineStat }) {
   const isQuality = stat.id === "defect_rate";
   const Icon = isCost || isToken ? TrendingDown : isQuality ? ShieldCheck : Cpu;
   const label = isCost
-    ? "Cost reduction"
+    ? "Cost change vs baseline"
     : isToken
       ? "Tokens / passing patch"
       : isQuality
         ? "Governed defect rate"
         : "Governed cache hit rate";
+  const displayValue = isCost
+    ? stat.signed_cost_label ||
+      (finite(stat.value) ? formatSignedCostChange(stat.value) : String(stat.value))
+    : finite(stat.value)
+      ? `${stat.value.toFixed(1)}%`
+      : stat.value;
   return (
     <article className="metric-card">
       <div className="metric-top">
@@ -132,7 +139,7 @@ function Metric({ stat }: { stat: HeadlineStat }) {
       <div
         className={`metric-value ${(isCost || isToken) && finite(stat.value) && stat.value < 0 ? "text-rust" : ""}`}
       >
-        {finite(stat.value) ? `${stat.value.toFixed(1)}%` : stat.value}
+        {displayValue}
         <span className="metric-tag">
           {isQuality ? "Quality" : isToken ? "All models" : "Recorded"}
         </span>
@@ -147,9 +154,10 @@ function Metric({ stat }: { stat: HeadlineStat }) {
       </div>
       <div className="metric-foot">
         {stat.source} · {stat.n_tasks} {isToken ? "series" : "tasks"}
+        {isCost && stat.pooling_method ? ` · ${stat.pooling_method}` : ""}
         {stat.ci95 && (
           <span className="confidence">
-            95% CI: {stat.ci95[0]}% to {stat.ci95[1]}%
+            95% CI (exploratory): {stat.ci95[0]}% to {stat.ci95[1]}%
           </span>
         )}
       </div>
@@ -301,10 +309,16 @@ export function Overview({ data }: { data: DashboardPayload }) {
   );
   const stats = measured ? data.headline?.stats || [] : [];
   const totalRunsCount = data.runs?.length ?? data.cumulative?.total_runs ?? 0;
+  const pricedRunsCount = (data.runs || []).filter(isPricedRun).length;
+  const uniqueTasksCount = new Set(tasks.map((t) => t.task_id)).size;
+  const unmeasuredSuites = (data.declared_benchmarks || []).filter(
+    (b) => b.measured_runs === 0 || b.status === "suite present, unmeasured",
+  );
   const archivedRunsCount = (data.runs || []).filter(
     (run) => run.source_kind === "imported",
   ).length;
   const liveRunsCount = totalRunsCount - archivedRunsCount;
+  const headlineScope = data.headline?.scope;
   return (
     <>
       <div className="page-heading">
@@ -351,14 +365,14 @@ export function Overview({ data }: { data: DashboardPayload }) {
       <div className="section-heading results-heading">
         <h2>What the evidence says</h2>
         <span>
-          {modelSummaries.length > 1 ? `${modelSummaries.length} models · ` : ""}
-          {pricedTasks.length} priced
-          {tokenBenchTasks.length
-            ? ` · ${tokenBenchTasks.length} token-bench`
-            : ""}{" "}
-          <span className="middle-dot">·</span> {totalRunsCount} total runs
+          {headlineScope
+            ? `${headlineScope.unique_task_count} tasks · ${headlineScope.total_run_count} runs · ${headlineScope.priced_run_count} priced runs · ${headlineScope.pooling_method} pooling`
+            : `${uniqueTasksCount} tasks · ${totalRunsCount} runs · ${pricedRunsCount} priced runs · macro_average pooling`}
           {archivedRunsCount > 0
             ? ` (${liveRunsCount} live · ${archivedRunsCount} archived)`
+            : ""}
+          {unmeasuredSuites.length > 0
+            ? ` · ${unmeasuredSuites.length} suite present, unmeasured`
             : ""}
         </span>
       </div>
