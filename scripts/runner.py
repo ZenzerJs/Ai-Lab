@@ -49,7 +49,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import stat
 import ledger
-from complexity_router import MODES, RoutingDecision, build_mode_prompt, classify_mode, resolve_mode
+from complexity_router import ICM_V2, MODES, RoutingDecision, build_mode_prompt, classify_mode, count_ast_symbols, extract_ast_symbol_spans, resolve_mode
 
 DEFAULT_FIXTURES_PATH = WORKSPACE_ROOT / "experiments" / "fixtures" / "mock_stream.ndjson"
 DEFAULT_EVIDENCE_DIR = WORKSPACE_ROOT / "experiments" / "evidence"
@@ -297,6 +297,7 @@ def validate_manifest_configuration(
                 arm_cfg.governance_instructions
                 or "ICM" in arm_cfg.prompt
                 or "01_intake" in arm_cfg.prompt
+                or "Loop-Breaker" in arm_cfg.prompt
             ),
         }
 
@@ -370,6 +371,51 @@ def _count_changed_lines(before: Path, after: Path) -> int:
     )
 
 
+def _count_touched_ast_symbols(old: Optional[Path], new: Optional[Path]) -> int:
+    """Count AST symbols actually added, removed, or overlapping changed lines in a diff."""
+    if old is None and new is None:
+        return 0
+    if old is None:
+        return count_ast_symbols(new) or 0
+    if new is None:
+        return count_ast_symbols(old) or 0
+
+    try:
+        old_src = old.read_text(encoding="utf-8", errors="replace")
+        new_src = new.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return 0
+
+    old_lines = old_src.splitlines()
+    new_lines = new_src.splitlines()
+    changed_old: Set[int] = set()
+    changed_new: Set[int] = set()
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old_lines, new_lines).get_opcodes():
+        if tag in ("replace", "delete"):
+            changed_old.update(range(i1 + 1, i2 + 1))
+        if tag in ("replace", "insert"):
+            changed_new.update(range(j1 + 1, j2 + 1))
+
+    if not changed_old and not changed_new:
+        return 0
+
+    old_spans = extract_ast_symbol_spans(old, old_src)
+    new_spans = extract_ast_symbol_spans(new, new_src)
+    if old_spans is not None and new_spans is not None:
+        touched_symbols: Set[str] = set()
+        for qname, start, end in old_spans:
+            if any(start <= ln <= end for ln in changed_old):
+                touched_symbols.add(qname)
+        for qname, start, end in new_spans:
+            if any(start <= ln <= end for ln in changed_new):
+                touched_symbols.add(qname)
+        return len(touched_symbols)
+
+    old_count = count_ast_symbols(old) or 0
+    new_count = count_ast_symbols(new) or 0
+    return abs(new_count - old_count)
+
+
 def scope_telemetry(workspace_dir: Path, snapshot_dir: Path, metadata: Mapping[str, Any]) -> Dict[str, Any]:
     """Compare a post-run workspace to its snapshot and flag scope drift.
 
@@ -398,11 +444,31 @@ def scope_telemetry(workspace_dir: Path, snapshot_dir: Path, metadata: Mapping[s
         if isinstance(f, str) and f.strip()
     } if isinstance(declared, list) else set()
     scope_mismatch = set(touched) != declared_set if declared_set else bool(touched)
+    lines_touched = sum(entry["lines"] for entry in touched.values())
+    ast_symbols_touched = sum(
+        _count_touched_ast_symbols(before.get(rel), after.get(rel))
+        for rel in touched
+    )
+
+    declared_scope = {
+        "target_files": sorted(declared_set),
+        "target_files_count": metadata.get("target_files_count", len(declared_set)),
+        "estimated_loc": metadata.get("estimated_loc"),
+        "target_loc_range": metadata.get("target_loc_range"),
+    }
+    actual_scope = {
+        "files_touched": sorted(touched.keys()),
+        "files_touched_count": len(touched),
+        "lines_touched": lines_touched,
+        "ast_symbols_touched": ast_symbols_touched,
+    }
     return {
         "files_touched": touched,
-        "lines_touched": sum(entry["lines"] for entry in touched.values()),
+        "lines_touched": lines_touched,
         "declared_files": sorted(declared_set),
         "scope_mismatch": scope_mismatch,
+        "declared_scope": declared_scope,
+        "actual_scope": actual_scope,
     }
 
 
@@ -1196,6 +1262,8 @@ def _persist_run_lifecycle_events(
                     "lines_touched": scope.get("lines_touched"),
                     "declared_files": scope.get("declared_files"),
                     "loc_source": scope.get("loc_source"),
+                    "declared_scope": scope.get("declared_scope"),
+                    "actual_scope": scope.get("actual_scope"),
                 }
             ),
             conn=conn,
@@ -1625,10 +1693,12 @@ print("ALL TESTS PASSED")
 # Live Benchmark Adapter (LiveAgyAdapter / run_benchmark_live)
 # ---------------------------------------------------------------------------
 
-def _build_live_prompt(instructions_text: str, arm: str) -> str:
-    """Build baseline or 4-stage ICM contract prompt with exact INSTRUCTIONS.md appended."""
+def _build_live_prompt(instructions_text: str, arm: str, workspace: Optional[Path] = None) -> str:
+    """Build baseline, ICM v2, or 4-stage ICM contract prompt with exact INSTRUCTIONS.md appended."""
     if arm.lower() == "baseline":
         return instructions_text
+    if arm.lower() == ICM_V2:
+        return build_mode_prompt(instructions_text, ICM_V2, workspace=workspace)
     return (
         "Execute this task strictly following the 4-stage ICM contract:\n"
         "1. INTAKE & SCOPE: Read only the target files named in the instructions; stay strictly within scope and do not alter unrelated or prohibited files.\n"
@@ -1714,6 +1784,7 @@ def run_benchmark_live(
         print(
             f"[*] Routing mode '{mode}' selected arm '{arm}' "
             f"(loc_source={routing_decision.loc_source}, loc={routing_decision.loc}, "
+            f"ast_symbol_count={routing_decision.ast_symbol_count}, "
             f"single_file={routing_decision.single_file}, target={routing_decision.target})."
         )
     _validate_identifier(arm, "arm")
@@ -1729,9 +1800,9 @@ def run_benchmark_live(
         raise FileNotFoundError(f"INSTRUCTIONS.md not found in {snapshot_dir}")
     instructions_text = instructions_path.read_text(encoding="utf-8")
     if mode is None:
-        prompt = _build_live_prompt(instructions_text, arm)
+        prompt = _build_live_prompt(instructions_text, arm, workspace=snapshot_dir)
     else:
-        prompt = build_mode_prompt(instructions_text, arm)
+        prompt = build_mode_prompt(instructions_text, arm, workspace=snapshot_dir)
 
     evaluator = ProtectedEvaluator(evaluator_dir)
     run_uid = f"live_{task_id}_{os.getpid()}_{int(time.time() * 1000)}"
@@ -1863,8 +1934,14 @@ def run_benchmark_live(
         scope = scope_telemetry(workspace.path, snapshot_dir, metadata)
         if routing_decision is not None:
             scope["loc_source"] = routing_decision.loc_source
+            scope["ast_symbol_count"] = routing_decision.ast_symbol_count
+            scope["declared_scope"]["loc"] = routing_decision.loc
+            scope["declared_scope"]["loc_source"] = routing_decision.loc_source
+            scope["declared_scope"]["ast_symbol_count"] = routing_decision.ast_symbol_count
         print(
-            f"[*] Scope telemetry: files_touched={list(scope['files_touched'])} "
+            f"[*] Scope telemetry: declared_scope={scope['declared_scope']} "
+            f"actual_scope={scope['actual_scope']} "
+            f"files_touched={list(scope['files_touched'])} "
             f"lines_touched={scope['lines_touched']} scope_mismatch={scope['scope_mismatch']}."
         )
 
