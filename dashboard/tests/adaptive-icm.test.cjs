@@ -48,8 +48,8 @@ test('governed selection honors Lite explicitly and preserves legacy precedence'
 });
 
 test('the published snapshot still resolves its original governed comparisons', () => {
-  assert.equal(snapshot.runs.length, 532);
-  assert.equal(snapshot.runs.filter((r) => r.arm === 'icm_lite').length, 40);
+  assert.equal(snapshot.runs.length, 632);
+  assert.equal(snapshot.runs.filter((r) => r.arm === 'icm_lite').length, 52);
   for (const task of snapshot.tasks) {
     const arm = governedArmName(task);
     assert.ok(arm === 'icm' || arm === 'icm_lite');
