@@ -57,6 +57,24 @@
       "inject_repo_map": true,
       "repo_map_max_tokens": 1200,
       "execution_strategy": "single_session"
+    },
+    "icm_staged": {
+      "id": "icm_staged",
+      "file": "contracts/icm_staged_plan.md",
+      "exec_file": "contracts/icm_staged_exec.md",
+      "sha256": "b178da7c0540746667da0bedd522ddd15e0f1c1294647174269d88f9b9dd729c",
+      "plan_sha256": "5771719e8e74f53ab9de1df4ea8f36e7165b051510270c5be7d32e6f3e6bd032",
+      "exec_sha256": "91ca61a35685b67e76ba620c03c2333d0f49026e6b209bce7cff0e46eaa667cc",
+      "parent_version": "icm_v3",
+      "hypothesis": "Splitting multi-file exploration/planning and execution across two fresh-context sessions sheds Phase 1 exploration bloat before Phase 2 edits, reducing peak context and cumulative input tokens while preserving correctness.",
+      "changes_from_prev": [
+        "Split execution into Phase 1 read-only Explore & Plan and Phase 2 fresh-context Batch Exec & Verify",
+        "Prohibit file modifications and stage files during Phase 1; pass only compact structured plan to Phase 2",
+        "Record context_reset telemetry (phase1_peak_context, phase2_initial_context, tokens_shed) across sessions"
+      ],
+      "inject_repo_map": true,
+      "repo_map_max_tokens": 1200,
+      "execution_strategy": "two_phase_staged"
     }
   }
 }

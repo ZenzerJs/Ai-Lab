@@ -22,6 +22,7 @@ from complexity_router import (
     ICM_V3_REPO_MAP_MAX_TOKENS,
     MODES,
     build_mode_prompt,
+    build_staged_prompts,
     build_static_context_prefix,
     classify_mode,
     load_contract_registry,
@@ -41,7 +42,7 @@ import runner
 
 def test_contract_registry_passes_and_has_expected_entries():
     verified = verify_contract_registry()
-    assert set(verified) == {ICM_LITE, ICM_V1, ICM_V2, ICM_V3}
+    assert set(verified) == {ICM_LITE, ICM_V1, ICM_V2, ICM_V3, ICM_STAGED}
 
     registry = load_contract_registry()
     required_fields = {
@@ -65,6 +66,13 @@ def test_contract_registry_passes_and_has_expected_entries():
     assert registry[ICM_V3]["inject_repo_map"] is True
     assert registry[ICM_V3]["repo_map_max_tokens"] == ICM_V3_REPO_MAP_MAX_TOKENS
     assert registry[ICM_V3]["execution_strategy"] == "single_session"
+
+    assert registry[ICM_STAGED]["parent_version"] == ICM_V3
+    assert registry[ICM_STAGED]["file"] == "contracts/icm_staged_plan.md"
+    assert registry[ICM_STAGED]["exec_file"] == "contracts/icm_staged_exec.md"
+    assert registry[ICM_STAGED]["inject_repo_map"] is True
+    assert registry[ICM_STAGED]["repo_map_max_tokens"] == ICM_V3_REPO_MAP_MAX_TOKENS
+    assert registry[ICM_STAGED]["execution_strategy"] == "two_phase_staged"
 
     # Existing template files remain intact and mirrored
     def _norm(p: Path) -> str:
@@ -101,6 +109,36 @@ def test_verify_contract_registry_detects_tampered_sha_and_missing_file(tmp_path
     # Missing contract file fails verification
     shutil.copy2(DEFAULT_CONTRACT_REGISTRY, reg_copy)
     v3_copy.unlink()
+    with pytest.raises(ValueError, match="Missing contract file"):
+        verify_contract_registry(reg_copy)
+
+
+def test_verify_contract_registry_catches_staged_plan_and_exec_tampering(tmp_path):
+    copied_contracts = tmp_path / "contracts"
+    shutil.copytree(CONTRACTS_DIR, copied_contracts)
+    reg_copy = copied_contracts / "registry.json"
+    expected_staged = load_contract_registry(DEFAULT_CONTRACT_REGISTRY)[ICM_STAGED]["sha256"]
+
+    # CRLF normalization passes for both staged contract files
+    plan_copy = copied_contracts / "icm_staged_plan.md"
+    exec_copy = copied_contracts / "icm_staged_exec.md"
+    plan_copy.write_bytes(plan_copy.read_text(encoding="utf-8").replace("\n", "\r\n").encode("utf-8"))
+    exec_copy.write_bytes(exec_copy.read_text(encoding="utf-8").replace("\n", "\r\n").encode("utf-8"))
+    assert verify_contract_registry(reg_copy)[ICM_STAGED] == expected_staged
+
+    # Tampering Phase 1 plan contract fails verification
+    plan_copy.write_text(plan_copy.read_text(encoding="utf-8") + "\n# tampered plan\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        verify_contract_registry(reg_copy)
+
+    # Restore plan, tamper Phase 2 exec contract -> fails verification
+    shutil.copy2(CONTRACTS_DIR / "icm_staged_plan.md", plan_copy)
+    exec_copy.write_text(exec_copy.read_text(encoding="utf-8") + "\n# tampered exec\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        verify_contract_registry(reg_copy)
+
+    # Deleting exec contract -> fails verification with missing file
+    exec_copy.unlink()
     with pytest.raises(ValueError, match="Missing contract file"):
         verify_contract_registry(reg_copy)
 
@@ -232,12 +270,13 @@ def test_auto_v3_three_tier_routing_and_ignored_artifacts(tmp_path):
     assert d3_files.arm == ICM_STAGED
     assert d3_files.loc == 255
     assert d3_files.contract_version == ICM_STAGED
-    assert d3_files.contract_hash is None  # registered in PR 2.2
+    assert d3_files.contract_hash == registry[ICM_STAGED]["sha256"]
 
     # Tier 3b: multi_stage metadata overrides even small workspaces -> icm_staged
     d3_meta = classify_mode("auto-v3", {"multi_stage": True}, t1)
     assert d3_meta.arm == ICM_STAGED
     assert d3_meta.contract_version == ICM_STAGED
+    assert d3_meta.contract_hash == registry[ICM_STAGED]["sha256"]
 
 
 def test_explicit_v3_and_staged_modes_and_contract_metadata(tmp_path):
@@ -251,6 +290,10 @@ def test_explicit_v3_and_staged_modes_and_contract_metadata(tmp_path):
     assert d_v3.contract_version == ICM_V3
     assert d_v3.contract_hash == registry[ICM_V3]["sha256"]
 
+    d_staged = classify_mode("icm-staged", {}, tmp_path)
+    assert d_staged.contract_version == ICM_STAGED
+    assert d_staged.contract_hash == registry[ICM_STAGED]["sha256"]
+
     d_icm = classify_mode("icm", {}, tmp_path)
     assert d_icm.contract_version == ICM_V1
     assert d_icm.contract_hash == registry[ICM_V1]["sha256"]
@@ -261,6 +304,7 @@ def test_explicit_v3_and_staged_modes_and_contract_metadata(tmp_path):
 
     assert resolve_contract_metadata("baseline") == (None, None)
     assert resolve_contract_metadata(ICM_V3) == (ICM_V3, registry[ICM_V3]["sha256"])
+    assert resolve_contract_metadata(ICM_STAGED) == (ICM_STAGED, registry[ICM_STAGED]["sha256"])
 
 
 # ---------------------------------------------------------------------------
@@ -370,3 +414,37 @@ def test_run_benchmark_live_persists_contract_version_and_hash(tmp_path, monkeyp
     with sqlite3.connect(db) as conn:
         row = conn.execute("SELECT arm, contract_version, contract_hash FROM runs").fetchone()
     assert row == (expected_arm, expected_contract, expected_hash)
+
+
+def test_build_staged_prompts_shares_static_prefix_and_embeds_plan():
+    ws = runner.WORKSPACE_ROOT / "benchmarks" / "BENCH-018" / "workspace"
+    instructions = "Implement ledger reconciliation rounding rules."
+    compact_plan = "### Target Files\n- reconciler.py\n### Verify Command\npytest -q --tb=short"
+
+    phase1_prompt, phase2_prompt = build_staged_prompts(
+        instructions,
+        workspace=ws,
+        plan_text=compact_plan,
+    )
+
+    static_prefix = build_static_context_prefix(ws, max_tokens=ICM_V3_REPO_MAP_MAX_TOKENS)
+    assert phase1_prompt.startswith(static_prefix)
+    assert phase2_prompt.startswith(static_prefix)
+    assert phase1_prompt.endswith("\n\n" + instructions)
+    assert phase2_prompt.endswith("\n\n" + instructions)
+
+    # Phase 1 enforces read-only exploration and structured plan output
+    assert "FORBIDDEN from modifying or creating any files" in phase1_prompt
+    assert "Target Files" in phase1_prompt
+    assert "Symbols & Line Ranges" in phase1_prompt
+    assert "Invariants & Exact Changes" in phase1_prompt
+    assert "Verify Command" in phase1_prompt
+    assert "01_intake.md" in phase1_prompt
+    assert "tasks/" in phase1_prompt
+
+    # Phase 2 embeds compact plan + batch exec + CRLF fallback + Loop-Breaker
+    assert f"## Approved Phase 1 Compact Plan\n{compact_plan}" in phase2_prompt
+    assert "Loop-Breaker" in phase2_prompt
+    assert "CRLF" in phase2_prompt
+    assert ">120 LOC" in phase2_prompt
+    assert "05_retro.md" in phase2_prompt

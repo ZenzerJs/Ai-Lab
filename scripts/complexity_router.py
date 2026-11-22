@@ -24,6 +24,7 @@ LOC_THRESHOLD = 150
 SYMBOL_THRESHOLD = 10
 ICM_V2_REPO_MAP_MAX_TOKENS = 600
 ICM_V3_REPO_MAP_MAX_TOKENS = 1200
+ICM_STAGED_REPO_MAP_MAX_TOKENS = ICM_V3_REPO_MAP_MAX_TOKENS
 LOC_SOURCES = ("estimated_loc", "target_loc_range", "file_loc", "workspace_footprint", "unknown")
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS_DIR = _REPO_ROOT / "contracts"
@@ -31,6 +32,8 @@ DEFAULT_CONTRACT_REGISTRY = CONTRACTS_DIR / "registry.json"
 LITE_CONTRACT = _REPO_ROOT / "tasks" / "_template" / "icm_lite.md"
 V2_CONTRACT = _REPO_ROOT / "tasks" / "_template" / "icm_v2.md"
 V3_CONTRACT = CONTRACTS_DIR / "icm_v3.md"
+STAGED_PLAN_CONTRACT = CONTRACTS_DIR / "icm_staged_plan.md"
+STAGED_EXEC_CONTRACT = CONTRACTS_DIR / "icm_staged_exec.md"
 
 ARM_TO_CONTRACT_ID: Dict[str, str] = {
     "icm": ICM_V1,
@@ -154,7 +157,26 @@ def verify_contract_registry(registry_path: Optional[Path] = None) -> Dict[str, 
         contract_path = _resolve_contract_path(entry.get("file", ""), path)
         if not contract_path.is_file():
             raise ValueError(f"Missing contract file for '{cid}': {contract_path}")
-        actual_hash = _compute_contract_sha256(contract_path)
+        plan_hash = _compute_contract_sha256(contract_path)
+
+        exec_file = entry.get("exec_file")
+        if exec_file is not None:
+            exec_path = _resolve_contract_path(exec_file, path)
+            if not exec_path.is_file():
+                raise ValueError(f"Missing contract file for '{cid}': {exec_path}")
+            exec_hash = _compute_contract_sha256(exec_path)
+            if entry.get("plan_sha256") is not None and plan_hash != str(entry["plan_sha256"]).lower():
+                raise ValueError(
+                    f"SHA-256 mismatch for contract '{cid}' plan file: expected {str(entry['plan_sha256']).lower()}, got {plan_hash}"
+                )
+            if entry.get("exec_sha256") is not None and exec_hash != str(entry["exec_sha256"]).lower():
+                raise ValueError(
+                    f"SHA-256 mismatch for contract '{cid}' exec file: expected {str(entry['exec_sha256']).lower()}, got {exec_hash}"
+                )
+            actual_hash = hashlib.sha256(f"{plan_hash}:{exec_hash}".encode("utf-8")).hexdigest()
+        else:
+            actual_hash = plan_hash
+
         if actual_hash != expected_hash.lower():
             raise ValueError(
                 f"SHA-256 mismatch for contract '{cid}': expected {expected_hash.lower()}, got {actual_hash}"
@@ -567,6 +589,48 @@ def resolve_mode(mode: str, metadata: Mapping[str, Any], workspace: Path) -> str
     return classify_mode(mode, metadata, workspace).arm
 
 
+def build_staged_exec_prompt(
+    instructions: str,
+    plan_text: str,
+    workspace: Optional[Path] = None,
+    repo_map_max_tokens: Optional[int] = None,
+    static_prefix: Optional[str] = None,
+) -> str:
+    """Build the Phase 2 fresh-context execution prompt from the compact Phase 1 plan."""
+    max_tokens = ICM_STAGED_REPO_MAP_MAX_TOKENS if repo_map_max_tokens is None else repo_map_max_tokens
+    exec_contract = STAGED_EXEC_CONTRACT.read_text(encoding="utf-8").replace("\r\n", "\n").rstrip()
+    if static_prefix is None and workspace is not None and workspace.exists():
+        static_prefix = build_static_context_prefix(workspace, max_tokens=max_tokens)
+    plan_body = (plan_text or "").strip() or "(no plan produced)"
+    plan_block = f"## Approved Phase 1 Compact Plan\n{plan_body}"
+    parts = [p for p in (static_prefix, exec_contract, plan_block, instructions) if p]
+    return "\n\n".join(parts)
+
+
+def build_staged_prompts(
+    instructions: str,
+    workspace: Optional[Path] = None,
+    plan_text: Optional[str] = None,
+    repo_map_max_tokens: Optional[int] = None,
+) -> Tuple[str, str]:
+    """Build the ``(phase1_plan_prompt, phase2_exec_prompt)`` pair sharing the static workspace prefix."""
+    max_tokens = ICM_STAGED_REPO_MAP_MAX_TOKENS if repo_map_max_tokens is None else repo_map_max_tokens
+    plan_contract = STAGED_PLAN_CONTRACT.read_text(encoding="utf-8").replace("\r\n", "\n").rstrip()
+    static_prefix: Optional[str] = None
+    if workspace is not None and workspace.exists():
+        static_prefix = build_static_context_prefix(workspace, max_tokens=max_tokens)
+    phase1_parts = [p for p in (static_prefix, plan_contract, instructions) if p]
+    phase1_prompt = "\n\n".join(phase1_parts)
+    phase2_prompt = build_staged_exec_prompt(
+        instructions=instructions,
+        plan_text=plan_text or "",
+        workspace=workspace,
+        repo_map_max_tokens=max_tokens,
+        static_prefix=static_prefix,
+    )
+    return phase1_prompt, phase2_prompt
+
+
 def build_mode_prompt(
     instructions: str,
     arm: str,
@@ -592,4 +656,10 @@ def build_mode_prompt(
             static_prefix = build_static_context_prefix(workspace, max_tokens=max_tokens)
             return f"{contract}\n\n{static_prefix}\n\n{instructions}"
         return f"{contract}\n\n{instructions}"
+    if arm == ICM_STAGED:
+        return build_staged_prompts(
+            instructions,
+            workspace=workspace,
+            repo_map_max_tokens=repo_map_max_tokens,
+        )[0]
     return f"{FULL_CONTRACT}\n\n{instructions}"

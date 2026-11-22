@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 import pytest
 
+import complexity_router
 import ledger
 import runner
 
@@ -997,3 +998,407 @@ def test_cleanup_destroys_only_the_disposable_dir(tmp_path: Path):
     assert sentinel.read_text(encoding="utf-8") == "do not delete\n"
     # Snapshot source untouched
     assert (snapshot_dir / "task.py").read_text(encoding="utf-8") == "print('task')\n"
+
+
+# ---------------------------------------------------------------------------
+# PR 2.2: Two-Session icm_staged Plan -> Fresh-Context Exec Handoff
+# ---------------------------------------------------------------------------
+
+
+def _make_staged_bench_fixture(root: Path, task_id: str = "STAGE-001") -> Path:
+    task_dir = root / "benchmarks" / task_id
+    ws = task_dir / "workspace"
+    ev = task_dir / "evaluator"
+    ws.mkdir(parents=True)
+    ev.mkdir(parents=True)
+    (ws / "INSTRUCTIONS.md").write_text("# Task STAGE-001\nFix add(a, b) in calc.py.\n", encoding="utf-8")
+    (ws / "calc.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+    (task_dir / "task.json").write_text(
+        json.dumps({"target_files": ["calc.py"], "target_files_count": 1}),
+        encoding="utf-8",
+    )
+    (ev / "test_eval.py").write_text(
+        "import calc\n\ndef test_add():\n    assert calc.add(2, 3) == 5\n",
+        encoding="utf-8",
+    )
+    return task_dir
+
+
+def _ndjson_bytes(events: list[dict]) -> bytes:
+    return ("\n".join(json.dumps(e) for e in events) + "\n").encode("utf-8")
+
+
+def test_run_benchmark_staged_two_phase_metrics_and_context_reset(tmp_path: Path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    _make_staged_bench_fixture(repo_root)
+    db_file = tmp_path / "staged.db"
+    evidence_dir = repo_root / "evidence"
+    ws_root = tmp_path / "workspaces"
+    monkeypatch.setattr(runner, "WORKSPACE_ROOT", repo_root)
+    monkeypatch.setattr(runner, "DEFAULT_EVIDENCE_DIR", evidence_dir)
+
+    compact_plan = (
+        "### Target Files\n- calc.py\n"
+        "### Symbols & Line Ranges\n- add (L1-L2)\n"
+        "### Invariants & Exact Changes\n- Return a + b.\n"
+        "### Verify Command\npytest -q --tb=short"
+    )
+    raw_transcript_sentinel = "RAW_PHASE1_TRANSCRIPT_NOISE_DO_NOT_FORWARD"
+
+    p1_events = [
+        {"event": "init", "conversation_id": "conv-p1"},
+        {
+            "event": "step_update",
+            "step_update": {
+                "step_index": 1,
+                "state": "DONE",
+                "step_type": "agent_response",
+                "usage": {"input_tokens": 4000, "output_tokens": 50, "thinking_tokens": 10, "cache_read_tokens": 0},
+            },
+        },
+        {
+            "event": "step_update",
+            "step_update": {
+                "step_index": 2,
+                "state": "DONE",
+                "step_type": "tool",
+                "tool_name": "read_file",
+                "tool_info": {"parameters": {"TargetFile": "calc.py"}, "output": raw_transcript_sentinel},
+            },
+        },
+        {
+            "event": "step_update",
+            "step_update": {
+                "step_index": 3,
+                "state": "DONE",
+                "step_type": "tool",
+                "tool_name": "grep_search",
+                "tool_info": {"parameters": {"Query": "add"}},
+            },
+        },
+        {
+            "event": "step_update",
+            "step_update": {
+                "step_index": 4,
+                "state": "DONE",
+                "step_type": "agent_response",
+                "usage": {"input_tokens": 1500, "output_tokens": 120, "thinking_tokens": 20, "cache_read_tokens": 3500},
+            },
+        },
+        {
+            "event": "result",
+            "result": {
+                "status": "SUCCESS",
+                "response": compact_plan,
+                "duration_seconds": 4.5,
+                "num_turns": 2,
+                "usage": {
+                    "input_tokens": 5500,
+                    "output_tokens": 170,
+                    "thinking_tokens": 30,
+                    "cache_read_tokens": 3500,
+                    "total_tokens": 9200,
+                },
+            },
+        },
+    ]
+
+    p2_events = [
+        {"event": "init", "conversation_id": "conv-p2"},
+        {
+            "event": "step_update",
+            "step_update": {
+                "step_index": 1,
+                "state": "DONE",
+                "step_type": "agent_response",
+                "usage": {"input_tokens": 2200, "output_tokens": 40, "thinking_tokens": 5, "cache_read_tokens": 0},
+            },
+        },
+        {
+            "event": "step_update",
+            "step_update": {
+                "step_index": 2,
+                "state": "DONE",
+                "step_type": "tool",
+                "tool_name": "edit_file",
+                "tool_info": {"parameters": {"TargetFile": "calc.py"}},
+            },
+        },
+        {
+            "event": "step_update",
+            "step_update": {
+                "step_index": 3,
+                "state": "DONE",
+                "step_type": "agent_response",
+                "usage": {"input_tokens": 400, "output_tokens": 80, "thinking_tokens": 15, "cache_read_tokens": 2100},
+            },
+        },
+        {
+            "event": "result",
+            "result": {
+                "status": "SUCCESS",
+                "response": "Fixed add(a, b) and verified.",
+                "duration_seconds": 3.0,
+                "num_turns": 2,
+                "usage": {
+                    "input_tokens": 2600,
+                    "output_tokens": 120,
+                    "thinking_tokens": 20,
+                    "cache_read_tokens": 2100,
+                    "total_tokens": 4840,
+                },
+            },
+        },
+    ]
+
+    captured_calls = []
+    orig_run = subprocess.run
+
+    def fake_cli(cmd, **kwargs):
+        if cmd and cmd[0] == "agy":
+            prompt = cmd[cmd.index("-p") + 1]
+            captured_calls.append({"cmd": cmd, "prompt": prompt, "cwd": Path(kwargs["cwd"])})
+            if len(captured_calls) == 1:
+                return subprocess.CompletedProcess(cmd, returncode=0, stdout=_ndjson_bytes(p1_events), stderr=b"")
+            (Path(kwargs["cwd"]) / "calc.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, returncode=0, stdout=_ndjson_bytes(p2_events), stderr=b"")
+        return orig_run(cmd, **kwargs)
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_cli)
+
+    res = runner.run_benchmark_live(
+        task_id="STAGE-001",
+        arm="baseline",
+        run_index=1,
+        model="gemini-4-hydrogen-low",
+        cli_cmd="agy",
+        db_path=db_file,
+        workspace_root=ws_root,
+        mode="icm-staged",
+    )
+
+    assert len(captured_calls) == 2
+    p1_prompt, p2_prompt = captured_calls[0]["prompt"], captured_calls[1]["prompt"]
+    assert "FORBIDDEN from modifying or creating any files" in p1_prompt
+    assert f"## Approved Phase 1 Compact Plan\n{compact_plan}" in p2_prompt
+    assert raw_transcript_sentinel not in p2_prompt
+    assert "Loop-Breaker" in p2_prompt
+
+    assert res["arm"] == complexity_router.ICM_STAGED
+    assert res["execution_status"] == "completed"
+    assert res["verification_status"] == "passed"
+    assert res["rolled_back"] is False
+
+    # Combined metrics equal Phase 1 + Phase 2 without double counting
+    assert res["usage"] == {
+        "input_tokens": 8100,
+        "output_tokens": 290,
+        "thinking_tokens": 50,
+        "cache_read_tokens": 5600,
+        "total_tokens": 14040,
+    }
+    assert res["tool_metrics"]["tool_calls_count"] == 3
+    assert res["tool_metrics"]["tool_errors_count"] == 0
+    assert res["cache_diagnostics"]["llm_calls_count"] == 4
+    assert res["cache_diagnostics"]["peak_context_tokens"] == 5000
+    assert res["cache_diagnostics"]["cache_bust_count"] == 0
+    assert res["cache_diagnostics"]["tools_per_llm_call"] == pytest.approx(0.75)
+    assert res["cache_diagnostics"]["avg_fresh_input_per_call"] == pytest.approx((1500 + 400) / 2)
+    assert res["phase1_peak_context"] == 5000
+    assert res["phase2_initial_context"] == 2200
+    assert res["tokens_shed"] == 2800
+
+    # Manifest and per-phase NDJSON evidence files exist and validate cleanly
+    manifest_path = repo_root / res["evidence_ref"]
+    assert manifest_path.is_file()
+    assert ledger.validate_evidence_file(manifest_path, res["evidence_hash"])["is_valid"] is True
+    manifest_obj = json.loads(manifest_path.read_text(encoding="utf-8").strip())
+    assert manifest_obj["event"] == "staged_summary"
+    assert manifest_obj["phase1_peak_context"] == 5000
+    assert manifest_obj["phase2_initial_context"] == 2200
+    assert manifest_obj["tokens_shed"] == 2800
+    assert ledger.validate_evidence_file(repo_root / manifest_obj["phase1_ref"], manifest_obj["phase1_hash"])["is_valid"] is True
+    assert ledger.validate_evidence_file(repo_root / manifest_obj["phase2_ref"], manifest_obj["phase2_hash"])["is_valid"] is True
+
+    registry = complexity_router.load_contract_registry()
+    with ledger.get_connection(db_file) as conn:
+        row = dict(conn.execute("SELECT * FROM runs WHERE id = ?", (res["run_id"],)).fetchone())
+        assert row["contract_version"] == complexity_router.ICM_STAGED
+        assert row["contract_hash"] == registry[complexity_router.ICM_STAGED]["sha256"]
+        assert row["llm_calls_count"] == 4
+        assert row["peak_context_tokens"] == 5000
+        assert row["tool_calls_count"] == 3
+
+        events = ledger.get_run_events(res["run_id"], conn=conn)
+        phases = [(e["phase"], e["tool_name"], e["status"]) for e in events]
+        assert phases == [
+            ("start", None, "started"),
+            ("tool", "read_file", "DONE"),
+            ("tool", "grep_search", "DONE"),
+            ("context_reset", "context_reset", "DONE"),
+            ("tool", "edit_file", "DONE"),
+            ("verify", None, "passed"),
+            ("scope", None, "scope_ok"),
+        ]
+        reset_ev = next(e for e in events if e["phase"] == "context_reset")
+        assert reset_ev["diff_hash"] == res["phase1_hash"]
+        assert json.loads(reset_ev["rollback_ref"]) == {
+            "phase1_peak_context": 5000,
+            "phase2_initial_context": 2200,
+            "tokens_shed": 2800,
+        }
+
+
+def test_run_benchmark_staged_phase1_mutation_triggers_violation_and_restores_before_phase2(tmp_path: Path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    _make_staged_bench_fixture(repo_root)
+    db_file = tmp_path / "staged_mut.db"
+    evidence_dir = repo_root / "evidence"
+    ws_root = tmp_path / "workspaces"
+    monkeypatch.setattr(runner, "WORKSPACE_ROOT", repo_root)
+    monkeypatch.setattr(runner, "DEFAULT_EVIDENCE_DIR", evidence_dir)
+
+    p1_stream = _ndjson_bytes([
+        {
+            "event": "step_update",
+            "step_update": {
+                "step_index": 1,
+                "state": "DONE",
+                "step_type": "agent_response",
+                "text_delta": "### Target Files\n- calc.py",
+                "usage": {"input_tokens": 1000, "output_tokens": 30, "cache_read_tokens": 0},
+            },
+        },
+        {
+            "event": "result",
+            "result": {
+                "status": "SUCCESS",
+                "duration_seconds": 1.0,
+                "num_turns": 1,
+                "usage": {"input_tokens": 1000, "output_tokens": 30, "total_tokens": 1030},
+            },
+        },
+    ])
+    p2_stream = _ndjson_bytes([
+        {
+            "event": "step_update",
+            "step_update": {
+                "step_index": 1,
+                "state": "DONE",
+                "step_type": "agent_response",
+                "usage": {"input_tokens": 800, "output_tokens": 20, "cache_read_tokens": 0},
+            },
+        },
+        {
+            "event": "result",
+            "result": {
+                "status": "SUCCESS",
+                "response": "Done",
+                "duration_seconds": 1.0,
+                "num_turns": 1,
+                "usage": {"input_tokens": 800, "output_tokens": 20, "total_tokens": 820},
+            },
+        },
+    ])
+
+    phase2_saw_rogue = []
+    call_idx = 0
+    orig_run = subprocess.run
+
+    def fake_cli(cmd, **kwargs):
+        nonlocal call_idx
+        if cmd and cmd[0] == "agy":
+            call_idx += 1
+            cwd = Path(kwargs["cwd"])
+            if call_idx == 1:
+                (cwd / "rogue_phase1.py").write_text("# illegal Phase 1 edit\n", encoding="utf-8")
+                (cwd / "calc.py").write_text("# broken by phase 1\n", encoding="utf-8")
+                return subprocess.CompletedProcess(cmd, returncode=0, stdout=p1_stream, stderr=b"")
+            phase2_saw_rogue.append((cwd / "rogue_phase1.py").exists())
+            (cwd / "calc.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, returncode=0, stdout=p2_stream, stderr=b"")
+        return orig_run(cmd, **kwargs)
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_cli)
+
+    res = runner.run_benchmark_staged(
+        task_id="STAGE-001",
+        run_index=1,
+        model="gemini-4-hydrogen-low",
+        cli_cmd="agy",
+        db_path=db_file,
+        workspace_root=ws_root,
+    )
+
+    assert phase2_saw_rogue == [False]
+    assert "phase1_mutation_violation" in res["exclusion_reasons"]
+    assert res["verification_status"] == "passed"
+    with ledger.get_connection(db_file) as conn:
+        row = dict(conn.execute("SELECT exclusion_reasons FROM runs WHERE id = ?", (res["run_id"],)).fetchone())
+    assert "phase1_mutation_violation" in json.loads(row["exclusion_reasons"])
+
+
+def test_run_benchmark_staged_plan_truncation_missing_usage_and_phase1_failure(tmp_path: Path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    _make_staged_bench_fixture(repo_root)
+    evidence_dir = repo_root / "evidence"
+    ws_root = tmp_path / "workspaces"
+    monkeypatch.setattr(runner, "WORKSPACE_ROOT", repo_root)
+    monkeypatch.setattr(runner, "DEFAULT_EVIDENCE_DIR", evidence_dir)
+
+    # Case A: oversized Phase 1 plan (>12,000 chars) + missing Phase 2 usage keeps None
+    db_a = tmp_path / "staged_a.db"
+    oversized_plan = "X" * (runner.MAX_PHASE1_PLAN_CHARS + 500)
+    p1_ok = _ndjson_bytes([
+        {
+            "event": "result",
+            "result": {
+                "status": "SUCCESS",
+                "response": oversized_plan,
+                "duration_seconds": 1.0,
+                "num_turns": 1,
+                "usage": {"input_tokens": 500, "output_tokens": 50, "total_tokens": 550},
+            },
+        }
+    ])
+    p2_no_usage = _ndjson_bytes([{"event": "result", "result": {"status": "SUCCESS", "duration_seconds": 1.0, "num_turns": 1}}])
+
+    prompts_a = []
+    orig_run = subprocess.run
+
+    def fake_cli_a(cmd, **kwargs):
+        if cmd and cmd[0] == "agy":
+            prompts_a.append(cmd[cmd.index("-p") + 1])
+            if len(prompts_a) == 1:
+                return subprocess.CompletedProcess(cmd, returncode=0, stdout=p1_ok, stderr=b"")
+            (Path(kwargs["cwd"]) / "calc.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, returncode=0, stdout=p2_no_usage, stderr=b"")
+        return orig_run(cmd, **kwargs)
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_cli_a)
+    res_a = runner.run_benchmark_staged("STAGE-001", run_index=1, db_path=db_a, workspace_root=ws_root)
+    assert "phase1_plan_truncated" in res_a["exclusion_reasons"]
+    assert ("X" * runner.MAX_PHASE1_PLAN_CHARS) in prompts_a[1]
+    assert ("X" * (runner.MAX_PHASE1_PLAN_CHARS + 1)) not in prompts_a[1]
+    assert res_a["usage"]["input_tokens"] is None
+    assert res_a["usage"]["output_tokens"] is None
+    assert res_a["cache_diagnostics"]["llm_calls_count"] is None
+    assert res_a["tokens_shed"] is None
+
+    # Case B: failed Phase 1 skips Phase 2 and rolls back cleanly
+    db_b = tmp_path / "staged_b.db"
+    calls_b = []
+
+    def fake_cli_b(cmd, **kwargs):
+        if cmd and cmd[0] == "agy":
+            calls_b.append(cmd)
+            return subprocess.CompletedProcess(cmd, returncode=1, stdout=p1_ok, stderr=b"boom")
+        return orig_run(cmd, **kwargs)
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_cli_b)
+    res_b = runner.run_benchmark_staged("STAGE-001", run_index=2, db_path=db_b, workspace_root=ws_root)
+    assert len(calls_b) == 1
+    assert res_b["execution_status"] == "failed"
+    assert res_b["verification_status"] == "not_run"
+    assert res_b["rolled_back"] is True
+    assert res_b["phase2_ref"] is None
