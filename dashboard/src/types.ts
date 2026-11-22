@@ -61,6 +61,7 @@ export interface RunRecord {
   duration_seconds: number;
   cost_usd: number | null;
   cost_status?: 'usage_estimate' | 'simulation' | 'incomplete' | 'unavailable' | 'unknown' | string;
+  acus_consumed?: number | null;
   source_kind?: 'live' | 'fixture' | 'imported' | 'unknown' | string;
   evidence_status?: 'verified' | 'unverified' | 'invalid' | 'missing' | string;
   exclusion_reasons?: string[];

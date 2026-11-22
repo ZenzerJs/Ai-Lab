@@ -29,6 +29,12 @@ DEFAULT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB_PATH = DEFAULT_ROOT / "data" / "usage.db"
 DEFAULT_PRICING_PATH = DEFAULT_ROOT / "config" / "PRICING.json"
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from pricing import validate_acus_consumed  # noqa: E402
+
 # Trailing effort levels telemetry appends to a base model id
 # (e.g. gemini-4-argon-low -> gemini-4-argon).
 EFFORT_SUFFIXES = frozenset({"low", "medium", "high", "xhigh"})
@@ -90,6 +96,7 @@ PUBLIC_RUN_KEYS = {
     "exclusion_reasons",
     "cost_status",
     "cost_usd",
+    "acus_consumed",
     "is_simulation",
     "execution_status",
     "verification_status",
@@ -369,6 +376,8 @@ def validate_and_parse_telemetry(
     resolved_adapter_name = adapter_name
     num_turns = 0
     duration_seconds = 0.0
+    acus_consumed: Optional[float] = None
+    devin_session_id: Optional[str] = None
 
     cumulative_usage: Optional[Dict[str, Any]] = None
     turn_usages: List[Dict[str, Any]] = []
@@ -413,6 +422,18 @@ def validate_and_parse_telemetry(
                 resolved_adapter_name = str(event["usage"]["adapter_name"])
             elif "cache_accounting" in event["usage"] and event["usage"]["cache_accounting"]:
                 resolved_adapter_name = str(event["usage"]["cache_accounting"])
+
+        raw_devin_id = (
+            event.get("devin_session_id")
+            or event.get("devin_id")
+            or (
+                event["devin_session"].get("session_id") or event["devin_session"].get("devin_id")
+                if isinstance(event.get("devin_session"), dict)
+                else None
+            )
+        )
+        if raw_devin_id:
+            devin_session_id = str(raw_devin_id)
 
         if "run_index" in event and event["run_index"] is not None:
             try:
@@ -523,6 +544,26 @@ def validate_and_parse_telemetry(
             seen_event_lines.add(event_hash)
 
         ev_type = str(event.get("type") or event.get("event") or "").lower()
+
+        raw_acus = event.get("acus_consumed")
+        if raw_acus is None and isinstance(event.get("usage"), dict):
+            raw_acus = event["usage"].get("acus_consumed")
+        if raw_acus is None and isinstance(event.get("devin_session"), dict):
+            raw_acus = event["devin_session"].get("acus_consumed")
+        if raw_acus is None and isinstance(event.get("result"), dict):
+            res_dict = event["result"]
+            raw_acus = res_dict.get("acus_consumed")
+            if raw_acus is None and isinstance(res_dict.get("usage"), dict):
+                raw_acus = res_dict["usage"].get("acus_consumed")
+        if raw_acus is not None:
+            try:
+                acus_consumed = validate_acus_consumed(raw_acus)
+            except ValueError as exc:
+                raise TelemetryValidationError(
+                    f"Line {idx}: Invalid 'acus_consumed': {exc}",
+                    line_number=idx,
+                    event_data=event,
+                ) from exc
 
         # Turn event
         if ev_type == "turn" or "turn" in event:
@@ -689,6 +730,8 @@ def validate_and_parse_telemetry(
         "adapter_name": resolved_adapter_name,
         "field_completeness": field_completeness,
         "tool_metrics": tool_metrics,
+        "acus_consumed": acus_consumed,
+        "devin_session_id": devin_session_id,
     }
 
 
@@ -970,6 +1013,7 @@ def init_db(conn: sqlite3.Connection) -> None:
                     import_id TEXT,
                     cost_status TEXT NOT NULL DEFAULT 'unknown',
                     cost_usd REAL,
+                    acus_consumed REAL,
                     is_simulation INTEGER NOT NULL DEFAULT 0,
                     notes TEXT,
                     execution_status TEXT NOT NULL DEFAULT 'completed',
@@ -1042,6 +1086,8 @@ def init_db(conn: sqlite3.Connection) -> None:
                     conn.execute("ALTER TABLE runs ADD COLUMN max_consecutive_tool_streak INTEGER")
                 if "loop_detected" not in cols:
                     conn.execute("ALTER TABLE runs ADD COLUMN loop_detected INTEGER")
+                if "acus_consumed" not in cols:
+                    conn.execute("ALTER TABLE runs ADD COLUMN acus_consumed REAL")
 
         with conn:
             conn.execute("""
@@ -1128,6 +1174,9 @@ def migrate_db(conn: sqlite3.Connection) -> bool:
             if "loop_detected" not in cols:
                 conn.execute("ALTER TABLE runs ADD COLUMN loop_detected INTEGER")
                 applied_upgrade = True
+            if "acus_consumed" not in cols:
+                conn.execute("ALTER TABLE runs ADD COLUMN acus_consumed REAL")
+                applied_upgrade = True
             if not run_events_exists:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS run_events (
@@ -1175,6 +1224,7 @@ def migrate_db(conn: sqlite3.Connection) -> bool:
                 import_id TEXT,
                 cost_status TEXT NOT NULL DEFAULT 'unknown',
                 cost_usd REAL,
+                acus_consumed REAL,
                 is_simulation INTEGER NOT NULL DEFAULT 0,
                 notes TEXT,
                 execution_status TEXT NOT NULL DEFAULT 'completed',
@@ -1587,6 +1637,7 @@ def record_run(
     import_id: Optional[str] = None,
     cost_status: Optional[str] = None,
     cost_usd: Optional[float] = None,
+    acus_consumed: Optional[float] = None,
     is_simulation: bool = False,
     notes: Optional[str] = None,
     execution_status: str = "completed",
@@ -1653,7 +1704,8 @@ def record_run(
         if "evaluator_error" not in exclusion_reasons:
             exclusion_reasons.append("evaluator_error")
 
-    # Calculate cost if not provided
+    # Calculate cost if not provided (Devin ACUs are metadata only; never converted to USD)
+    validated_acus = validate_acus_consumed(acus_consumed)
     is_part = (cost_status == "incomplete") or (exclusion_reasons is not None and "partial_telemetry" in exclusion_reasons)
     if cost_usd is None and input_tokens is not None:
         cost_calc = calculate_cost_detailed(
@@ -1696,7 +1748,55 @@ def record_run(
 
     with conn:
         if "source_kind" in cols:
-            if "execution_status" in cols and "tool_calls_count" in cols:
+            if "execution_status" in cols and "tool_calls_count" in cols and "acus_consumed" in cols:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO runs (
+                        task_id, arm, model, run_index, timestamp,
+                        input_tokens, output_tokens, thinking_tokens, cache_read_tokens,
+                        total_tokens, num_turns, duration_seconds,
+                        source_kind, evidence_status, exclusion_reasons,
+                        evidence_ref, evidence_hash, import_id,
+                        cost_status, cost_usd, acus_consumed, is_simulation, notes,
+                        execution_status, verification_status, manifest_id, evaluator_hash,
+                        tool_calls_count, tool_errors_count, max_consecutive_tool_streak, loop_detected
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        task_id,
+                        arm,
+                        model,
+                        run_index,
+                        timestamp,
+                        input_tokens,
+                        output_tokens,
+                        thinking_tokens,
+                        cache_read_tokens,
+                        total_tokens,
+                        int(num_turns),
+                        float(duration_seconds),
+                        source_kind,
+                        evidence_status,
+                        reasons_json,
+                        evidence_ref,
+                        evidence_hash,
+                        import_id,
+                        cost_status,
+                        cost_usd,
+                        validated_acus,
+                        1 if is_simulation else 0,
+                        notes,
+                        execution_status,
+                        verification_status,
+                        manifest_id,
+                        evaluator_hash,
+                        tool_calls_count,
+                        tool_errors_count,
+                        max_consecutive_tool_streak,
+                        loop_val,
+                    ),
+                )
+            elif "execution_status" in cols and "tool_calls_count" in cols:
                 cursor = conn.execute(
                     """
                     INSERT INTO runs (
@@ -2184,6 +2284,12 @@ def import_run(
             v_ex = ex.get(fld)
             if (v_new or 0) != (v_ex or 0):
                 diffs.append(f"{fld} (existing: {v_ex} vs new: {v_new})")
+        new_acus = validate_acus_consumed(run_dict.get("acus_consumed"))
+        ex_acus = validate_acus_consumed(ex.get("acus_consumed"))
+        if (new_acus is None) != (ex_acus is None) or (
+            new_acus is not None and ex_acus is not None and abs(new_acus - ex_acus) > 1e-6
+        ):
+            diffs.append(f"acus_consumed (existing: {ex_acus} vs new: {new_acus})")
         if "num_turns" in run_dict and int(run_dict["num_turns"]) != int(ex.get("num_turns", 1)):
             diffs.append(f"num_turns (existing: {ex.get('num_turns')} vs new: {run_dict['num_turns']})")
         if "duration_seconds" in run_dict and abs(float(run_dict["duration_seconds"]) - float(ex.get("duration_seconds", 0.0))) > 1e-4:
@@ -2272,6 +2378,7 @@ def import_run(
         import_id=import_id,
         cost_status=cost_status,
         cost_usd=cost_usd,
+        acus_consumed=run_dict.get("acus_consumed"),
         is_simulation=bool(run_dict.get("is_simulation", 0)),
         notes=run_dict.get("notes"),
         execution_status=run_dict.get("execution_status") or "completed",

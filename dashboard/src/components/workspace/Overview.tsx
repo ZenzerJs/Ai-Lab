@@ -17,7 +17,11 @@ import {
   TaskSummaryItem,
 } from "../../types";
 import { formatArm, formatCurrency, formatTokens } from "../../lib/formatters";
-import { formatSignedCostChange, isPricedRun } from "../../lib/analytics";
+import {
+  acuTelemetrySummary,
+  formatSignedCostChange,
+  isPricedRun,
+} from "../../lib/analytics";
 import { armNames, experimentNames, finite, governedArm, governedArmName } from "../../lib/workspace";
 import AdaptiveICM from "./AdaptiveICM";
 
@@ -264,6 +268,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
           (s, r) => s + (finite(r.tool_errors_count) ? r.tool_errors_count : 0),
           0,
         );
+        const acu = acuTelemetrySummary(runs);
         return {
           model,
           liveRuns: runs.length,
@@ -280,6 +285,8 @@ export function Overview({ data }: { data: DashboardPayload }) {
           govErrors,
           baseUsd: sumUsd(baseRuns),
           govUsd: sumUsd(govRuns),
+          acuRuns: acu.runsWithAcus,
+          totalAcus: acu.totalAcus,
         };
       });
   }, [data.runs]);
@@ -578,6 +585,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
                   <th scope="col">Tokens / pass (Base → Gov)</th>
                   <th scope="col">Δ Tokens</th>
                   <th scope="col">Tool calls (err)</th>
+                  <th scope="col">ACU (metadata)</th>
                   <th scope="col">Priced USD (Base → Gov)</th>
                 </tr>
               </thead>
@@ -611,6 +619,9 @@ export function Overview({ data }: { data: DashboardPayload }) {
                     <td>
                       {m.baseTools} ({m.baseErrors}) / {m.govTools} ({m.govErrors}
                       )
+                    </td>
+                    <td>
+                      {m.acuRuns > 0 ? `${m.totalAcus.toFixed(2)} ACU` : "—"}
                     </td>
                     <td>
                       {m.baseUsd != null && m.govUsd != null
