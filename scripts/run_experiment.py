@@ -37,7 +37,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import ledger
-from complexity_router import ICM_LITE, MODES, build_mode_prompt, resolve_mode
+from complexity_router import ICM_LITE, ICM_V2, MODES, build_mode_prompt, resolve_mode
 
 # Ensure UTF-8 output encoding
 if hasattr(sys.stdout, "reconfigure"):
@@ -368,7 +368,7 @@ def execute_live_run(
     model = task["model"]
 
     if use_mode_contract:
-        effective_prompt = build_mode_prompt(prompt, arm)
+        effective_prompt = build_mode_prompt(prompt, arm, workspace=target_repo_path)
     else:
         effective_prompt = prompt if arm == "baseline" else (
             f"Execute the following task strictly conforming to the workspace ICM pipeline "
@@ -627,7 +627,7 @@ def main():
                     db_path=db_path,
                 )
 
-        if arm_to_run in ("icm", "icm-subagents", ICM_LITE, "both"):
+        if arm_to_run in ("icm", "icm-subagents", ICM_LITE, ICM_V2, "both"):
             target_gov_arm = "icm" if arm_to_run == "both" else arm_to_run
             print(f"\n[*] Starting {target_gov_arm.upper()} Arm ({runs_per_arm} runs)...")
             if args.clear:

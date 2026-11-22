@@ -1,16 +1,34 @@
 """Deterministic selection of experiment contracts from declared task scope."""
 
+import ast
 from dataclasses import dataclass
 import re
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, List, Mapping, Optional, Tuple
 import warnings
 
-MODES = ("auto", "icm", "icm-lite", "baseline")
+import tiktoken
+
+import repo_map
+
+MODES = ("auto", "icm", "icm-lite", "icm-v2", "baseline")
 ICM_LITE = "icm_lite"
+ICM_V2 = "icm_v2"
 LOC_THRESHOLD = 150
+SYMBOL_THRESHOLD = 10
+ICM_V2_REPO_MAP_MAX_TOKENS = 600
 LOC_SOURCES = ("estimated_loc", "target_loc_range", "file_loc", "unknown")
 LITE_CONTRACT = Path(__file__).resolve().parents[1] / "tasks" / "_template" / "icm_lite.md"
+V2_CONTRACT = Path(__file__).resolve().parents[1] / "tasks" / "_template" / "icm_v2.md"
+
+_REGEX_SYMBOL_PATTERNS = (
+    re.compile(r"^\s*(?:async\s+)?def\s+[a-zA-Z_]"),
+    re.compile(r"^\s*class\s+[a-zA-Z_]"),
+    re.compile(r"^\s*(?:export\s+)?(?:default\s+)?(?:class|interface|type|function)\s+[a-zA-Z_]"),
+    re.compile(r"^\s*(?:export\s+)?(?:const|let|var)\s+[a-zA-Z_$][\w$]*\s*=\s*(?:async\s*)?(?:\([^)]*\)|[a-zA-Z_$][\w$]*)\s*=>"),
+    re.compile(r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+[a-zA-Z_]"),
+    re.compile(r"^\s*func\s+(?:\([^)]+\)\s+)?[a-zA-Z_]"),
+)
 
 FULL_CONTRACT = """Execute this task using the full 5-stage ICM contract:
 1. 01_intake: Establish scope, constraints, and context budget.
@@ -29,6 +47,142 @@ class RoutingDecision:
     loc: Optional[int]
     single_file: bool
     target: Optional[str]
+    ast_symbol_count: Optional[int] = None
+
+
+_WRAPPER_NODE_TYPES = frozenset({"export_statement", "decorated_definition"})
+_AST_SYMBOL_NODE_TYPES = frozenset(repo_map.DEF_NODE_TYPES) - _WRAPPER_NODE_TYPES
+_FUNC_VALUE_NODE_TYPES = frozenset({"arrow_function", "function_expression", "function"})
+
+
+def _is_ast_symbol_node(node: Any) -> bool:
+    if node.type in _AST_SYMBOL_NODE_TYPES:
+        return True
+    if node.type == "variable_declarator":
+        val = node.child_by_field_name("value") if hasattr(node, "child_by_field_name") else None
+        if val is not None and val.type in _FUNC_VALUE_NODE_TYPES:
+            return True
+    return False
+
+
+def extract_ast_symbol_spans(target: Path, code: str) -> Optional[List[Tuple[str, int, int]]]:
+    """Return ``(symbol_key, start_line, end_line)`` spans (1-based) for definitions in *code*."""
+    if target.suffix == ".py":
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return None
+        spans: List[Tuple[str, int, int]] = []
+
+        def _visit(node: ast.AST, prefix: str) -> None:
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    qname = f"{prefix}.{child.name}" if prefix else child.name
+                    decorator_lines = [d.lineno for d in getattr(child, "decorator_list", ()) if hasattr(d, "lineno")]
+                    start = min([child.lineno, *decorator_lines])
+                    end = getattr(child, "end_lineno", child.lineno) or child.lineno
+                    spans.append((qname, start, end))
+                    _visit(child, qname)
+                else:
+                    _visit(child, prefix)
+
+        _visit(tree, "")
+        return spans
+
+    lang = repo_map.filename_to_lang(str(target))
+    if not lang:
+        return None
+    try:
+        tc = repo_map.TreeContext(
+            filename=str(target),
+            code=code,
+            color=False,
+            line_number=False,
+            mark_lois=False,
+            margin=0,
+            parent_context=False,
+            child_context=False,
+            last_line=False,
+            loi_pad=0,
+        )
+        lines = code.splitlines()
+        seen: set[Tuple[int, int, str]] = set()
+        spans = []
+        for nodes in tc.nodes:
+            for node in nodes:
+                if not _is_ast_symbol_node(node):
+                    continue
+                pos = (node.start_point[0], node.start_point[1], node.type)
+                if pos in seen:
+                    continue
+                seen.add(pos)
+                name_node = node.child_by_field_name("name") if hasattr(node, "child_by_field_name") else None
+                if name_node is not None and hasattr(name_node, "text") and name_node.text:
+                    sym_name = name_node.text.decode("utf-8", errors="replace") if isinstance(name_node.text, bytes) else str(name_node.text)
+                else:
+                    row = node.start_point[0]
+                    sym_name = lines[row].strip() if 0 <= row < len(lines) else f"L{row + 1}"
+                spans.append((f"{node.type}:{sym_name}", node.start_point[0] + 1, node.end_point[0] + 1))
+        return spans
+    except Exception:
+        return None
+
+
+def count_ast_symbols(target: Optional[Path]) -> Optional[int]:
+    """Count AST-level symbol definitions (functions, async functions, classes) in a file.
+
+    Uses Python's ``ast`` module for ``.py`` files, falling back to tree-sitter via
+    ``grep_ast`` (same node types as ``repo_map.py``) and finally regex signatures for
+    non-Python or syntactically incomplete files.
+    """
+    if target is None or not target.is_file():
+        return None
+    try:
+        code = target.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+
+    spans = extract_ast_symbol_spans(target, code)
+    if spans is not None and (target.suffix == ".py" or len(spans) > 0):
+        return len(spans)
+
+    return sum(
+        1
+        for line in code.splitlines()
+        if any(pat.search(line) for pat in _REGEX_SYMBOL_PATTERNS)
+    )
+
+
+def build_compact_repo_map(
+    workspace: Optional[Path],
+    max_tokens: int = ICM_V2_REPO_MAP_MAX_TOKENS,
+) -> str:
+    """Build a deterministic, token-bounded AST symbol/signature map for a workspace."""
+    if workspace is None or not workspace.exists():
+        return "# Repository Map: No AST symbols detected."
+
+    root = workspace.resolve()
+    files = repo_map.collect_target_files(root, root)
+    if not files:
+        return "# Repository Map: No AST symbols detected."
+
+    def _rel_posix(fp: Path) -> str:
+        try:
+            return fp.resolve().relative_to(root).as_posix()
+        except ValueError:
+            return fp.as_posix()
+
+    file_blocks: List[Tuple[str, str]] = []
+    for fp in sorted(files, key=_rel_posix):
+        symbols = repo_map.extract_symbols_from_file(fp)
+        if symbols:
+            file_blocks.append((_rel_posix(fp), symbols))
+
+    if not file_blocks:
+        return "# Repository Map: No AST symbols detected."
+
+    enc = tiktoken.get_encoding(repo_map.ENCODING_NAME)
+    return repo_map.binary_search_prune(file_blocks, max_tokens, enc)
 
 
 def _single_target(metadata: Mapping[str, Any], workspace: Path) -> tuple[bool, Optional[Path]]:
@@ -97,9 +251,11 @@ def _scoped_loc(metadata: Mapping[str, Any], target: Optional[Path]) -> tuple[Op
 
 
 def classify_mode(mode: str, metadata: Mapping[str, Any], workspace: Path) -> RoutingDecision:
-    """Resolve the arm and report which scope source supplied the LOC evidence."""
+    """Resolve the arm and report which scope source supplied the LOC & AST evidence."""
     if mode == "icm-lite":
         return RoutingDecision(ICM_LITE, "unknown", None, False, None)
+    if mode == "icm-v2":
+        return RoutingDecision(ICM_V2, "unknown", None, False, None)
     if mode in ("baseline", "icm"):
         return RoutingDecision(mode, "unknown", None, False, None)
     if mode != "auto":
@@ -107,14 +263,23 @@ def classify_mode(mode: str, metadata: Mapping[str, Any], workspace: Path) -> Ro
 
     single_file, target = _single_target(metadata, workspace)
     loc, loc_source = _scoped_loc(metadata, target)
-    arm = ICM_LITE if single_file and loc is not None and loc < LOC_THRESHOLD else "icm"
+    ast_symbol_count = count_ast_symbols(target)
+
+    within_loc = loc is not None and loc < LOC_THRESHOLD
+    within_symbols = (
+        ast_symbol_count is None
+        or loc_source != "file_loc"
+        or ast_symbol_count < SYMBOL_THRESHOLD
+    )
+    arm = ICM_LITE if single_file and within_loc and within_symbols else "icm"
+
     rel_target = None
     if target is not None:
         try:
             rel_target = target.relative_to(workspace.resolve()).as_posix()
         except ValueError:
             rel_target = str(target)
-    return RoutingDecision(arm, loc_source, loc, single_file, rel_target)
+    return RoutingDecision(arm, loc_source, loc, single_file, rel_target, ast_symbol_count=ast_symbol_count)
 
 
 def resolve_mode(mode: str, metadata: Mapping[str, Any], workspace: Path) -> str:
@@ -122,8 +287,21 @@ def resolve_mode(mode: str, metadata: Mapping[str, Any], workspace: Path) -> str
     return classify_mode(mode, metadata, workspace).arm
 
 
-def build_mode_prompt(instructions: str, arm: str) -> str:
+def build_mode_prompt(
+    instructions: str,
+    arm: str,
+    workspace: Optional[Path] = None,
+    repo_map_max_tokens: int = ICM_V2_REPO_MAP_MAX_TOKENS,
+) -> str:
     if arm == "baseline":
         return instructions
-    contract = LITE_CONTRACT.read_text(encoding="utf-8").rstrip() if arm == ICM_LITE else FULL_CONTRACT
-    return f"{contract}\n\n{instructions}"
+    if arm == ICM_LITE:
+        contract = LITE_CONTRACT.read_text(encoding="utf-8").rstrip()
+        return f"{contract}\n\n{instructions}"
+    if arm == ICM_V2:
+        contract = V2_CONTRACT.read_text(encoding="utf-8").rstrip()
+        if workspace is not None and workspace.exists():
+            symbol_map = build_compact_repo_map(workspace, max_tokens=repo_map_max_tokens)
+            return f"{contract}\n\n## Pre-Injected AST Symbol Map\n{symbol_map}\n\n{instructions}"
+        return f"{contract}\n\n{instructions}"
+    return f"{FULL_CONTRACT}\n\n{instructions}"
