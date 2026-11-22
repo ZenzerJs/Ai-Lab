@@ -115,6 +115,13 @@ DEFAULT_ARM_CONFIGS: Dict[str, Dict[str, Any]] = {
 
 CACHE_CONDITIONS = ("cold", "warm")
 
+# Arms with a dedicated runner routing contract (runner.run_benchmark_live `mode`).
+# Arms absent here keep the runner's default prompt semantics for their arm name.
+ARM_ROUTING_MODES: Dict[str, str] = {
+    "icm_lite": "icm-lite",
+    "icm_v2": "icm-v2",
+}
+
 
 # ---------------------------------------------------------------------------
 # Campaign Data Models (REP-01, REP-02)
@@ -667,15 +674,21 @@ def execute_campaign_batch(
         }
         target_slot = slots_by_id[slot.slot_id]
         try:
-            res = runner_fn(
-                task_id=slot.task_id,
-                arm=slot.arm,
-                run_index=slot.repetition_index,
-                model=slot.model,
-                db_path=db_path,
-                cli_cmd=cli_cmd,
-                timeout_seconds=timeout_seconds,
-            )
+            call_kwargs: Dict[str, Any] = {
+                "task_id": slot.task_id,
+                "arm": slot.arm,
+                "run_index": slot.repetition_index,
+                "model": slot.model,
+                "db_path": db_path,
+                "cli_cmd": cli_cmd,
+                "timeout_seconds": timeout_seconds,
+            }
+            # Arms with a dedicated routing contract dispatch through `mode` so the
+            # runner builds that arm's prompt instead of the generic ICM contract.
+            routing_mode = ARM_ROUTING_MODES.get(slot.arm)
+            if routing_mode is not None:
+                call_kwargs["mode"] = routing_mode
+            res = runner_fn(**call_kwargs)
             exec_status = str(res.get("execution_status") or "completed")
             outcome.update({
                 "execution_status": exec_status,

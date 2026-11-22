@@ -794,7 +794,7 @@ def test_execute_batch_runs_in_planned_order_and_retains_failures():
     """
     manifest = campaign.plan_campaign(
         tasks=["BENCH-01"],
-        arms=["baseline", "icm", "delegation"],
+        arms=["baseline", "icm", "delegation", "icm_lite"],
         repetitions=2,
         random_seed=99,
         cache_conditions=["cold", "warm"],
@@ -803,7 +803,7 @@ def test_execute_batch_runs_in_planned_order_and_retains_failures():
 
     calls: list = []
 
-    def fake_run(task_id, arm, run_index, model, db_path, cli_cmd, timeout_seconds):
+    def fake_run(task_id, arm, run_index, model, db_path, cli_cmd, timeout_seconds, mode=None):
         calls.append({
             "task_id": task_id,
             "arm": arm,
@@ -812,6 +812,7 @@ def test_execute_batch_runs_in_planned_order_and_retains_failures():
             "db_path": db_path,
             "cli_cmd": cli_cmd,
             "timeout_seconds": timeout_seconds,
+            "mode": mode,
         })
         if arm == "icm":
             raise subprocess.TimeoutExpired(cmd=cli_cmd, timeout=timeout_seconds)
@@ -845,6 +846,12 @@ def test_execute_batch_runs_in_planned_order_and_retains_failures():
         assert call["model"] == slot.model
         assert call["cli_cmd"] == "agy"
         assert call["timeout_seconds"] == 60
+        # Arms with a dedicated routing contract dispatch via `mode`
+        expected_mode = campaign.ARM_ROUTING_MODES.get(slot.arm)
+        assert call["mode"] == expected_mode
+    # icm_lite slots specifically route to the icm-lite contract
+    lite_calls = [c for c in calls if c["arm"] == "icm_lite"]
+    assert lite_calls and all(c["mode"] == "icm-lite" for c in lite_calls)
 
     # 2. Every attempt retained in results with manifest_id + planned_order (REP-02)
     assert result["executed_count"] == len(ordered)
@@ -855,10 +862,10 @@ def test_execute_batch_runs_in_planned_order_and_retains_failures():
         assert outcome["planned_order"] == slot.planned_order
 
     statuses = [o["execution_status"] for o in result["results"]]
-    assert statuses.count("completed") == 4  # 2 baseline reps x 2 cache conditions
+    assert statuses.count("completed") == 8  # baseline + icm_lite (2 reps x 2 conditions each)
     assert statuses.count("timed_out") == 4  # icm slots
     assert statuses.count("failed") == 4     # delegation slots
-    assert result["status_counts"] == {"completed": 4, "timed_out": 4, "failed": 4}
+    assert result["status_counts"] == {"completed": 8, "timed_out": 4, "failed": 4}
 
     timed_out = [o for o in result["results"] if o["execution_status"] == "timed_out"]
     assert all("Timed out" in o["error_message"] for o in timed_out)
