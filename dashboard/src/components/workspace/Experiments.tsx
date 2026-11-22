@@ -7,7 +7,7 @@ import {
   Search,
 } from "lucide-react";
 import { ArmStats, DashboardPayload, TaskSummaryItem } from "../../types";
-import { armNames, experimentNames, finite, governedArm } from "../../lib/workspace";
+import { armNames, experimentNames, finite, governedArm, suiteBootstrapCI } from "../../lib/workspace";
 import { isPricedRun, pairedDiffStats, suitePairsDetailed } from "../../lib/analytics";
 import { formatArm, formatCurrency, formatSignedPercent, formatTokens } from "../../lib/formatters";
 import AdaptiveICM from "./AdaptiveICM";
@@ -193,7 +193,7 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
             ]),
           );
           const ciByArm = Object.fromEntries(
-            governedNames.map((n) => [n, statsByArm[n]?.ci95 ?? null]),
+            governedNames.map((n) => [n, suiteBootstrapCI(task, n)]),
           );
           const armBadges = (name: string) => {
             const st = statsByArm[name];
