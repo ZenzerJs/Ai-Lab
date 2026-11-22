@@ -14,6 +14,7 @@ manual import adapters:
 """
 
 import argparse
+import ast
 import copy
 from contextlib import contextmanager
 import dataclasses
@@ -371,6 +372,75 @@ def _count_changed_lines(before: Path, after: Path) -> int:
     )
 
 
+def _extract_python_symbol_spans(source: str) -> Optional[List[Tuple[str, int, int]]]:
+    """Return (qualified_name, start_line, end_line) spans for Python functions/classes."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    spans: List[Tuple[str, int, int]] = []
+
+    def _visit(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                qname = f"{prefix}.{child.name}" if prefix else child.name
+                start = getattr(child, "lineno", 0)
+                end = getattr(child, "end_lineno", start) or start
+                spans.append((qname, start, end))
+                _visit(child, qname)
+            else:
+                _visit(child, prefix)
+
+    _visit(tree, "")
+    return spans
+
+
+def _count_touched_ast_symbols(old: Optional[Path], new: Optional[Path]) -> int:
+    """Count AST symbols actually added, removed, or overlapping changed lines in a diff."""
+    if old is None and new is None:
+        return 0
+    if old is None:
+        return count_ast_symbols(new) or 0
+    if new is None:
+        return count_ast_symbols(old) or 0
+
+    try:
+        old_src = old.read_text(encoding="utf-8", errors="replace")
+        new_src = new.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return 0
+
+    old_lines = old_src.splitlines()
+    new_lines = new_src.splitlines()
+    changed_old: Set[int] = set()
+    changed_new: Set[int] = set()
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old_lines, new_lines).get_opcodes():
+        if tag in ("replace", "delete"):
+            changed_old.update(range(i1 + 1, i2 + 1))
+        if tag in ("replace", "insert"):
+            changed_new.update(range(j1 + 1, j2 + 1))
+
+    if not changed_old and not changed_new:
+        return 0
+
+    if new.suffix == ".py" or old.suffix == ".py":
+        old_spans = _extract_python_symbol_spans(old_src)
+        new_spans = _extract_python_symbol_spans(new_src)
+        if old_spans is not None and new_spans is not None:
+            touched_symbols: Set[str] = set()
+            for qname, start, end in old_spans:
+                if any(start <= ln <= end for ln in changed_old):
+                    touched_symbols.add(qname)
+            for qname, start, end in new_spans:
+                if any(start <= ln <= end for ln in changed_new):
+                    touched_symbols.add(qname)
+            return len(touched_symbols)
+
+    old_count = count_ast_symbols(old) or 0
+    new_count = count_ast_symbols(new) or 0
+    return abs(new_count - old_count)
+
+
 def scope_telemetry(workspace_dir: Path, snapshot_dir: Path, metadata: Mapping[str, Any]) -> Dict[str, Any]:
     """Compare a post-run workspace to its snapshot and flag scope drift.
 
@@ -400,12 +470,10 @@ def scope_telemetry(workspace_dir: Path, snapshot_dir: Path, metadata: Mapping[s
     } if isinstance(declared, list) else set()
     scope_mismatch = set(touched) != declared_set if declared_set else bool(touched)
     lines_touched = sum(entry["lines"] for entry in touched.values())
-    ast_symbols_touched = 0
-    for rel in touched:
-        p = after.get(rel) or before.get(rel)
-        sym_count = count_ast_symbols(p) if p is not None else None
-        if sym_count is not None:
-            ast_symbols_touched += sym_count
+    ast_symbols_touched = sum(
+        _count_touched_ast_symbols(before.get(rel), after.get(rel))
+        for rel in touched
+    )
 
     declared_scope = {
         "target_files": sorted(declared_set),
