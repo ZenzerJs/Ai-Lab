@@ -2363,6 +2363,12 @@ def import_run(
             v_ex = ex.get(fld)
             if (v_new or 0) != (v_ex or 0):
                 diffs.append(f"{fld} (existing: {v_ex} vs new: {v_new})")
+        new_acus = validate_acus_consumed(run_dict.get("acus_consumed"))
+        ex_acus = validate_acus_consumed(ex.get("acus_consumed"))
+        if (new_acus is None) != (ex_acus is None) or (
+            new_acus is not None and ex_acus is not None and abs(new_acus - ex_acus) > 1e-6
+        ):
+            diffs.append(f"acus_consumed (existing: {ex_acus} vs new: {new_acus})")
         if "num_turns" in run_dict and int(run_dict["num_turns"]) != int(ex.get("num_turns", 1)):
             diffs.append(f"num_turns (existing: {ex.get('num_turns')} vs new: {run_dict['num_turns']})")
         if "duration_seconds" in run_dict and abs(float(run_dict["duration_seconds"]) - float(ex.get("duration_seconds", 0.0))) > 1e-4:
