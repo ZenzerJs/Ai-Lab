@@ -7,6 +7,7 @@ import {
   finite,
 } from "../../lib/workspace";
 import {
+  acuTelemetrySummary,
   applyFdrToRows,
   CostScope,
   isPricedRun,
@@ -77,6 +78,7 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
     () => runs.filter(isPricedRun).length,
     [runs],
   );
+  const acuSummary = useMemo(() => acuTelemetrySummary(runs), [runs]);
   const share = useMemo(() => pricedShare(runs), [runs]);
   const primaryMetric = useMemo(() => primaryEffectMetric(share), [share]);
   const families = useMemo(
@@ -186,12 +188,20 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
           <strong>{scoped.length}</strong>
         </div>
         <div>
-          <span>Priced (cost-complete)</span>
+          <span>Priced (Direct Billed)</span>
           <strong>{pricedCount}</strong>
         </div>
         <div>
           <span>Unpriced scale runs</span>
           <strong>{runs.length - pricedCount}</strong>
+        </div>
+        <div>
+          <span>ACU telemetry (metadata)</span>
+          <strong>
+            {acuSummary.runsWithAcus > 0
+              ? `${acuSummary.totalAcus.toFixed(2)} ACU (${acuSummary.runsWithAcus})`
+              : "0 runs"}
+          </strong>
         </div>
         <div>
           <span>Priced share</span>
@@ -401,6 +411,7 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
                 <th scope="col">Pass (Base / Gov)</th>
                 <th scope="col">Mean tokens (Base → Gov)</th>
                 <th scope="col">Δ tokens</th>
+                <th scope="col">ACU (metadata)</th>
                 <th scope="col">Priced USD (Base → Gov)</th>
                 <th scope="col">Savings</th>
               </tr>
@@ -440,6 +451,9 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
                     ) : (
                       "—"
                     )}
+                  </td>
+                  <td>
+                    {f.acuRuns > 0 ? `${f.totalAcus.toFixed(2)} ACU` : "—"}
                   </td>
                   <td>
                     {f.baselineCostUsd != null && f.governedCostUsd != null

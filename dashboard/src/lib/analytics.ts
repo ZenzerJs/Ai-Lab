@@ -12,6 +12,37 @@ export function isPricedRun(run: RunRecord): boolean {
   return finite(run.cost_usd);
 }
 
+export function hasAcuTelemetry(run: RunRecord): boolean {
+  return finite(run.acus_consumed);
+}
+
+export interface AcuTelemetrySummary {
+  runsWithAcus: number;
+  totalAcus: number;
+}
+
+/**
+ * Summarize optional Devin ACU telemetry strictly as non-USD metadata.
+ * ACUs are never converted into synthetic dollar costs.
+ */
+export function acuTelemetrySummary(
+  runs: RunRecord[] | undefined,
+): AcuTelemetrySummary {
+  const list = runs || [];
+  let runsWithAcus = 0;
+  let totalAcus = 0;
+  for (const r of list) {
+    if (finite(r.acus_consumed)) {
+      runsWithAcus += 1;
+      totalAcus += r.acus_consumed;
+    }
+  }
+  return {
+    runsWithAcus,
+    totalAcus: Number(totalAcus.toFixed(6)),
+  };
+}
+
 export function scopeRuns(
   runs: RunRecord[] | undefined,
   scope: CostScope,
@@ -42,6 +73,8 @@ export interface ModelFamilySummary {
   models: string[];
   runs: number;
   pricedRuns: number;
+  acuRuns: number;
+  totalAcus: number;
   baselineRuns: number;
   governedRuns: number;
   baselinePassed: number;
@@ -96,11 +129,14 @@ export function modelFamilySummaries(
       );
       const baselineCostUsd = meanCost(base);
       const governedCostUsd = meanCost(gov);
+      const acu = acuTelemetrySummary(list);
       return {
         family,
         models: Array.from(new Set(list.map((r) => r.model))).sort(),
         runs: list.length,
         pricedRuns: list.filter(isPricedRun).length,
+        acuRuns: acu.runsWithAcus,
+        totalAcus: acu.totalAcus,
         baselineRuns: base.length,
         governedRuns: gov.length,
         baselinePassed: passed(base),
