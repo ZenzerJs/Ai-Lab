@@ -86,9 +86,14 @@ def _class(pat, pos):
         pos += 1
     ranges = []
     while pos < len(pat) and pat[pos] != "]":
-        if pat[pos] == "\\" and pos + 1 < len(pat) and \
-                pat[pos + 1] in _CLASS_ESCAPES:
-            ranges.extend(_CLASS_ESCAPES[pat[pos + 1]])
+        if pat[pos] == "\\" and pos + 1 < len(pat):
+            esc = pat[pos + 1]
+            if esc in _CLASS_ESCAPES:
+                ranges.extend(_CLASS_ESCAPES[esc])
+            else:
+                # escaped literal: [\n], [\]], [\-] etc.
+                ranges.append((_ESCAPES.get(esc, esc),
+                               _ESCAPES.get(esc, esc)))
             pos += 2
             continue
         lo = pat[pos]
