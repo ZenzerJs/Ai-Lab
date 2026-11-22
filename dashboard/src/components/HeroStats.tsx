@@ -1,5 +1,6 @@
 import React from 'react';
 import { HeadlineBlock } from '../types';
+import { formatSignedCostChange } from '../lib/analytics';
 import { Sparkles, TrendingDown, Cpu, Zap, ShieldCheck } from 'lucide-react';
 import { Badge } from './ui/badge';
 
@@ -90,7 +91,12 @@ export const HeroStats: React.FC<HeroStatsProps> = ({ headline, totalRuns }) => 
 
               <div className="flex items-baseline gap-2.5 my-1">
                 <span className={`text-3xl lg:text-4xl font-black font-mono tracking-tight ${valueColor}`}>
-                  {typeof stat.value === 'number' ? (
+                  {isCost ? (
+                    stat.signed_cost_label ||
+                    (typeof stat.value === 'number'
+                      ? formatSignedCostChange(stat.value)
+                      : stat.value)
+                  ) : typeof stat.value === 'number' ? (
                     `${(stat.value as number) > 0 ? '+' : ''}${stat.value}%`
                   ) : (
                     stat.value

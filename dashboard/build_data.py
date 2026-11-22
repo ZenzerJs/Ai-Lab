@@ -25,7 +25,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import ledger
 import campaign
-from complexity_router import ICM_LITE
+from complexity_router import ICM_LITE, ICM_V2
 
 # Ensure UTF-8 output encoding
 if hasattr(sys.stdout, "reconfigure"):
@@ -35,7 +35,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 OUTPUT_PATH = DASHBOARD_DIR / "public" / "data.json"
 OPS_DB_PATH = WORKSPACE_ROOT / "data" / "ops_exp005.db"
-GOVERNED_ARMS = ("icm-subagents", "icm", "delegation", "governed", ICM_LITE)
+GOVERNED_ARMS = ("icm-subagents", "icm", "delegation", "governed", ICM_V2, ICM_LITE)
 
 
 def _governed_key(arms: Dict[str, Any], preferred: Optional[str] = None) -> Optional[str]:
@@ -260,10 +260,58 @@ def compute_bootstrap_ci(baseline_vals: List[float], icm_vals: List[float], num_
     return [round(lo, 1), round(hi, 1)]
 
 
+def build_declared_benchmarks(
+    tasks: List[Dict[str, Any]],
+    runs: Optional[List[Dict[str, Any]]] = None,
+    benchmarks_dir: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """Cross-check declared benchmarks/BENCH-* directories against measured runs."""
+    root = benchmarks_dir if benchmarks_dir is not None else (WORKSPACE_ROOT / "benchmarks")
+    if not root.exists() or not root.is_dir():
+        return []
+    declared = sorted(
+        p.name for p in root.iterdir() if p.is_dir() and p.name.startswith("BENCH-")
+    )
+    counts: Dict[str, int] = {}
+    if runs is not None:
+        for r in runs:
+            tid = r.get("task_id")
+            if (
+                tid
+                and r.get("source_kind") == "live"
+                and not r.get("is_simulation")
+                and r.get("evidence_status") not in ("unverified", "invalid", "missing")
+            ):
+                counts[tid] = counts.get(tid, 0) + 1
+    else:
+        for t in tasks:
+            tid = t.get("task_id")
+            if (
+                tid
+                and t.get("has_measured_data")
+                and not t.get("is_simulation")
+                and not t.get("is_demo_report")
+            ):
+                measured = t.get("measured_runs_count")
+                counts[tid] = counts.get(tid, 0) + int(
+                    measured if measured is not None else (t.get("total_runs") or 0)
+                )
+    return [
+        {
+            "task_id": tid,
+            "measured_runs": counts.get(tid, 0),
+            "status": "measured" if counts.get(tid, 0) > 0 else "suite present, unmeasured",
+        }
+        for tid in declared
+    ]
+
+
 def build_headline_block(
     tasks: List[Dict[str, Any]],
     cum: Dict[str, Any],
     operational: Optional[Dict[str, Any]] = None,
+    total_runs: Optional[int] = None,
+    priced_runs: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Construct high-impact headline metrics with strict honesty invariants.
@@ -271,6 +319,7 @@ def build_headline_block(
     """
     stats = []
     sentence = None
+    scope = None
 
     # H1: Delta cost per passing task (%)
     # Requires >= 1 task with valid measured data
@@ -281,9 +330,17 @@ def build_headline_block(
     governed_keys = {key for _, key in task_arms if key}
     governed_counts = [counts.get(key, {}) for key in sorted(governed_keys)]
     n_governed = sum(row.get("cost_eligible") or row.get("completed", 0) for row in governed_counts)
+    unique_task_count = len({t.get("task_id") for t in tasks if t.get("task_id")})
+    total_run_count = int(total_runs) if total_runs is not None else int(cum.get("total_runs") or 0)
+    priced_run_count = (
+        int(priced_runs)
+        if priced_runs is not None
+        else int((b_pac.get("cost_eligible") or b_pac.get("completed", 0)) + n_governed)
+    )
     if valid_tasks and cum.get("has_measured_data"):
         b_costs = []
         i_costs = []
+        task_savings_pcts = []
         n_paired_tasks = 0
         for t, gov_key in task_arms:
             # Only tasks whose arms share run_index pairs feed the paired cost
@@ -298,6 +355,10 @@ def build_headline_block(
             if not paired:
                 continue
             n_paired_tasks += 1
+            t_b = sum(b for b, _ in paired)
+            t_g = sum(g for _, g in paired)
+            if t_b > 0:
+                task_savings_pcts.append((t_b - t_g) / t_b * 100.0)
             # Weight the bootstrap by pair, matching cumulative_savings'
             # totals: every matched run counts equally, not every task.
             for b, g in paired:
@@ -307,8 +368,39 @@ def build_headline_block(
         tot_b = cum.get("total_baseline_cost_usd")
         tot_i = cum.get("total_icm_cost_usd")
         if tot_b is not None and tot_i is not None and tot_b > 0:
+            def _signed_cost(savings_pct: float) -> str:
+                if savings_pct < 0:
+                    return f"+{abs(savings_pct):.1f}% cost"
+                if savings_pct > 0:
+                    return f"-{abs(savings_pct):.1f}% savings"
+                return "0.0% cost"
+
             pct = round((tot_b - tot_i) / tot_b * 100.0, 1)
+            cost_delta_pct = round((tot_i - tot_b) / tot_b * 100.0, 1)
+            signed_cost_label = _signed_cost(pct)
+            macro_avg_pct = (
+                round(sum(task_savings_pcts) / len(task_savings_pcts), 1)
+                if task_savings_pcts
+                else None
+            )
+            macro_note = (
+                f"macro_average across {len(task_savings_pcts)} tasks: {_signed_cost(macro_avg_pct)}"
+                if macro_avg_pct is not None
+                else "macro_average unavailable"
+            )
             ci = compute_bootstrap_ci(b_costs, i_costs)
+            scope = {
+                "unique_task_count": unique_task_count,
+                "paired_priced_task_count": n_paired_tasks,
+                "total_run_count": total_run_count,
+                "priced_run_count": priced_run_count,
+                "pooling_method": "pooled_sum",
+                "macro_average_savings_pct": macro_avg_pct,
+                "pooling_note": f"pooled_sum across matched priced pairs ({macro_note})",
+                "signed_cost_label": signed_cost_label,
+                "cost_delta_pct": cost_delta_pct,
+                "savings_pct": pct,
+            }
             stats.append({
                 "id": "cost_reduction",
                 "label": "Cost Reduction per Task",
@@ -321,6 +413,12 @@ def build_headline_block(
                 "n_tasks": n_paired_tasks,
                 "source": "live CLI",
                 "ci95": ci,
+                "cost_delta_pct": cost_delta_pct,
+                "signed_cost_label": signed_cost_label,
+                "pooling_method": "pooled_sum",
+                "macro_average_savings_pct": macro_avg_pct,
+                "priced_run_count": priced_run_count,
+                "total_run_count": total_run_count,
             })
 
     # H2: Pass / Defect rate (only emit when defect_runs is genuinely tracked)
@@ -397,15 +495,19 @@ def build_headline_block(
     # Construct descriptive sentence
     if stats:
         first = stats[0]
-        if first["id"] == "cost_reduction":
-            val = first["value"]
-            sign_word = "reduced" if float(val) > 0 else "increased"
-            sentence = f"Across {first['n_tasks']} live-verified tasks, the ICM harness {sign_word} task cost by {abs(float(val))}% with strict provenance assertions."
+        if first["id"] == "cost_reduction" and scope is not None:
+            sentence = (
+                f"Across {scope['unique_task_count']} tasks ({scope['total_run_count']} runs; "
+                f"{scope['priced_run_count']} priced runs across {scope['paired_priced_task_count']} paired tasks; "
+                f"{scope['pooling_note']}), the ICM harness resulted in "
+                f"{scope['signed_cost_label']} ({first['baseline']} vs {first['icm']})."
+            )
         elif first["id"] == "defect_rate":
             sentence = f"Across operational runs, the ICM harness delivered {first['icm']} compared to {first['baseline']} in baseline arm."
 
     return {
         "sentence": sentence,
+        "scope": scope,
         "stats": stats,
     }
 
@@ -740,7 +842,15 @@ def build_data_payload(
             campaign_rep = None
 
         ops_block = build_operational_block()
-        headline_block = build_headline_block(cum.get("tasks", []), cum, operational=ops_block)
+        priced_runs_total = sum(1 for r in processed_runs if r.get("cost_usd") is not None)
+        headline_block = build_headline_block(
+            cum.get("tasks", []),
+            cum,
+            operational=ops_block,
+            total_runs=len(processed_runs),
+            priced_runs=priced_runs_total,
+        )
+        declared_benchmarks = build_declared_benchmarks(cum.get("tasks", []), processed_runs)
 
         quality_block = None
         try:
@@ -769,6 +879,7 @@ def build_data_payload(
             "is_demo_report": is_demo_report,
             "is_simulation": False,
             "headline": headline_block,
+            "declared_benchmarks": declared_benchmarks,
             "cumulative": cum,
             "tasks": cum.get("tasks", []),
             "runs": processed_runs,
