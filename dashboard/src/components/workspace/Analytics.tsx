@@ -9,6 +9,7 @@ import {
 import {
   applyFdrToRows,
   CostScope,
+  costSourceBreakdown,
   isPricedRun,
   matchedArmComparison,
   MIN_PAIRS_FOR_EFFECT,
@@ -77,6 +78,7 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
     () => runs.filter(isPricedRun).length,
     [runs],
   );
+  const costBreakdown = useMemo(() => costSourceBreakdown(runs), [runs]);
   const share = useMemo(() => pricedShare(runs), [runs]);
   const primaryMetric = useMemo(() => primaryEffectMetric(share), [share]);
   const families = useMemo(
@@ -106,7 +108,7 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
         const costStats = pairedDiffStats(costMatch.pairs);
         const tokenStats = pairedDiffStats(tokenMatch.pairs);
         let chosen: [PairedStats | null, PairMatchResult, "Cost" | "Tokens"];
-        if (scope === "priced") {
+        if (scope === "priced" || scope === "billed_direct" || scope === "estimated_acu_derived") {
           chosen = [costStats, costMatch, "Cost"];
         } else if (scope === "unpriced") {
           chosen = [tokenStats, tokenMatch, "Tokens"];
@@ -169,7 +171,9 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
             onChange={(event) => setScope(event.target.value as CostScope)}
           >
             <option value="all">All runs</option>
-            <option value="priced">Priced only</option>
+            <option value="priced">Priced only (Direct + ACU)</option>
+            <option value="billed_direct">Direct Billed only</option>
+            <option value="estimated_acu_derived">ACU Derived only</option>
             <option value="unpriced">Unpriced only</option>
           </select>
         </label>
@@ -186,12 +190,21 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
           <strong>{scoped.length}</strong>
         </div>
         <div>
-          <span>Priced (cost-complete)</span>
-          <strong>{pricedCount}</strong>
+          <span>Direct Billed</span>
+          <strong>{costBreakdown.directBilled}</strong>
+        </div>
+        <div>
+          <span>ACU Derived</span>
+          <strong>
+            {costBreakdown.acuDerived}
+            {costBreakdown.totalAcus > 0
+              ? ` (${costBreakdown.totalAcus.toFixed(2)} ACU)`
+              : ""}
+          </strong>
         </div>
         <div>
           <span>Unpriced scale runs</span>
-          <strong>{runs.length - pricedCount}</strong>
+          <strong>{costBreakdown.unpriced}</strong>
         </div>
         <div>
           <span>Priced share</span>
@@ -401,6 +414,7 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
                 <th scope="col">Pass (Base / Gov)</th>
                 <th scope="col">Mean tokens (Base → Gov)</th>
                 <th scope="col">Δ tokens</th>
+                <th scope="col">Cost basis</th>
                 <th scope="col">Priced USD (Base → Gov)</th>
                 <th scope="col">Savings</th>
               </tr>
@@ -439,6 +453,26 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
                       </span>
                     ) : (
                       "—"
+                    )}
+                  </td>
+                  <td>
+                    <span
+                      className={`badge ${
+                        f.costBasis === "Direct Billed"
+                          ? "badge-green"
+                          : f.costBasis === "ACU Derived"
+                            ? "badge-blue"
+                            : f.costBasis === "Direct Billed + ACU Derived"
+                              ? "badge-purple"
+                              : "badge-neutral"
+                      }`}
+                    >
+                      {f.costBasis}
+                    </span>
+                    {f.totalAcus > 0 && (
+                      <span className="cell-subtitle">
+                        {f.totalAcus.toFixed(2)} ACU
+                      </span>
                     )}
                   </td>
                   <td>

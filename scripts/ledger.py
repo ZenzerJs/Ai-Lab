@@ -29,6 +29,21 @@ DEFAULT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB_PATH = DEFAULT_ROOT / "data" / "usage.db"
 DEFAULT_PRICING_PATH = DEFAULT_ROOT / "config" / "PRICING.json"
 
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from pricing import (  # noqa: E402
+    COST_SOURCE_BILLED_DIRECT,
+    COST_SOURCE_ESTIMATED_ACU_DERIVED,
+    COST_SOURCE_UNAVAILABLE,
+    DEFAULT_DEVIN_ACU_USD_RATE,
+    calculate_acu_cost,
+    classify_cost_source,
+    get_devin_acu_usd_rate,
+    validate_acus_consumed,
+)
+
 # Trailing effort levels telemetry appends to a base model id
 # (e.g. gemini-4-argon-low -> gemini-4-argon).
 EFFORT_SUFFIXES = frozenset({"low", "medium", "high", "xhigh"})
@@ -90,6 +105,10 @@ PUBLIC_RUN_KEYS = {
     "exclusion_reasons",
     "cost_status",
     "cost_usd",
+    "cost_source",
+    "acus_consumed",
+    "acu_usd_rate",
+    "estimated_cost_usd",
     "is_simulation",
     "execution_status",
     "verification_status",
@@ -117,6 +136,13 @@ def to_public_run(run: Dict[str, Any], sanitize: bool = True) -> Dict[str, Any]:
 
     out.setdefault("source_kind", run.get("source_kind") or "unknown")
     out.setdefault("evidence_status", run.get("evidence_status") or "unverified")
+    out["cost_source"] = classify_cost_source(out)
+    if (
+        out["cost_source"] == COST_SOURCE_ESTIMATED_ACU_DERIVED
+        and out.get("estimated_cost_usd") is None
+        and out.get("cost_usd") is not None
+    ):
+        out["estimated_cost_usd"] = out["cost_usd"]
 
     if isinstance(out.get("exclusion_reasons"), str):
         try:
@@ -369,6 +395,8 @@ def validate_and_parse_telemetry(
     resolved_adapter_name = adapter_name
     num_turns = 0
     duration_seconds = 0.0
+    acus_consumed: Optional[float] = None
+    devin_session_id: Optional[str] = None
 
     cumulative_usage: Optional[Dict[str, Any]] = None
     turn_usages: List[Dict[str, Any]] = []
@@ -413,6 +441,34 @@ def validate_and_parse_telemetry(
                 resolved_adapter_name = str(event["usage"]["adapter_name"])
             elif "cache_accounting" in event["usage"] and event["usage"]["cache_accounting"]:
                 resolved_adapter_name = str(event["usage"]["cache_accounting"])
+
+        # Extract Devin session ACU telemetry when present in NDJSON events
+        raw_devin_id = (
+            event.get("devin_session_id")
+            or event.get("devin_id")
+            or (
+                event["devin_session"].get("session_id") or event["devin_session"].get("devin_id")
+                if isinstance(event.get("devin_session"), dict)
+                else None
+            )
+        )
+        if raw_devin_id:
+            devin_session_id = str(raw_devin_id)
+
+        raw_acus = event.get("acus_consumed")
+        if raw_acus is None and isinstance(event.get("usage"), dict):
+            raw_acus = event["usage"].get("acus_consumed")
+        if raw_acus is None and isinstance(event.get("devin_session"), dict):
+            raw_acus = event["devin_session"].get("acus_consumed")
+        if raw_acus is not None:
+            try:
+                acus_consumed = validate_acus_consumed(raw_acus)
+            except ValueError as exc:
+                raise TelemetryValidationError(
+                    f"Line {idx}: Invalid 'acus_consumed': {exc}",
+                    line_number=idx,
+                    event_data=event,
+                ) from exc
 
         if "run_index" in event and event["run_index"] is not None:
             try:
@@ -689,6 +745,8 @@ def validate_and_parse_telemetry(
         "adapter_name": resolved_adapter_name,
         "field_completeness": field_completeness,
         "tool_metrics": tool_metrics,
+        "acus_consumed": acus_consumed,
+        "devin_session_id": devin_session_id,
     }
 
 
@@ -845,9 +903,16 @@ def evaluate_run_eligibility(
     # Cost completeness evaluation
     input_tokens = run.get("input_tokens")
     output_tokens = run.get("output_tokens")
+    acus_consumed = run.get("acus_consumed")
+    cost_source = classify_cost_source(run)
+    is_acu_derived = (
+        acus_consumed is not None
+        and cost_source == COST_SOURCE_ESTIMATED_ACU_DERIVED
+        and cost_status not in ("unavailable", "incomplete", "unknown")
+    )
     is_cost_complete = True
 
-    if input_tokens is None or output_tokens is None:
+    if not is_acu_derived and (input_tokens is None or output_tokens is None):
         cost_reasons.append("missing_usage_telemetry")
         is_cost_complete = False
 
@@ -970,6 +1035,10 @@ def init_db(conn: sqlite3.Connection) -> None:
                     import_id TEXT,
                     cost_status TEXT NOT NULL DEFAULT 'unknown',
                     cost_usd REAL,
+                    cost_source TEXT,
+                    acus_consumed REAL,
+                    acu_usd_rate REAL,
+                    estimated_cost_usd REAL,
                     is_simulation INTEGER NOT NULL DEFAULT 0,
                     notes TEXT,
                     execution_status TEXT NOT NULL DEFAULT 'completed',
@@ -1042,6 +1111,14 @@ def init_db(conn: sqlite3.Connection) -> None:
                     conn.execute("ALTER TABLE runs ADD COLUMN max_consecutive_tool_streak INTEGER")
                 if "loop_detected" not in cols:
                     conn.execute("ALTER TABLE runs ADD COLUMN loop_detected INTEGER")
+                if "cost_source" not in cols:
+                    conn.execute("ALTER TABLE runs ADD COLUMN cost_source TEXT")
+                if "acus_consumed" not in cols:
+                    conn.execute("ALTER TABLE runs ADD COLUMN acus_consumed REAL")
+                if "acu_usd_rate" not in cols:
+                    conn.execute("ALTER TABLE runs ADD COLUMN acu_usd_rate REAL")
+                if "estimated_cost_usd" not in cols:
+                    conn.execute("ALTER TABLE runs ADD COLUMN estimated_cost_usd REAL")
 
         with conn:
             conn.execute("""
@@ -1175,6 +1252,10 @@ def migrate_db(conn: sqlite3.Connection) -> bool:
                 import_id TEXT,
                 cost_status TEXT NOT NULL DEFAULT 'unknown',
                 cost_usd REAL,
+                cost_source TEXT,
+                acus_consumed REAL,
+                acu_usd_rate REAL,
+                estimated_cost_usd REAL,
                 is_simulation INTEGER NOT NULL DEFAULT 0,
                 notes TEXT,
                 execution_status TEXT NOT NULL DEFAULT 'completed',
@@ -1394,28 +1475,44 @@ def calculate_cost_detailed(
     db_path: Optional[Path] = None,
     is_simulation: bool = False,
     is_partial: bool = False,
+    acus_consumed: Optional[float] = None,
+    acu_usd_rate: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
-    Compute cache-aware USD cost for token profile with provider semantics.
-    Enforces ACC-01 to ACC-07 and TEL-02.
+    Compute cache-aware USD cost for token profile with provider semantics,
+    or derive estimated_cost_usd from Devin ACUs when direct token pricing
+    is unavailable. Enforces ACC-01 to ACC-07 and TEL-02.
     """
-    if input_tokens is None or output_tokens is None:
+    validated_acus = validate_acus_consumed(acus_consumed)
+
+    def _acu_or_unavailable(reason: str, rates_obj: Any = None) -> Dict[str, Any]:
+        if validated_acus is not None:
+            acu_res = calculate_acu_cost(
+                validated_acus,
+                acu_usd_rate=acu_usd_rate,
+                is_simulation=is_simulation,
+                is_partial=is_partial,
+            )
+            acu_res["rates"] = rates_obj
+            return acu_res
         return {
             "cost_usd": None,
+            "estimated_cost_usd": None,
+            "acus_consumed": None,
+            "acu_usd_rate": None,
             "cost_status": "unavailable",
-            "reasons": ["missing_usage_telemetry"],
-            "rates": None,
+            "cost_source": COST_SOURCE_UNAVAILABLE,
+            "reasons": [reason],
+            "rates": rates_obj,
         }
+
+    if input_tokens is None or output_tokens is None:
+        return _acu_or_unavailable("missing_usage_telemetry")
 
     try:
         rates = get_pricing(model, conn=conn, db_path=db_path)
     except ValueError:
-        return {
-            "cost_usd": None,
-            "cost_status": "unavailable",
-            "reasons": ["model_rate_absent"],
-            "rates": None,
-        }
+        return _acu_or_unavailable("model_rate_absent")
 
     thinking = thinking_tokens or 0
     thinking_cost = 0.0
@@ -1427,12 +1524,7 @@ def calculate_cost_detailed(
         elif thinking_rate is not None:
             thinking_cost = thinking * float(thinking_rate)
         else:
-            return {
-                "cost_usd": None,
-                "cost_status": "unavailable",
-                "reasons": ["thinking_token_pricing_unspecified"],
-                "rates": rates,
-            }
+            return _acu_or_unavailable("thinking_token_pricing_unspecified", rates)
 
     cache_read = cache_read_tokens or 0
     inp = input_tokens or 0
@@ -1446,12 +1538,7 @@ def calculate_cost_detailed(
         input_cost = inp * rates["input_usd_per_mtok"]
         cache_cost = cache_read * rates["cache_read_usd_per_mtok"]
     else:
-        return {
-            "cost_usd": None,
-            "cost_status": "unavailable",
-            "reasons": [f"unknown_cache_accounting_{cache_mode}"],
-            "rates": rates,
-        }
+        return _acu_or_unavailable(f"unknown_cache_accounting_{cache_mode}", rates)
 
     out = output_tokens or 0
     output_cost = out * rates["output_usd_per_mtok"]
@@ -1471,7 +1558,11 @@ def calculate_cost_detailed(
 
     return {
         "cost_usd": cost_usd,
+        "estimated_cost_usd": None,
+        "acus_consumed": validated_acus,
+        "acu_usd_rate": None,
         "cost_status": cost_status,
+        "cost_source": COST_SOURCE_BILLED_DIRECT,
         "reasons": reasons,
         "rates": rates,
     }
@@ -1587,6 +1678,10 @@ def record_run(
     import_id: Optional[str] = None,
     cost_status: Optional[str] = None,
     cost_usd: Optional[float] = None,
+    cost_source: Optional[str] = None,
+    acus_consumed: Optional[float] = None,
+    acu_usd_rate: Optional[float] = None,
+    estimated_cost_usd: Optional[float] = None,
     is_simulation: bool = False,
     notes: Optional[str] = None,
     execution_status: str = "completed",
@@ -1654,8 +1749,9 @@ def record_run(
             exclusion_reasons.append("evaluator_error")
 
     # Calculate cost if not provided
+    validated_acus = validate_acus_consumed(acus_consumed)
     is_part = (cost_status == "incomplete") or (exclusion_reasons is not None and "partial_telemetry" in exclusion_reasons)
-    if cost_usd is None and input_tokens is not None:
+    if cost_usd is None and (input_tokens is not None or validated_acus is not None):
         cost_calc = calculate_cost_detailed(
             input_tokens=input_tokens,
             cache_read_tokens=cache_read_tokens,
@@ -1666,10 +1762,18 @@ def record_run(
             db_path=db_path,
             is_simulation=is_simulation,
             is_partial=is_part,
+            acus_consumed=validated_acus,
+            acu_usd_rate=acu_usd_rate,
         )
         cost_usd = cost_calc["cost_usd"]
         if not cost_status:
             cost_status = cost_calc["cost_status"]
+        if not cost_source:
+            cost_source = cost_calc.get("cost_source")
+        if acu_usd_rate is None and cost_calc.get("acu_usd_rate") is not None:
+            acu_usd_rate = cost_calc["acu_usd_rate"]
+        if estimated_cost_usd is None and cost_calc.get("estimated_cost_usd") is not None:
+            estimated_cost_usd = cost_calc["estimated_cost_usd"]
         if cost_calc["reasons"]:
             if exclusion_reasons is None:
                 exclusion_reasons = []
@@ -1677,9 +1781,27 @@ def record_run(
                 if r not in exclusion_reasons:
                     exclusion_reasons.append(r)
     elif cost_status is None:
-        cost_status = "unavailable" if input_tokens is None else "usage_estimate"
+        if validated_acus is not None and cost_usd is not None:
+            cost_status = COST_SOURCE_ESTIMATED_ACU_DERIVED
+        else:
+            cost_status = "unavailable" if input_tokens is None else "usage_estimate"
 
-    if input_tokens is None:
+    if not cost_source:
+        cost_source = classify_cost_source(
+            {
+                "cost_status": cost_status,
+                "cost_usd": cost_usd,
+                "acus_consumed": validated_acus,
+                "input_tokens": input_tokens,
+            }
+        )
+    if cost_source == COST_SOURCE_ESTIMATED_ACU_DERIVED:
+        if estimated_cost_usd is None and cost_usd is not None:
+            estimated_cost_usd = cost_usd
+        if acu_usd_rate is None and validated_acus is not None:
+            acu_usd_rate = get_devin_acu_usd_rate()
+
+    if input_tokens is None and validated_acus is None:
         if exclusion_reasons is None:
             exclusion_reasons = []
         if "missing_usage_telemetry" not in exclusion_reasons:
@@ -1696,7 +1818,59 @@ def record_run(
 
     with conn:
         if "source_kind" in cols:
-            if "execution_status" in cols and "tool_calls_count" in cols:
+            if "execution_status" in cols and "tool_calls_count" in cols and "acus_consumed" in cols:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO runs (
+                        task_id, arm, model, run_index, timestamp,
+                        input_tokens, output_tokens, thinking_tokens, cache_read_tokens,
+                        total_tokens, num_turns, duration_seconds,
+                        source_kind, evidence_status, exclusion_reasons,
+                        evidence_ref, evidence_hash, import_id,
+                        cost_status, cost_usd, cost_source, acus_consumed, acu_usd_rate, estimated_cost_usd,
+                        is_simulation, notes,
+                        execution_status, verification_status, manifest_id, evaluator_hash,
+                        tool_calls_count, tool_errors_count, max_consecutive_tool_streak, loop_detected
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        task_id,
+                        arm,
+                        model,
+                        run_index,
+                        timestamp,
+                        input_tokens,
+                        output_tokens,
+                        thinking_tokens,
+                        cache_read_tokens,
+                        total_tokens,
+                        int(num_turns),
+                        float(duration_seconds),
+                        source_kind,
+                        evidence_status,
+                        reasons_json,
+                        evidence_ref,
+                        evidence_hash,
+                        import_id,
+                        cost_status,
+                        cost_usd,
+                        cost_source,
+                        validated_acus,
+                        acu_usd_rate,
+                        estimated_cost_usd,
+                        1 if is_simulation else 0,
+                        notes,
+                        execution_status,
+                        verification_status,
+                        manifest_id,
+                        evaluator_hash,
+                        tool_calls_count,
+                        tool_errors_count,
+                        max_consecutive_tool_streak,
+                        loop_val,
+                    ),
+                )
+            elif "execution_status" in cols and "tool_calls_count" in cols:
                 cursor = conn.execute(
                     """
                     INSERT INTO runs (
@@ -2226,9 +2400,15 @@ def import_run(
         db_path=db_path,
         is_simulation=bool(run_dict.get("is_simulation", 0)),
         is_partial=bool(run_dict.get("is_partial", False)),
+        acus_consumed=run_dict.get("acus_consumed"),
+        acu_usd_rate=run_dict.get("acu_usd_rate"),
     )
     cost_usd = run_dict.get("cost_usd") if run_dict.get("cost_usd") is not None else cost_info["cost_usd"]
     cost_status = run_dict.get("cost_status") or cost_info["cost_status"]
+    cost_source = run_dict.get("cost_source") or cost_info.get("cost_source")
+    acus_consumed = run_dict.get("acus_consumed")
+    acu_usd_rate = run_dict.get("acu_usd_rate") if run_dict.get("acu_usd_rate") is not None else cost_info.get("acu_usd_rate")
+    estimated_cost_usd = run_dict.get("estimated_cost_usd") if run_dict.get("estimated_cost_usd") is not None else cost_info.get("estimated_cost_usd")
     if cost_info["reasons"]:
         for r in cost_info["reasons"]:
             if r not in exclusion_reasons:
@@ -2272,6 +2452,10 @@ def import_run(
         import_id=import_id,
         cost_status=cost_status,
         cost_usd=cost_usd,
+        cost_source=cost_source,
+        acus_consumed=acus_consumed,
+        acu_usd_rate=acu_usd_rate,
+        estimated_cost_usd=estimated_cost_usd,
         is_simulation=bool(run_dict.get("is_simulation", 0)),
         notes=run_dict.get("notes"),
         execution_status=run_dict.get("execution_status") or "completed",
@@ -2378,6 +2562,8 @@ def _compute_task_summary_with_rows(
             conn=conn,
             is_simulation=is_sim or bool(r.get("is_simulation", 0)),
             is_partial=is_row_partial,
+            acus_consumed=None if is_sim else r.get("acus_consumed"),
+            acu_usd_rate=None if is_sim else r.get("acu_usd_rate"),
         )
         if not is_sim and r.get("cost_status") in ("unavailable", "incomplete"):
             pass
@@ -2386,6 +2572,15 @@ def _compute_task_summary_with_rows(
 
         if r.get("cost_usd") is None or is_sim:
             r["cost_usd"] = cost_info["cost_usd"]
+        if not is_sim:
+            r["cost_source"] = r.get("cost_source") or cost_info.get("cost_source") or classify_cost_source(r)
+            if r["cost_source"] == COST_SOURCE_ESTIMATED_ACU_DERIVED:
+                if r.get("estimated_cost_usd") is None and r.get("cost_usd") is not None:
+                    r["estimated_cost_usd"] = r["cost_usd"]
+                if r.get("acu_usd_rate") is None and cost_info.get("acu_usd_rate") is not None:
+                    r["acu_usd_rate"] = cost_info["acu_usd_rate"]
+        else:
+            r["cost_source"] = cost_info.get("cost_source") or classify_cost_source(r)
 
         elig = evaluate_run_eligibility(r, capture_policy=capture_policy)
         r["is_eligible"] = elig["is_eligible"]

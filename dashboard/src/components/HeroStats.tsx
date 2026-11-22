@@ -85,7 +85,7 @@ export const HeroStats: React.FC<HeroStatsProps> = ({ headline, totalRuns }) => 
                   </span>
                 </div>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-black/40 border border-white/10 text-gray-400 font-mono">
-                  {stat.source}
+                  {isCost && stat.cost_basis ? `${stat.source} · ${stat.cost_basis}` : stat.source}
                 </span>
               </div>
 

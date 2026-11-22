@@ -1,4 +1,9 @@
 {
+  "acu_defaults": {
+    "devin_acu_usd_rate": 2.25,
+    "currency": "USD",
+    "note": "Default reference USD-per-ACU conversion rate for deriving estimated_cost_usd on Devin API sessions. Override via DEVIN_ACU_USD_RATE."
+  },
   "models": {
     "claude-fable-5-2": {
       "input_usd_per_mtok": 8.00,

@@ -45,6 +45,8 @@ export type ScaleMode = '1x' | '1m' | '10m' | '100m';
 
 export type ArmName = 'baseline' | 'icm' | 'icm_lite' | 'icm-subagents' | 'delegation' | (string & {});
 
+export type CostSource = 'billed_direct' | 'estimated_acu_derived' | 'unavailable';
+
 export interface RunRecord {
   id: number;
   task_id: string;
@@ -60,7 +62,11 @@ export interface RunRecord {
   num_turns: number;
   duration_seconds: number;
   cost_usd: number | null;
-  cost_status?: 'usage_estimate' | 'simulation' | 'incomplete' | 'unavailable' | 'unknown' | string;
+  cost_status?: 'usage_estimate' | 'estimated_acu_derived' | 'simulation' | 'incomplete' | 'unavailable' | 'unknown' | string;
+  cost_source?: CostSource | string;
+  acus_consumed?: number | null;
+  acu_usd_rate?: number | null;
+  estimated_cost_usd?: number | null;
   source_kind?: 'live' | 'fixture' | 'imported' | 'unknown' | string;
   evidence_status?: 'verified' | 'unverified' | 'invalid' | 'missing' | string;
   exclusion_reasons?: string[];
@@ -277,6 +283,7 @@ export interface HeadlineStat {
   n_icm: number;
   n_tasks: number;
   source: string;
+  cost_basis?: string | null;
   ci95?: [number, number] | null;
   cost_delta_pct?: number | null;
   signed_cost_label?: string | null;
@@ -291,6 +298,10 @@ export interface HeadlineScope {
   paired_priced_task_count: number;
   total_run_count: number;
   priced_run_count: number;
+  billed_direct_run_count?: number;
+  estimated_acu_derived_run_count?: number;
+  unpriced_run_count?: number;
+  cost_basis?: string;
   pooling_method: string;
   macro_average_savings_pct?: number | null;
   pooling_note: string;
@@ -383,5 +394,10 @@ export interface DashboardPayload {
   runs: RunRecord[];
   timeline: TimelinePoint[];
   pricing: PricingRecord[];
+  acu_pricing?: {
+    devin_acu_usd_rate: number;
+    default_rate: number;
+    currency: string;
+  };
   cascade?: ModelCascadeItem[];
 }

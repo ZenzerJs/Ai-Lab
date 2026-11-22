@@ -29,6 +29,9 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -49,10 +52,67 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import stat
 import ledger
+import pricing
 from complexity_router import MODES, RoutingDecision, build_mode_prompt, classify_mode, resolve_mode
+
+DEVIN_API_BASE_URL = "https://api.devin.ai"
 
 DEFAULT_FIXTURES_PATH = WORKSPACE_ROOT / "experiments" / "fixtures" / "mock_stream.ndjson"
 DEFAULT_EVIDENCE_DIR = WORKSPACE_ROOT / "experiments" / "evidence"
+
+
+def extract_acus_consumed(session_payload: Mapping[str, Any]) -> Optional[float]:
+    """Extract and validate `acus_consumed` from a Devin session API payload."""
+    if not isinstance(session_payload, Mapping):
+        raise ValueError(f"Expected Devin session payload dict, got {type(session_payload).__name__}")
+    raw = session_payload.get("acus_consumed")
+    if raw is None and isinstance(session_payload.get("usage"), Mapping):
+        raw = session_payload["usage"].get("acus_consumed")
+    if raw is None and isinstance(session_payload.get("session"), Mapping):
+        raw = session_payload["session"].get("acus_consumed")
+    return pricing.validate_acus_consumed(raw)
+
+
+def fetch_devin_session_acus(
+    devin_id: str,
+    org_id: Optional[str] = None,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+    timeout: float = 15.0,
+) -> Optional[float]:
+    """Fetch `acus_consumed` from `GET /v3/organizations/{org_id}/sessions/{devin_id}`.
+
+    Reads `DEVIN_ORG_ID`, `DEVIN_API_KEY`, and `DEVIN_API_BASE_URL` from the
+    environment when omitted. Returns `None` if the API key is not configured
+    or if the session payload omits `acus_consumed`.
+    """
+    session_id = str(devin_id or "").strip()
+    if not session_id:
+        raise ValueError("devin_id must be a non-empty string")
+    resolved_org = str(org_id or os.environ.get("DEVIN_ORG_ID") or "").strip()
+    if not resolved_org:
+        raise ValueError("org_id (or DEVIN_ORG_ID) is required to query Devin session telemetry")
+    resolved_key = str(api_key or os.environ.get("DEVIN_API_KEY") or "").strip()
+    if not resolved_key:
+        return None
+
+    api_root = str(base_url or os.environ.get("DEVIN_API_BASE_URL") or DEVIN_API_BASE_URL).rstrip("/")
+    url = (
+        f"{api_root}/v3/organizations/{urllib.parse.quote(resolved_org, safe='')}"
+        f"/sessions/{urllib.parse.quote(session_id, safe='')}"
+    )
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {resolved_key}",
+            "Accept": "application/json",
+        },
+        method="GET",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw_body = resp.read().decode("utf-8")
+    payload = json.loads(raw_body)
+    return extract_acus_consumed(payload)
 
 SENSITIVE_ENV_PATTERNS = ("KEY", "TOKEN", "SECRET", "PASS", "CREDENTIAL", "AUTH")
 
@@ -1061,6 +1121,8 @@ class ManualExecutionAdapter:
         telemetry_stream: Optional[List[str]] = None,
         model: Optional[str] = None,
         manifest_id: Optional[str] = None,
+        acus_consumed: Optional[float] = None,
+        acu_usd_rate: Optional[float] = None,
         db_path: Optional[Path] = None,
         conn: Optional[sqlite3.Connection] = None,
     ) -> Dict[str, Any]:
@@ -1074,14 +1136,17 @@ class ManualExecutionAdapter:
 
         # 2. Parse telemetry if supplied, otherwise usage and cost are unavailable
         exclusion_reasons = []
+        resolved_acus = pricing.validate_acus_consumed(acus_consumed)
         if telemetry_stream:
             parsed = ledger.validate_and_parse_telemetry(telemetry_stream)
             u = parsed["usage"]
             num_turns = parsed["num_turns"]
             duration = parsed["duration_seconds"]
+            if resolved_acus is None:
+                resolved_acus = parsed.get("acus_consumed")
             cost_status = None
         else:
-            # RUN-11: Lacks usage telemetry -> None (unknown), cost unavailable
+            # RUN-11: Lacks usage telemetry -> None (unknown), cost unavailable unless ACUs supplied
             u = {
                 "input_tokens": None,
                 "output_tokens": None,
@@ -1091,8 +1156,11 @@ class ManualExecutionAdapter:
             }
             num_turns = 1
             duration = 0.0
-            cost_status = "unavailable"
-            exclusion_reasons.append("missing_usage_telemetry")
+            if resolved_acus is not None:
+                cost_status = None
+            else:
+                cost_status = "unavailable"
+                exclusion_reasons.append("missing_usage_telemetry")
 
         if verif.reasons:
             for r in verif.reasons:
@@ -1118,6 +1186,8 @@ class ManualExecutionAdapter:
             evidence_status="unverified" if not telemetry_stream else "verified",
             exclusion_reasons=exclusion_reasons,
             cost_status=cost_status,
+            acus_consumed=resolved_acus,
+            acu_usd_rate=acu_usd_rate,
             execution_status="completed",
             verification_status=verif.verification_status,
             manifest_id=manifest_id,
@@ -1686,6 +1756,11 @@ def run_benchmark_live(
     db_path: Optional[Path] = None,
     workspace_root: Optional[Path] = None,
     mode: Optional[str] = None,
+    devin_session_id: Optional[str] = None,
+    devin_org_id: Optional[str] = None,
+    devin_api_key: Optional[str] = None,
+    acus_consumed: Optional[float] = None,
+    acu_usd_rate: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Execute a live benchmark task using the agy CLI in an isolated DisposableWorkspace.
@@ -1858,6 +1933,29 @@ def run_benchmark_live(
         duration_seconds = parsed["duration_seconds"] if parsed["duration_seconds"] > 0 else wall_duration
         num_turns = parsed["num_turns"]
 
+        resolved_acus = pricing.validate_acus_consumed(acus_consumed)
+        if resolved_acus is None:
+            resolved_acus = parsed.get("acus_consumed")
+        if resolved_acus is None:
+            resolved_devin_id = (
+                devin_session_id
+                or parsed.get("devin_session_id")
+                or os.environ.get("DEVIN_SESSION_ID")
+            )
+            resolved_org = devin_org_id or os.environ.get("DEVIN_ORG_ID")
+            resolved_key = devin_api_key or os.environ.get("DEVIN_API_KEY")
+            if resolved_devin_id and resolved_org and resolved_key:
+                try:
+                    resolved_acus = fetch_devin_session_acus(
+                        devin_id=resolved_devin_id,
+                        org_id=resolved_org,
+                        api_key=resolved_key,
+                    )
+                except (urllib.error.URLError, ValueError, json.JSONDecodeError, OSError) as exc:
+                    warnings.warn(
+                        f"Failed to fetch Devin session ACU telemetry for {resolved_devin_id}: {exc}"
+                    )
+
         post_hash = workspace.snapshot_tree_hash()
 
         scope = scope_telemetry(workspace.path, snapshot_dir, metadata)
@@ -1913,6 +2011,8 @@ def run_benchmark_live(
                 evidence_ref=evidence_ref,
                 evidence_hash=evidence_hash,
                 cost_status=cost_status,
+                acus_consumed=resolved_acus,
+                acu_usd_rate=acu_usd_rate,
                 execution_status=execution_status,
                 verification_status=verif_status,
                 evaluator_hash=ev_hash,
@@ -1936,7 +2036,13 @@ def run_benchmark_live(
                 scope=scope,
             )
 
-            row = dict(conn.execute("SELECT cost_status, cost_usd FROM runs WHERE id = ?", (run_id,)).fetchone())
+            row = dict(
+                conn.execute(
+                    "SELECT cost_status, cost_usd, cost_source, acus_consumed, acu_usd_rate, estimated_cost_usd "
+                    "FROM runs WHERE id = ?",
+                    (run_id,),
+                ).fetchone()
+            )
         finally:
             conn.close()
 
@@ -1951,6 +2057,10 @@ def run_benchmark_live(
             "verification": verif,
             "cost_status": row["cost_status"],
             "cost_usd": row["cost_usd"],
+            "cost_source": row["cost_source"],
+            "acus_consumed": row["acus_consumed"],
+            "acu_usd_rate": row["acu_usd_rate"],
+            "estimated_cost_usd": row["estimated_cost_usd"],
             "usage": usage,
             "tool_metrics": tool_metrics,
             "evidence_ref": evidence_ref,
