@@ -14,7 +14,6 @@ manual import adapters:
 """
 
 import argparse
-import ast
 import copy
 from contextlib import contextmanager
 import dataclasses
@@ -50,7 +49,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import stat
 import ledger
-from complexity_router import ICM_V2, MODES, RoutingDecision, build_mode_prompt, classify_mode, count_ast_symbols, resolve_mode
+from complexity_router import ICM_V2, MODES, RoutingDecision, build_mode_prompt, classify_mode, count_ast_symbols, extract_ast_symbol_spans, resolve_mode
 
 DEFAULT_FIXTURES_PATH = WORKSPACE_ROOT / "experiments" / "fixtures" / "mock_stream.ndjson"
 DEFAULT_EVIDENCE_DIR = WORKSPACE_ROOT / "experiments" / "evidence"
@@ -372,29 +371,6 @@ def _count_changed_lines(before: Path, after: Path) -> int:
     )
 
 
-def _extract_python_symbol_spans(source: str) -> Optional[List[Tuple[str, int, int]]]:
-    """Return (qualified_name, start_line, end_line) spans for Python functions/classes."""
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return None
-    spans: List[Tuple[str, int, int]] = []
-
-    def _visit(node: ast.AST, prefix: str) -> None:
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                qname = f"{prefix}.{child.name}" if prefix else child.name
-                start = getattr(child, "lineno", 0)
-                end = getattr(child, "end_lineno", start) or start
-                spans.append((qname, start, end))
-                _visit(child, qname)
-            else:
-                _visit(child, prefix)
-
-    _visit(tree, "")
-    return spans
-
-
 def _count_touched_ast_symbols(old: Optional[Path], new: Optional[Path]) -> int:
     """Count AST symbols actually added, removed, or overlapping changed lines in a diff."""
     if old is None and new is None:
@@ -423,18 +399,17 @@ def _count_touched_ast_symbols(old: Optional[Path], new: Optional[Path]) -> int:
     if not changed_old and not changed_new:
         return 0
 
-    if new.suffix == ".py" or old.suffix == ".py":
-        old_spans = _extract_python_symbol_spans(old_src)
-        new_spans = _extract_python_symbol_spans(new_src)
-        if old_spans is not None and new_spans is not None:
-            touched_symbols: Set[str] = set()
-            for qname, start, end in old_spans:
-                if any(start <= ln <= end for ln in changed_old):
-                    touched_symbols.add(qname)
-            for qname, start, end in new_spans:
-                if any(start <= ln <= end for ln in changed_new):
-                    touched_symbols.add(qname)
-            return len(touched_symbols)
+    old_spans = extract_ast_symbol_spans(old, old_src)
+    new_spans = extract_ast_symbol_spans(new, new_src)
+    if old_spans is not None and new_spans is not None:
+        touched_symbols: Set[str] = set()
+        for qname, start, end in old_spans:
+            if any(start <= ln <= end for ln in changed_old):
+                touched_symbols.add(qname)
+        for qname, start, end in new_spans:
+            if any(start <= ln <= end for ln in changed_new):
+                touched_symbols.add(qname)
+        return len(touched_symbols)
 
     old_count = count_ast_symbols(old) or 0
     new_count = count_ast_symbols(new) or 0
