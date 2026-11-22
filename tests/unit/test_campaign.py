@@ -948,6 +948,9 @@ def test_execute_batch_links_ledger_runs_to_slots(tmp_path: Path):
         assert notes["planned_order"] == slot.planned_order
         assert notes["cache_condition"] == slot.cache_condition
         assert notes["intended_cache_condition"] == slot.cache_condition
+        # Observed condition stays honest: runner did not measure one, so it
+        # must remain "unknown" — never invented from the planned stratum.
+        assert notes["observed_cache_condition"] == "unknown"
 
     # Manifest-based report reconciles every live run against its scheduled slot
     report = campaign.generate_campaign_report(manifest=result["manifest"], db_path=db_file)

@@ -708,6 +708,8 @@ def execute_campaign_batch(
             target_slot.cost_usd = res.get("cost_usd")
             target_slot.cost_status = res.get("cost_status")
             target_slot.source_kind = "live"
+            if res.get("observed_cache_condition"):
+                target_slot.observed_cache_condition = str(res["observed_cache_condition"])
             target_slot.evidence_ref = res.get("evidence_ref")
             target_slot.evidence_hash = res.get("evidence_hash")
             usage = res.get("usage")
@@ -742,11 +744,9 @@ def execute_campaign_batch(
                             "planned_order": slot.planned_order,
                             "cache_condition": slot.cache_condition,
                             "intended_cache_condition": slot.intended_cache_condition,
-                            "observed_cache_condition": (
-                                slot.observed_cache_condition
-                                if slot.observed_cache_condition != "unknown"
-                                else slot.cache_condition
-                            ),
+                            # Honest observation: only what the runner actually measured.
+                            # Never substitute the planned condition (REP-09).
+                            "observed_cache_condition": target_slot.observed_cache_condition,
                         })
                         link_conn.execute(
                             "UPDATE runs SET manifest_id = ?, notes = ? WHERE id = ?",
