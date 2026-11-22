@@ -32,4 +32,4 @@ together. Several invariants are broken — restore them.
 - Merge commits have exactly two sorted parents; HEAD moves forward.
 - Conflicts are never silently resolved.
 
-Run `PYTHONPATH=. python3 ../evaluator/evaluator.py` to check.
+Visible tests are smoke coverage, not the complete specification.

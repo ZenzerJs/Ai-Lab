@@ -29,4 +29,4 @@ search. Several invariants are broken — restore them.
 - PC-2 intersects — never unions — and detects empties.
 - `o ∘ o` is exactly `{b, m, o}`.
 
-Run `PYTHONPATH=. python3 ../evaluator/evaluator.py` to check.
+Visible tests are smoke coverage, not the complete specification.

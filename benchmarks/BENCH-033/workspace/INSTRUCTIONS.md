@@ -29,4 +29,4 @@ Several invariants are broken — restore them.
 - Advancing the watermark fires every due window, not just the one the
   pushed event landed in.
 
-Run `PYTHONPATH=. python3 ../evaluator/evaluator.py` to check.
+Visible tests are smoke coverage, not the complete specification.

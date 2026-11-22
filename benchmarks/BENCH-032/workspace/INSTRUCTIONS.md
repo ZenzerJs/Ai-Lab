@@ -27,4 +27,4 @@ but the machinery is broken.
 - Deep dependents (chains) go stale-proof: transitive dirty marking.
 - A batch of N source writes triggers ONE wave, not N.
 
-Run `PYTHONPATH=. python3 ../evaluator/evaluator.py` to check.
+Visible tests are smoke coverage, not the complete specification.

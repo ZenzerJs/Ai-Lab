@@ -1,1 +1,6 @@
-{"python_version": "3.11", "dependencies": [], "test_command": "PYTHONPATH=. python3 ../evaluator/evaluator.py", "visible_test_command": "python3 -m pytest tests/test_visible.py -x"}
+{
+  "task_id": "BENCH-033",
+  "runtime": "python",
+  "python_version": ">=3.10",
+  "dependencies": []
+}

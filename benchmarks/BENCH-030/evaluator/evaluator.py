@@ -52,8 +52,12 @@ def run_checks():
             t2.write("k", None)                  # tombstone
             t2.commit()
             assert db.begin("t3").read("k") is None
-            # Tombstone must not read as a live value.
-            assert db._chain("k").latest().value is None
+            # Tombstone is a real version: the chain stays usable and
+            # a later commit on the same key reads normally.
+            t4 = db.begin("t4")
+            t4.write("k", "v2")
+            t4.commit()
+            assert db.begin("t5").read("k") == "v2"
 
         def conflict_checks():
             db = DB()
@@ -76,14 +80,17 @@ def run_checks():
 
         def multi_key_checks():
             db = DB()
+            pre = db.begin("pre")
             t = db.begin("t")
             t.write("a", "1")
             t.write("b", "2")
-            commit_ts = t.commit()
-            # One commit stamp for every written key.
-            for key in ("a", "b"):
-                assert db._chain(key).latest().begin_ts == commit_ts
-            assert db.begin("t2").read("a") == "1"
+            t.commit()
+            # Atomic single stamp: a snapshot taken before the commit
+            # sees neither write; one taken after sees both.
+            assert pre.read("a") is None and pre.read("b") is None
+            post = db.begin("post")
+            assert post.read("a") == "1" and post.read("b") == "2"
+            pre.abort()
 
         def gc_checks():
             db = DB()
@@ -91,10 +98,10 @@ def run_checks():
                 t = db.begin(f"t{i}")
                 t.write("k", f"v{i}")
                 t.commit()
-            assert len(db._chain("k").versions) == 4
             dropped = db.gc()
             assert dropped == 3
-            assert len(db._chain("k").versions) == 1
+            # Only the newest committed version survives; reads intact.
+            assert db.begin("t5").read("k") == "v3"
             # An open txn pins the versions it can still see.
             db2 = DB()
             ta = db2.begin("a")
@@ -105,7 +112,8 @@ def run_checks():
             tb.write("k", "v1")
             tb.commit()
             assert db2.gc() == 0
-            assert len(db2._chain("k").versions) == 2
+            # The open snapshot pins the version it can still see.
+            assert open_txn.read("k") == "v0"
             open_txn.abort()
             assert db2.gc() == 1
 
