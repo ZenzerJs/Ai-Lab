@@ -2103,7 +2103,7 @@ def backfill_tool_metrics_from_evidence(
 
 
 _ORPHAN_EVIDENCE_RE = re.compile(
-    r"^live_(?P<task_id>[A-Za-z0-9-]+?)(?:_(?P<model_slug>[a-z0-9][a-z0-9._-]+))?_(?P<arm>baseline|icm|icm_lite|icm-subagents|delegation)_run(?P<run_idx>\d+)_(?P<epoch>\d+)\.ndjson$"
+    r"^live_(?P<task_id>[A-Za-z0-9-]+?)(?:_(?P<model_slug>[a-z0-9][a-z0-9._-]+))?_(?P<arm>baseline|icm|icm_lite|icm_v2|icm-subagents|delegation)_run(?P<run_idx>\d+)_(?P<epoch>\d+)\.ndjson$"
 )
 
 
@@ -2677,13 +2677,11 @@ def _compute_task_summary_with_rows(
 
     # Compare baseline vs governed arm
     gov_arm = None
-    if "icm-subagents" in summary["arms"] and summary["arms"]["icm-subagents"]["n"] > 0:
-        gov_arm = "icm-subagents"
-    elif "icm" in summary["arms"] and summary["arms"]["icm"]["n"] > 0:
-        gov_arm = "icm"
-    elif "delegation" in summary["arms"] and summary["arms"]["delegation"]["n"] > 0:
-        gov_arm = "delegation"
-    else:
+    for candidate in ("icm-subagents", "icm", "delegation", "icm_v2", "icm_lite"):
+        if candidate in summary["arms"] and summary["arms"][candidate]["n"] > 0:
+            gov_arm = candidate
+            break
+    if gov_arm is None:
         for k in summary["arms"]:
             if k != "baseline" and summary["arms"][k]["n"] > 0:
                 gov_arm = k

@@ -25,7 +25,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import ledger
 import campaign
-from complexity_router import ICM_LITE
+from complexity_router import ICM_LITE, ICM_V2
 
 # Ensure UTF-8 output encoding
 if hasattr(sys.stdout, "reconfigure"):
@@ -35,7 +35,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 OUTPUT_PATH = DASHBOARD_DIR / "public" / "data.json"
 OPS_DB_PATH = WORKSPACE_ROOT / "data" / "ops_exp005.db"
-GOVERNED_ARMS = ("icm-subagents", "icm", "delegation", "governed", ICM_LITE)
+GOVERNED_ARMS = ("icm-subagents", "icm", "delegation", "governed", ICM_V2, ICM_LITE)
 
 
 def _governed_key(arms: Dict[str, Any], preferred: Optional[str] = None) -> Optional[str]:
