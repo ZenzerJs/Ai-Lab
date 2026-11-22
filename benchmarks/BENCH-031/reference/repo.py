@@ -43,7 +43,7 @@ class Repo:
         their_f = self.files_at(other)
         merged, conflicts = {}, []
         for path in sorted(set(our_f) | set(their_f) | set(base_f)):
-            b, o, t = base_f.get(path, ""), our_f.get(path), \
+            b, o, t = base_f.get(path), our_f.get(path), \
                 their_f.get(path)
             if o == t:
                 if o is not None:
@@ -55,9 +55,10 @@ class Repo:
                 if o is not None:
                     merged[path] = o
             else:
-                text, cf = merge_blobs(b, o or "", t or "")
+                text, cf = merge_blobs(b or "", o or "", t or "")
                 merged[path] = text
-                conflicts.append(path)
+                if cf:
+                    conflicts.append(path)
         self.ts += 1
         oid = make_commit(self.store, write_tree(self.store, merged),
                           [head, other], "merge", self.ts)
