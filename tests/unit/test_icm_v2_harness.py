@@ -249,9 +249,11 @@ def test_runner_live_bench_icm_v2_injects_ast_map_and_logs_scope(tmp_path, monke
 
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT arm FROM runs").fetchall() == [(ICM_V2,)]
+        c_row = conn.execute("SELECT contract_version, contract_hash FROM runs").fetchone()
         scope_row = conn.execute(
             "SELECT status, target_path FROM run_events WHERE phase = 'scope'"
         ).fetchone()
+    assert c_row == (ICM_V2, complexity_router.load_contract_registry()[ICM_V2]["sha256"])
     assert scope_row is not None
     scope_payload = json.loads(scope_row[1])
     assert scope_payload["declared_scope"]["target_files"] == ["config_loader.py"]

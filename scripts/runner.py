@@ -53,7 +53,19 @@ if str(SCRIPTS_DIR) not in sys.path:
 import stat
 import ledger
 import pricing
-from complexity_router import ICM_V2, MODES, RoutingDecision, build_mode_prompt, classify_mode, count_ast_symbols, extract_ast_symbol_spans, resolve_mode
+from complexity_router import (
+    ICM_LITE,
+    ICM_V2,
+    ICM_V3,
+    MODES,
+    RoutingDecision,
+    build_mode_prompt,
+    classify_mode,
+    count_ast_symbols,
+    extract_ast_symbol_spans,
+    resolve_contract_metadata,
+    resolve_mode,
+)
 
 DEVIN_API_BASE_URL = "https://api.devin.ai"
 
@@ -358,6 +370,7 @@ def validate_manifest_configuration(
                 or "ICM" in arm_cfg.prompt
                 or "01_intake" in arm_cfg.prompt
                 or "Loop-Breaker" in arm_cfg.prompt
+                or "Batch-First" in arm_cfg.prompt
             ),
         }
 
@@ -1915,11 +1928,12 @@ print("ALL TESTS PASSED")
 # ---------------------------------------------------------------------------
 
 def _build_live_prompt(instructions_text: str, arm: str, workspace: Optional[Path] = None) -> str:
-    """Build baseline, ICM v2, or 4-stage ICM contract prompt with exact INSTRUCTIONS.md appended."""
-    if arm.lower() == "baseline":
+    """Build baseline, ICM v2/v3/lite, or 4-stage ICM contract prompt with exact INSTRUCTIONS.md appended."""
+    arm_lower = arm.lower()
+    if arm_lower == "baseline":
         return instructions_text
-    if arm.lower() == ICM_V2:
-        return build_mode_prompt(instructions_text, ICM_V2, workspace=workspace)
+    if arm_lower in (ICM_V2, ICM_V3, ICM_LITE):
+        return build_mode_prompt(instructions_text, arm_lower, workspace=workspace)
     return (
         "Execute this task strictly following the 4-stage ICM contract:\n"
         "1. INTAKE & SCOPE: Read only the target files named in the instructions; stay strictly within scope and do not alter unrelated or prohibited files.\n"
@@ -2014,6 +2028,11 @@ def run_benchmark_live(
             f"single_file={routing_decision.single_file}, target={routing_decision.target})."
         )
     _validate_identifier(arm, "arm")
+    if routing_decision is not None:
+        contract_version = routing_decision.contract_version
+        contract_hash = routing_decision.contract_hash
+    else:
+        contract_version, contract_hash = resolve_contract_metadata(arm)
 
     evaluator_dir = task_dir / "evaluator"
     if not snapshot_dir.is_dir():
@@ -2258,6 +2277,8 @@ def run_benchmark_live(
                 avg_fresh_input_per_call=cache_diagnostics["avg_fresh_input_per_call"],
                 cache_bust_count=cache_diagnostics["cache_bust_count"],
                 tools_per_llm_call=cache_diagnostics["tools_per_llm_call"],
+                contract_version=contract_version,
+                contract_hash=contract_hash,
                 conn=conn,
             )
 
@@ -2298,6 +2319,8 @@ def run_benchmark_live(
             "usage": usage,
             "tool_metrics": tool_metrics,
             "cache_diagnostics": cache_diagnostics,
+            "contract_version": contract_version,
+            "contract_hash": contract_hash,
             "evidence_ref": evidence_ref,
             "evidence_hash": evidence_hash,
             "pre_hash": pre_hash,

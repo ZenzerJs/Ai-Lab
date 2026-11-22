@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "contracts": {
+    "icm_lite": {
+      "id": "icm_lite",
+      "file": "contracts/icm_lite.md",
+      "sha256": "62a956c3835cdd2bd4201a35deeae1eab0d70ccc01b4c3c0684e4841138fce78",
+      "parent_version": "icm_v1",
+      "hypothesis": "Single-file small-scope tasks suffer net negative ROI from 5-stage ceremony; collapsing to one stage eliminates planning overhead while preserving diff-only discipline.",
+      "changes_from_prev": [
+        "Collapse 5 stage files into a single execution stage",
+        "Omit AST map injection for low-LOC single-file targets"
+      ],
+      "inject_repo_map": false,
+      "repo_map_max_tokens": 0,
+      "execution_strategy": "single_session"
+    },
+    "icm_v1": {
+      "id": "icm_v1",
+      "file": "contracts/icm_v1.md",
+      "sha256": "1e55ec32a07652d5ed179c3dc3df1072dfb7f4d8b0c33919a890861f0b7fad0e",
+      "parent_version": null,
+      "hypothesis": "Explicit 5-stage contract enforces intake, planning, diff-only edits, sanitized verification, and retrospective discipline.",
+      "changes_from_prev": [],
+      "inject_repo_map": false,
+      "repo_map_max_tokens": 0,
+      "execution_strategy": "single_session"
+    },
+    "icm_v2": {
+      "id": "icm_v2",
+      "file": "contracts/icm_v2.md",
+      "sha256": "5bc08bdf88bfef05c74df88b0b23eb32566558e7954ab8be423e0cf473a6e27b",
+      "parent_version": "icm_v1",
+      "hypothesis": "Removing stage-file ceremony and pre-injecting a bounded AST symbol map reduces turn count and redundant file reads while preserving correctness via Repro -> Surgical Diff -> Verify and Loop-Breaker.",
+      "changes_from_prev": [
+        "Prohibit stage files (01_intake.md..04_verify.md) and 05_retro essays",
+        "Pre-inject compact AST symbol map (max 600 tokens)",
+        "Add 2-failure Loop-Breaker directive and concise test flags"
+      ],
+      "inject_repo_map": true,
+      "repo_map_max_tokens": 600,
+      "execution_strategy": "single_session"
+    },
+    "icm_v3": {
+      "id": "icm_v3",
+      "file": "contracts/icm_v3.md",
+      "sha256": "08515d7ac44eca70b8916bc4da529b8e25ab9c6e76ac287171e49d0526ae38b3",
+      "parent_version": "icm_v2",
+      "hypothesis": "Enforcing a parallel batch-first 3-turn cadence with a byte-stable static workspace prefix (file list + 1200-token AST map + detected test runner), immediate CRLF/whitespace full-write fallback, and strict parent-path/tasks/ containment fixes remaining trace leaks and maximizes prompt prefix caching.",
+      "changes_from_prev": [
+        "Forbid all stage files (01_intake.md..05_retro.md) and any tasks/ writes",
+        "Enforce parallel batch-first 3-turn cadence (Turn 1 batch-read, Turn 2 <=8-line plan + parallel edits, Turn 3 detected concise test + invariant check)",
+        "Inject byte-deterministic static context prefix (file list + 1200-token AST map + detected test command)",
+        "Add immediate full-file write fallback on search/replace mismatch for files >120 LOC",
+        "Enforce strict workspace containment (no .. traversal, no missing external script calls)"
+      ],
+      "inject_repo_map": true,
+      "repo_map_max_tokens": 1200,
+      "execution_strategy": "single_session"
+    }
+  }
+}
