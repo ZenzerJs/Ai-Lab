@@ -248,3 +248,138 @@ def test_build_data_payload_emits_acu_fields_and_cost_basis(tmp_path, monkeypatc
     assert scope["cost_basis"] == "ACU Derived"
     assert scope["signed_cost_label"] == "-25.0% savings"
     assert scope["paired_priced_task_count"] == 1
+
+
+def test_ndjson_nested_result_usage_and_replay_dedup():
+    lines = [
+        json.dumps({"event_id": "e1", "type": "turn", "turn": 1, "acus_consumed": 0.25}),
+        json.dumps({"event_id": "e2", "type": "result", "result": {"usage": {"acus_consumed": 1.4}}}),
+        json.dumps({"event_id": "e1", "type": "turn", "turn": 1, "acus_consumed": 0.25}),
+    ]
+    parsed = ledger.validate_and_parse_telemetry(lines)
+    assert parsed["acus_consumed"] == pytest.approx(1.4)
+
+
+def test_record_imported_run_detects_conflicting_acus(tmp_path):
+    db_path = tmp_path / "usage.db"
+    conn = ledger.get_connection(db_path)
+    try:
+        base_run = {
+            "import_id": "imp-acu-1",
+            "task_id": "BENCH-001",
+            "arm": "baseline",
+            "model": "devin-session-v3",
+            "run_index": 1,
+            "timestamp": "2026-11-22T00:00:00Z",
+            "acus_consumed": 1.0,
+        }
+        first_id = ledger.import_run(conn, base_run)
+        assert ledger.import_run(conn, dict(base_run)) == first_id
+
+        changed = dict(base_run, acus_consumed=1.5)
+        with pytest.raises(ledger.DuplicateConflictError):
+            ledger.import_run(conn, changed)
+    finally:
+        conn.close()
+
+
+def test_cumulative_savings_cost_per_mtok_excludes_acu_only_pairs(tmp_path, monkeypatch):
+    monkeypatch.delenv("DEVIN_ACU_USD_RATE", raising=False)
+    db_path = tmp_path / "usage.db"
+    ev = tmp_path / "ev.ndjson"
+    ev_bytes = b'{"type":"result"}\n'
+    ev.write_bytes(ev_bytes)
+    ev_hash = hashlib.sha256(ev_bytes).hexdigest()
+
+    conn = ledger.get_connection(db_path)
+    try:
+        # Token-priced pair (Gemini)
+        ledger.record_run(
+            task_id="BENCH-001",
+            arm="baseline",
+            model="gemini-3.8-flash",
+            run_index=1,
+            timestamp="2026-11-22T00:00:00Z",
+            input_tokens=1_000_000,
+            output_tokens=0,
+            source_kind="live",
+            evidence_status="verified",
+            evidence_ref=str(ev),
+            evidence_hash=ev_hash,
+            verification_status="passed",
+            conn=conn,
+        )
+        ledger.record_run(
+            task_id="BENCH-001",
+            arm="icm",
+            model="gemini-3.8-flash",
+            run_index=1,
+            timestamp="2026-11-22T00:01:00Z",
+            input_tokens=500_000,
+            output_tokens=0,
+            source_kind="live",
+            evidence_status="verified",
+            evidence_ref=str(ev),
+            evidence_hash=ev_hash,
+            verification_status="passed",
+            conn=conn,
+        )
+        cum_token_only = ledger.cumulative_savings(conn=conn)
+
+        # Add an ACU-only pair (no tokens, $22.50 baseline / $11.25 icm)
+        ledger.record_run(
+            task_id="BENCH-002",
+            arm="baseline",
+            model="devin-session-v3",
+            run_index=1,
+            timestamp="2026-11-22T00:02:00Z",
+            input_tokens=None,
+            output_tokens=None,
+            acus_consumed=10.0,
+            source_kind="live",
+            evidence_status="verified",
+            evidence_ref=str(ev),
+            evidence_hash=ev_hash,
+            verification_status="passed",
+            conn=conn,
+        )
+        ledger.record_run(
+            task_id="BENCH-002",
+            arm="icm",
+            model="devin-session-v3",
+            run_index=1,
+            timestamp="2026-11-22T00:03:00Z",
+            input_tokens=None,
+            output_tokens=None,
+            acus_consumed=5.0,
+            source_kind="live",
+            evidence_status="verified",
+            evidence_ref=str(ev),
+            evidence_hash=ev_hash,
+            verification_status="passed",
+            conn=conn,
+        )
+        cum_mixed = ledger.cumulative_savings(conn=conn)
+        assert cum_mixed["cost_per_mtok_baseline"] == pytest.approx(cum_token_only["cost_per_mtok_baseline"])
+        assert cum_mixed["cost_per_mtok_icm"] == pytest.approx(cum_token_only["cost_per_mtok_icm"])
+    finally:
+        conn.close()
+
+
+def test_build_declared_benchmarks_excludes_invalidated_evidence(tmp_path):
+    bench_dir = tmp_path / "benchmarks"
+    (bench_dir / "BENCH-999").mkdir(parents=True)
+    runs = [
+        {
+            "task_id": "BENCH-999",
+            "source_kind": "live",
+            "is_simulation": False,
+            "evidence_status": "verified",
+            "exclusion_reasons": ["evidence_hash_mismatch"],
+        }
+    ]
+    declared = build_data.build_declared_benchmarks([], runs=runs, benchmarks_dir=bench_dir)
+    assert declared == [
+        {"task_id": "BENCH-999", "measured_runs": 0, "status": "suite present, unmeasured"}
+    ]
+
