@@ -780,11 +780,8 @@ class WorkspaceManager:
             )
             _validate_identifier(canonical_label, "task_id")
 
-        base_temp.mkdir(parents=True, exist_ok=True)
-        try:
-            os.chmod(base_temp, 0o700)
-        except OSError:
-            pass
+        if not base_temp.exists():
+            base_temp.mkdir(parents=True, mode=0o700)
         # A workspace root owned by another local account is untrusted: it could
         # substitute the tree the evaluator grades.
         if hasattr(os, "getuid") and base_temp.stat().st_uid != os.getuid():

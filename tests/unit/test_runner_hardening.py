@@ -370,3 +370,22 @@ def test_workspace_inside_checkout_tmp_warns(tmp_path: Path, monkeypatch):
         assert ws._is_safe_host_target() is True
     finally:
         ws.cleanup()
+
+
+def test_prepare_does_not_chmod_existing_workspace_root(tmp_path: Path):
+    """An existing base_temp keeps its permissions even if the run is later refused."""
+    import stat as _stat
+
+    ws_root = tmp_path / "shared_root"
+    ws_root.mkdir(mode=0o755)
+    os.chmod(ws_root, 0o755)
+
+    ws = runner.WorkspaceManager.prepare_arm_workspace(
+        snapshot_dir=_make_snapshot(tmp_path), arm="baseline",
+        workspace_root=ws_root, run_id="perm_test", init_git=False,
+    )
+    try:
+        assert _stat.S_IMODE(ws_root.stat().st_mode) == 0o755
+    finally:
+        ws.cleanup()
+    assert _stat.S_IMODE(ws_root.stat().st_mode) == 0o755
