@@ -56,12 +56,15 @@ def merge_blobs(base: str, ours: str, theirs: str):
         moved = True
         while moved:
             moved = False
-            while ocs and ocs[0][0] <= hi:
+            # a change joins the region only when it strictly overlaps
+            # (c[0] < hi) or starts at the region's still-empty start
+            # (coincident edits / same-point insertions)
+            while ocs and (ocs[0][0] < hi or (hi == lo and ocs[0][0] == lo)):
                 c = ocs.pop(0)
                 o_reg.append(c)
                 hi = max(hi, c[1])
                 moved = True
-            while tcs and tcs[0][0] <= hi:
+            while tcs and (tcs[0][0] < hi or (hi == lo and tcs[0][0] == lo)):
                 c = tcs.pop(0)
                 t_reg.append(c)
                 hi = max(hi, c[1])
