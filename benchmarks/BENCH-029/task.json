@@ -1,0 +1,22 @@
+{
+  "task_id": "BENCH-029",
+  "name": "Thompson NFA Regex Engine",
+  "category": "regex_engine",
+  "target_files": [
+    "syntax.py",
+    "parser.py",
+    "nfa.py",
+    "compiler.py",
+    "matcher.py",
+    "engine.py"
+  ],
+  "description": "Repair alternation splitting, postfix precedence, Star loop-back edges, transitive epsilon closure, unanchored search, and leftmost-longest findall semantics.",
+  "expected_broken_reason": "regex_simulation_violation",
+  "planted_defect": [
+    "concat does not stop at |, parsing alternation as literal pipe",
+    "Star fragment has no loop-back edge (matches zero-or-one)",
+    "epsilon closure is single-hop, breaking nested groups",
+    "search only probes position 0 (anchored semantics)",
+    "findall returns the shortest end, fragmenting matches"
+  ]
+}

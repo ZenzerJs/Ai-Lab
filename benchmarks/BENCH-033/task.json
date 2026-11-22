@@ -1,0 +1,23 @@
+{
+  "task_id": "BENCH-033",
+  "name": "Watermarked Stream Aggregator",
+  "category": "stream_processing",
+  "target_files": [
+    "event.py",
+    "watermark.py",
+    "windows.py",
+    "aggregators.py",
+    "triggers.py",
+    "pipeline.py"
+  ],
+  "description": "Repair a keyed tumbling-window aggregation pipeline driven by watermarks: the watermark must track the maximum observed event time without regressing, windows are floored not rounded, late events are dropped instead of aggregated, Count counts events not values, empty Mean is None, and triggers fire each window exactly once when the watermark reaches its end — across all pending states, not only the touched one.",
+  "expected_broken_reason": "stream_invariant_violation",
+  "planted_defect": [
+    "watermark.observe uses last ts not max ts (regresses on out-of-order)",
+    "windows.window_of rounds instead of flooring",
+    "aggregators.Count adds values instead of counting events",
+    "aggregators.Mean returns 0 on empty instead of None",
+    "triggers.maybe_fire ignores fired flag (double-fire)",
+    "pipeline.push never drops late events"
+  ]
+}

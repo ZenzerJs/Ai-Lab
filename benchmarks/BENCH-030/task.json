@@ -1,0 +1,22 @@
+{
+  "task_id": "BENCH-030",
+  "name": "MVCC Transactional Key-Value Store",
+  "category": "transactional_storage",
+  "target_files": [
+    "versions.py",
+    "rwset.py",
+    "locks.py",
+    "txn.py",
+    "collector.py",
+    "db.py"
+  ],
+  "description": "Repair snapshot-isolated reads, first-committer-wins conflict validation with per-key write locks, single commit stamps, predecessor closure, and GC pinned by open snapshots.",
+  "expected_broken_reason": "isolation_invariant_violation",
+  "planted_defect": [
+    "reads use latest() ignoring snapshot_ts",
+    "commit performs no conflict check and takes no locks",
+    "each write stamped with its own timestamp",
+    "version chain appends oldest-first and never closes predecessors",
+    "GC drops versions still visible to the oldest open snapshot"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "task_id": "BENCH-028",
+  "name": "Convergent CRDT Replicated Store",
+  "category": "convergent_state",
+  "target_files": [
+    "vclock.py",
+    "counters.py",
+    "orset.py",
+    "lww.py",
+    "merge.py",
+    "store.py"
+  ],
+  "description": "Repair vector-clock max merge, idempotent counter merge, OR-Set add-wins tombstoning, LWW (ts,node) deterministic tiebreak, typed merge dispatch, and per-key peer convergence.",
+  "expected_broken_reason": "convergence_invariant_violation",
+  "planted_defect": [
+    "vector clock merge uses elementwise min, losing causality",
+    "GCounter merge sums counts so re-merge inflates the value",
+    "ORSet remove tombstones the element name, blocking concurrent re-adds",
+    "LWW compares timestamps only, diverging on equal-ts writes",
+    "merge() dispatches without type validation",
+    "merge_peer overwrites shared keys with peer state instead of merging"
+  ]
+}
