@@ -49,6 +49,10 @@ class RoutingDecision:
     ast_symbol_count: Optional[int] = None
 
 
+_WRAPPER_NODE_TYPES = frozenset({"export_statement", "decorated_definition"})
+_AST_SYMBOL_NODE_TYPES = frozenset(repo_map.DEF_NODE_TYPES) - _WRAPPER_NODE_TYPES
+
+
 def count_ast_symbols(target: Optional[Path]) -> Optional[int]:
     """Count AST-level symbol definitions (functions, async functions, classes) in a file.
 
@@ -92,7 +96,7 @@ def count_ast_symbols(target: Optional[Path]) -> Optional[int]:
             seen: set[Tuple[int, int, str]] = set()
             for nodes in tc.nodes:
                 for node in nodes:
-                    if node.type in repo_map.DEF_NODE_TYPES:
+                    if node.type in _AST_SYMBOL_NODE_TYPES:
                         seen.add((node.start_point[0], node.start_point[1], node.type))
             if seen:
                 return len(seen)
