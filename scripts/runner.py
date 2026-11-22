@@ -684,6 +684,15 @@ WORKSPACE_GIT_ENV = {
 }
 
 
+def _pid_alive(pid: int) -> bool:
+    """Return True iff a process with the given pid is currently running."""
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 def _init_workspace_git(ws_dir: Path) -> None:
     """Create an isolated .git repository inside a disposable workspace.
 
@@ -693,11 +702,13 @@ def _init_workspace_git(ws_dir: Path) -> None:
 
     Uses subprocess.Popen rather than subprocess.run so harness tests that
     monkeypatch subprocess.run to fake the agent CLI cannot intercept this.
+    Inherited GIT_* variables (GIT_DIR, GIT_WORK_TREE, ...) are stripped so a
+    caller's environment cannot redirect the snapshot commit into the host repo.
     """
     if shutil.which("git") is None:
         warnings.warn("git executable not found; skipping disposable workspace .git initialization")
         return
-    git_env = os.environ.copy()
+    git_env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     git_env.update(WORKSPACE_GIT_ENV)
     for cmd in (
         ["git", "init"],
@@ -770,6 +781,16 @@ class WorkspaceManager:
             _validate_identifier(canonical_label, "task_id")
 
         base_temp.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(base_temp, 0o700)
+        except OSError:
+            pass
+        # A workspace root owned by another local account is untrusted: it could
+        # substitute the tree the evaluator grades.
+        if hasattr(os, "getuid") and base_temp.stat().st_uid != os.getuid():
+            raise RuntimeError(
+                f"Refusing to use workspace root '{base_temp}': owned by another local account."
+            )
         ws_name = f"{canonical_label}_{arm}" if canonical_workspace else f"{run_id}_{arm}"
         ws_dir = (base_temp / ws_name).resolve()
 
@@ -780,6 +801,23 @@ class WorkspaceManager:
             raise ValueError(
                 f"Path containment violation: workspace directory '{ws_dir}' escapes root '{base_temp}'"
             )
+
+        # A workspace inside the host checkout is only usable under tmp/: anywhere
+        # else makes _is_safe_host_target() reject backups and skip cleanup.
+        ws_res = WORKSPACE_ROOT.resolve()
+        if ws_dir == ws_res or ws_res in ws_dir.parents:
+            tmp_dir = (WORKSPACE_ROOT / "tmp").resolve()
+            try:
+                ws_dir.relative_to(tmp_dir)
+                warnings.warn(
+                    f"Workspace '{ws_dir}' is inside the host checkout under tmp/: "
+                    "host AGENTS.md and .git remain reachable to agent CLIs."
+                )
+            except ValueError:
+                raise ValueError(
+                    f"Workspace directory '{ws_dir}' lies inside the host checkout "
+                    f"outside '{tmp_dir}': backup and cleanup would refuse it."
+                )
 
         if ws_dir == base_temp:
             raise ValueError(f"Workspace path cannot be the root directory '{base_temp}'")
@@ -803,6 +841,18 @@ class WorkspaceManager:
                     if marker_data.get("task_id") != canonical_label:
                         raise RuntimeError(
                             f"Refusing to delete existing directory '{ws_dir}': marker ownership mismatch."
+                        )
+                    # A canonical dir may be reused across runs, but never while
+                    # the run that created it is still alive on this host.
+                    owner_pid = marker_data.get("pid")
+                    if (
+                        isinstance(owner_pid, int)
+                        and marker_data.get("host") == socket.gethostname()
+                        and _pid_alive(owner_pid)
+                    ):
+                        raise RuntimeError(
+                            f"Refusing to delete existing directory '{ws_dir}': "
+                            f"canonical workspace still in use by live run (pid={owner_pid})."
                         )
                 elif marker_data.get("run_id") != run_id:
                     raise RuntimeError(
@@ -831,6 +881,8 @@ class WorkspaceManager:
             "arm": arm,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "disposable": True,
+            "pid": os.getpid(),
+            "host": socket.gethostname(),
         }
         if canonical_workspace:
             marker_payload["task_id"] = canonical_label

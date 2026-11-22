@@ -1,5 +1,6 @@
 import tempfile
 import sqlite3
+import os
 from pathlib import Path
 import pytest
 from scripts.run_experiment import execute_verification, get_next_run_index, parse_task_file
@@ -277,5 +278,95 @@ def test_init_git_false_leaves_workspace_without_git_dir(tmp_path: Path):
     )
     try:
         assert not (ws.path / ".git").exists()
+    finally:
+        ws.cleanup()
+
+
+def test_git_env_leak_cannot_redirect_snapshot_commit(tmp_path: Path, monkeypatch):
+    """Exported host GIT_DIR/GIT_WORK_TREE must not redirect the workspace's git init."""
+    host_dir = tmp_path / "host_checkout"
+    host_dir.mkdir()
+    (host_dir / "precious.py").write_text("x = 1\n", encoding="utf-8")
+    host_git = host_dir / ".git"
+    monkeypatch.setenv("GIT_DIR", str(host_git))
+    monkeypatch.setenv("GIT_WORK_TREE", str(host_dir))
+
+    ws = runner.WorkspaceManager.prepare_arm_workspace(
+        snapshot_dir=_make_snapshot(tmp_path), arm="baseline",
+        workspace_root=tmp_path / "workspaces", run_id="git_leak_test",
+    )
+    try:
+        # Workspace got its own repo; host dir was not committed into
+        assert (ws.path / ".git").is_dir()
+        assert not host_git.exists()
+        import subprocess
+        clean_env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        top = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=str(ws.path), capture_output=True, text=True, check=True, env=clean_env,
+        ).stdout.strip()
+        assert Path(top).resolve() == ws.path.resolve()
+    finally:
+        ws.cleanup()
+
+
+def test_workspace_root_owned_by_other_account_refused(tmp_path: Path, monkeypatch):
+    """A base_temp owned by another local account is untrusted and refused."""
+    other_root = tmp_path / "foreign_root"
+    other_root.mkdir()
+    monkeypatch.setenv("AI_LAB_WORKSPACE_ROOT", str(other_root))
+    monkeypatch.setattr(runner.os, "getuid", lambda: -1)
+
+    with pytest.raises(RuntimeError, match="owned by another local account"):
+        runner.WorkspaceManager.prepare_arm_workspace(
+            snapshot_dir=_make_snapshot(tmp_path), arm="baseline", run_id="r",
+        )
+
+
+def test_canonical_workspace_refuses_overwrite_while_owner_alive(tmp_path: Path):
+    """A canonical dir owned by a live run on this host cannot be reclaimed."""
+    snapshot_dir = _make_snapshot(tmp_path)
+    ws1 = runner.WorkspaceManager.prepare_arm_workspace(
+        snapshot_dir=snapshot_dir, arm="baseline",
+        workspace_root=tmp_path / "workspaces", run_id="run_live",
+        canonical_workspace=True, task_id="BENCH-042",
+    )
+    try:
+        # Marker records our own live pid -> second canonical prepare must refuse
+        with pytest.raises(RuntimeError, match="still in use by live run"):
+            runner.WorkspaceManager.prepare_arm_workspace(
+                snapshot_dir=snapshot_dir, arm="baseline",
+                workspace_root=tmp_path / "workspaces", run_id="run_other",
+                canonical_workspace=True, task_id="BENCH-042",
+            )
+        assert ws1.path.exists()
+    finally:
+        ws1.cleanup()
+
+
+def test_workspace_inside_checkout_outside_tmp_refused(tmp_path: Path, monkeypatch):
+    """base_temp inside WORKSPACE_ROOT but outside tmp/ is rejected outright."""
+    monkeypatch.setenv(
+        "AI_LAB_WORKSPACE_ROOT", str(runner.WORKSPACE_ROOT / "nested_ws_root")
+    )
+    with pytest.raises(ValueError, match="inside the host checkout"):
+        runner.WorkspaceManager.prepare_arm_workspace(
+            snapshot_dir=_make_snapshot(tmp_path), arm="baseline", run_id="r",
+        )
+
+
+def test_workspace_inside_checkout_tmp_warns(tmp_path: Path, monkeypatch):
+    """base_temp under WORKSPACE_ROOT/tmp remains allowed but warns about host leakage."""
+    monkeypatch.setenv(
+        "AI_LAB_WORKSPACE_ROOT", str(runner.WORKSPACE_ROOT / "tmp" / "ws_root")
+    )
+    with pytest.warns(UserWarning, match="host AGENTS.md"):
+        ws = runner.WorkspaceManager.prepare_arm_workspace(
+            snapshot_dir=_make_snapshot(tmp_path), arm="baseline",
+            run_id="tmp_ws_test", init_git=False,
+        )
+    try:
+        assert runner.WORKSPACE_ROOT.resolve() in ws.path.resolve().parents
+        assert ws._is_safe_host_target() is True
     finally:
         ws.cleanup()
