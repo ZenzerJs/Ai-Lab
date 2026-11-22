@@ -6,6 +6,7 @@ import {
   CalendarDays,
   Code2,
   Braces,
+  ChartColumn,
   Check,
   ChevronRight,
   FlaskConical,
@@ -24,6 +25,7 @@ import { ThemeToggle } from "./ThemeToggle";
 const navigation = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "tasks", label: "Experiments", icon: FlaskConical },
+  { id: "analytics", label: "Deep analytics", icon: ChartColumn },
   { id: "simulator", label: "Model simulator", icon: SlidersHorizontal },
   { id: "sandboxes", label: "Sandboxes", icon: Braces },
   { id: "audit", label: "Evidence ledger", icon: ShieldCheck },

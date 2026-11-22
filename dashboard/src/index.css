@@ -1126,6 +1126,15 @@ code {
   font-weight: 400;
   margin-top: 5px;
 }
+.effect-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.effect-badges .badge {
+  white-space: nowrap;
+}
 .panel-note {
   color: var(--muted);
   font-size: 12px;

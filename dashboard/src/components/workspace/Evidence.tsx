@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { DashboardPayload } from "../../types";
 import { downloadJson, snapshotDate } from "../../lib/workspace";
+import { isPricedRun } from "../../lib/analytics";
 import { formatArm, formatCurrency, formatTokens } from "../../lib/formatters";
 import { ProviderIcon } from "./ProviderIcon";
 
@@ -20,6 +21,7 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
   const [arm, setArm] = useState("all");
   const [source, setSource] = useState("all");
   const [evidence, setEvidence] = useState("all");
+  const [cost, setCost] = useState("all");
   const [ascending, setAscending] = useState(true);
   const [page, setPage] = useState(1);
   const [exported, setExported] = useState(false);
@@ -34,12 +36,14 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
             (source === "all" || (run.source_kind || "unknown") === source) &&
             (evidence === "all" ||
               (run.evidence_status || "missing") === evidence) &&
+            (cost === "all" ||
+              (cost === "priced" ? isPricedRun(run) : !isPricedRun(run))) &&
             `${run.id} ${run.task_id} ${run.model} ${run.arm} ${formatArm(run.arm)} ${run.evidence_ref || ""} ${run.notes || ""}`
               .toLowerCase()
               .includes(query.toLowerCase()),
         )
         .sort((a, b) => (ascending ? a.id - b.id : b.id - a.id)),
-    [data.runs, query, task, model, arm, source, evidence, ascending],
+    [data.runs, query, task, model, arm, source, evidence, cost, ascending],
   );
   const pages = Math.max(1, Math.ceil(filtered.length / 10));
   const currentPage = Math.min(page, pages);
@@ -51,6 +55,7 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
     setArm("all");
     setSource("all");
     setEvidence("all");
+    setCost("all");
     setPage(1);
   };
   return (
@@ -115,7 +120,7 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
                 {
                   generated_at: data.generated_at,
                   build_identity: data.build_identity,
-                  filters: { query, task, model, arm, source, evidence },
+                  filters: { query, task, model, arm, source, evidence, cost },
                   runs: filtered,
                 },
                 "ai-lab-evidence.json",
@@ -156,6 +161,12 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
               values: Array.from(
                 new Set(data.runs.map((run) => run.source_kind || "unknown")),
               ),
+            },
+            {
+              label: "Cost",
+              value: cost,
+              set: setCost,
+              values: ["priced", "unpriced"],
             },
             {
               label: "Evidence status",
