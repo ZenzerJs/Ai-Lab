@@ -1967,7 +1967,8 @@ def main() -> None:
         print(f"  Manifest SHA-256: {manifest.manifest_hash}")
 
     elif args.command == "execute-batch":
-        manifest = CampaignManifest.load(Path(args.manifest))
+        manifest_path = Path(args.manifest)
+        manifest = CampaignManifest.load(manifest_path)
         try:
             result = execute_campaign_batch(
                 manifest=manifest,
@@ -1983,10 +1984,15 @@ def main() -> None:
         if args.dry_run:
             print(json.dumps(result, indent=2))
         else:
+            # Persist per-slot outcomes (incl. failed/timed-out attempts and error
+            # details) so reports can recover them (REP-02). Status fields are not
+            # covered by manifest_hash, so integrity verification still passes.
+            result["manifest"].save(manifest_path)
             print(
                 f"✓ Executed {result['executed_count']}/{result['total_slots']} slots "
                 f"for campaign {result['manifest_id']}: {result['status_counts']}"
             )
+            print(f"  Manifest updated with per-slot outcomes: {manifest_path.resolve()}")
 
     elif args.command == "report":
         manifest = None
