@@ -3,6 +3,8 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
+import tempfile
 from pathlib import Path
 import pytest
 
@@ -38,9 +40,9 @@ def test_run_01_prepare_two_arms_same_starting_state(tmp_path: Path):
         assert ws_base.path.exists()
         assert ws_icm.path.exists()
 
-        # Same starting state
-        base_files = sorted([p.relative_to(ws_base.path).as_posix() for p in ws_base.path.rglob("*") if p.is_file()])
-        icm_files = sorted([p.relative_to(ws_icm.path).as_posix() for p in ws_icm.path.rglob("*") if p.is_file()])
+        # Same starting state (.git is the isolated workspace repo, not a task file)
+        base_files = sorted([p.relative_to(ws_base.path).as_posix() for p in ws_base.path.rglob("*") if p.is_file() and ".git" not in p.relative_to(ws_base.path).parts])
+        icm_files = sorted([p.relative_to(ws_icm.path).as_posix() for p in ws_icm.path.rglob("*") if p.is_file() and ".git" not in p.relative_to(ws_icm.path).parts])
         assert base_files == icm_files
         assert base_files == ["README.md", "calculator.py", "config.json"]
 
@@ -897,3 +899,101 @@ def test_ledger_migrate_db_upgrades_phase1_database_to_phase2(tmp_path: Path):
     applied_again = ledger.migrate_db(conn)
     assert applied_again is False
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# PR 1.1: Out-of-repo disposable workspace isolation
+# ---------------------------------------------------------------------------
+
+def test_default_workspace_root_is_outside_host_checkout(tmp_path: Path, monkeypatch):
+    """
+    Default disposable workspace must live outside WORKSPACE_ROOT so agent CLIs
+    cannot inherit the host AI-Lab/AGENTS.md or the host .git repository.
+    """
+    monkeypatch.delenv("AI_LAB_WORKSPACE_ROOT", raising=False)
+    snapshot_dir = tmp_path / "task_snapshot"
+    snapshot_dir.mkdir()
+    (snapshot_dir / "task.py").write_text("print('task')\n", encoding="utf-8")
+
+    ws = runner.WorkspaceManager.prepare_arm_workspace(
+        snapshot_dir=snapshot_dir,
+        arm="baseline",
+        run_id="iso_default_test",
+        init_git=False,
+    )
+    try:
+        ws_res = ws.path.resolve()
+        host_res = runner.WORKSPACE_ROOT.resolve()
+
+        # Workspace is entirely outside the host checkout, under the OS temp dir
+        assert ws_res != host_res
+        assert host_res not in ws_res.parents
+        expected_root = (Path(tempfile.gettempdir()) / "ai_lab_disposable_workspaces").resolve()
+        assert ws_res.parent == expected_root
+
+        # No ancestor directory exposes an AGENTS.md (host instructions cannot leak in)
+        for parent in ws_res.parents:
+            assert not (parent / "AGENTS.md").exists(), f"ancestor {parent} exposes AGENTS.md"
+    finally:
+        ws.cleanup()
+
+
+def test_workspace_root_env_override_is_respected(tmp_path: Path, monkeypatch):
+    """AI_LAB_WORKSPACE_ROOT overrides the default OS-temp disposable root."""
+    custom_root = tmp_path / "custom_disposable_root"
+    monkeypatch.setenv("AI_LAB_WORKSPACE_ROOT", str(custom_root))
+
+    snapshot_dir = tmp_path / "task_snapshot"
+    snapshot_dir.mkdir()
+    (snapshot_dir / "task.py").write_text("print('task')\n", encoding="utf-8")
+
+    ws = runner.WorkspaceManager.prepare_arm_workspace(
+        snapshot_dir=snapshot_dir,
+        arm="baseline",
+        run_id="iso_env_test",
+        init_git=False,
+    )
+    try:
+        assert ws.path.resolve().parent == custom_root.resolve()
+    finally:
+        ws.cleanup()
+
+
+def test_cleanup_destroys_only_the_disposable_dir(tmp_path: Path):
+    """
+    cleanup() removes only the disposable workspace (and its backup/marker),
+    never touching host checkout files or sibling directories.
+    """
+    host_dir = tmp_path / "host_checkout"
+    host_dir.mkdir()
+    sentinel = host_dir / "important_user_file.txt"
+    sentinel.write_text("do not delete\n", encoding="utf-8")
+
+    snapshot_dir = tmp_path / "task_snapshot"
+    snapshot_dir.mkdir()
+    (snapshot_dir / "task.py").write_text("print('task')\n", encoding="utf-8")
+
+    ws_root = tmp_path / "workspaces"
+    ws = runner.WorkspaceManager.prepare_arm_workspace(
+        snapshot_dir=snapshot_dir,
+        arm="baseline",
+        workspace_root=ws_root,
+        run_id="cleanup_only_test",
+    )
+
+    ws.capture_backup()
+    (ws.path / "task.py").write_text("print('mutated')\n", encoding="utf-8")
+    assert ws.path.exists()
+    assert ws.backup_dir.exists()
+
+    ws.cleanup()
+
+    assert not ws.path.exists()
+    assert not ws.backup_dir.exists()
+    # External ownership marker is removed alongside the workspace
+    assert list(ws_root.iterdir()) == []
+    # Host files untouched
+    assert sentinel.exists()
+    assert sentinel.read_text(encoding="utf-8") == "do not delete\n"
+    # Snapshot source untouched
+    assert (snapshot_dir / "task.py").read_text(encoding="utf-8") == "print('task')\n"
