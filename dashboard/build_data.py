@@ -276,11 +276,21 @@ def build_declared_benchmarks(
     if runs is not None:
         for r in runs:
             tid = r.get("task_id")
+            reasons = r.get("exclusion_reasons") or []
+            has_evidence_failure = any(
+                isinstance(reason, str)
+                and (
+                    reason.startswith("evidence_")
+                    or reason in ("unverified_evidence", "unverified_import")
+                )
+                for reason in reasons
+            )
             if (
                 tid
                 and r.get("source_kind") == "live"
                 and not r.get("is_simulation")
                 and r.get("evidence_status") not in ("unverified", "invalid", "missing")
+                and not has_evidence_failure
             ):
                 counts[tid] = counts.get(tid, 0) + 1
     else:
