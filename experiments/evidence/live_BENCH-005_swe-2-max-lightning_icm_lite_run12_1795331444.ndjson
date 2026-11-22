@@ -1,0 +1,7 @@
+{"event": "init", "task_id": "BENCH-005", "arm": "icm_lite", "model": "swe-2-max-lightning", "run_index": 12, "timestamp": "2026-11-22T07:10:41+00:00", "init": {"model": "swe-2-max-lightning", "cwd": "/tmp/trial_BENCH-005_icm_lite_r12", "tools": ["edit_file"]}}
+{"event": "step_update", "task_id": "BENCH-005", "arm": "icm_lite", "model": "swe-2-max-lightning", "run_index": 12, "step_update": {"step_index": 0, "state": "DONE", "step_type": "tool", "phase": "tool", "tool_name": "edit_file", "tool_info": {"name": "edit_file", "parameters": "/tmp/trial_BENCH-005_icm_lite_r12/config_loader.py", "output": ""}, "duration_seconds": null}}
+{"event": "hash", "phase": "pre", "sha256": "3abec7796e02634dfd9b4d32b920e5c09522181583e27b84630dbe075caf59e5", "task_id": "BENCH-005", "arm": "icm_lite"}
+{"event": "hash", "phase": "post", "sha256": "4a5921faa6a3fec5337f7c914ca14e29dbd7d8fe73b31da28183ad29f62c5980", "task_id": "BENCH-005", "arm": "icm_lite"}
+{"event": "hash", "phase": "restored", "sha256": "3abec7796e02634dfd9b4d32b920e5c09522181583e27b84630dbe075caf59e5", "task_id": "BENCH-005", "arm": "icm_lite"}
+{"event": "evaluation", "task_id": "BENCH-005", "arm": "icm_lite", "verification_status": "passed", "passed": true, "reasons": [], "evaluator_hash": "cc08acaeddf29f899850801d6bae7e130f26348f6e88f5c8e117ff457d5de5ff", "evaluator_output": "ALL CHECKS PASSED"}
+{"event": "run_complete", "task_id": "BENCH-005", "arm": "icm_lite", "status": "completed", "duration_seconds": 3, "num_turns": 1, "timestamp": "2026-11-22T07:10:44+00:00"}
