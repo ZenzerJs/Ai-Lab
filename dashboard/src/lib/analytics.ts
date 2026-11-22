@@ -138,6 +138,8 @@ export interface PairedStats {
  * (e.g. cost_usd, total_tokens). The pool is the arm's listed runs plus the
  * task's excluded_runs for that arm — excluded records carry the unpriced
  * scale runs (cost_unavailable) and failed attempts — filtered to `scope`.
+ * Imported (superseded) records are never paired: their contaminated
+ * baselines would reverse the reported direction of savings.
  * Only pairs where both sides carry a finite metric value are kept.
  */
 export function suitePairs(
@@ -152,7 +154,7 @@ export function suitePairs(
       [
         ...(task.arms[name]?.runs || []),
         ...(task.excluded_runs || []).filter((r) => r.arm === name),
-      ],
+      ].filter((r) => r.source_kind !== "imported"),
       scope,
     );
   const pairs: [number, number][] = [];

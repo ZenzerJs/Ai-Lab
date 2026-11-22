@@ -142,6 +142,9 @@ test('suitePairs matches baseline and governed runs by run_index on a metric', (
       run({ id: 8, arm: 'baseline', run_index: 5, cost_usd: null, cost_status: 'unavailable', is_comparison_eligible: false }),
       run({ id: 9, arm: 'icm', run_index: 5, cost_usd: null, cost_status: 'unavailable', is_comparison_eligible: false }),
       run({ id: 10, arm: 'icm', run_index: 6, cost_usd: 0.9, verification_status: 'failed', is_comparison_eligible: false }),
+      // Superseded imported attempts must never pair.
+      run({ id: 11, arm: 'baseline', run_index: 7, cost_usd: 0.5, source_kind: 'imported', is_comparison_eligible: false }),
+      run({ id: 12, arm: 'icm', run_index: 7, cost_usd: 0.1, source_kind: 'imported', is_comparison_eligible: false }),
     ],
   };
   assert.deepEqual(suitePairs(task, 'icm'), [[0.1, 0.05], [0.3, 0.1]]);
