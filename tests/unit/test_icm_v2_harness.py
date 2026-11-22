@@ -148,7 +148,10 @@ def test_icm_v2_contract_template_directives():
     assert "2 consecutive failing" in text
     assert "caller symbol" in text
     assert "1-line" in text
-    assert "filter_output.py" in text
+    assert "filter_output.py" not in text
+    assert "pytest -q --tb=short" in text
+    assert "INSTRUCTIONS.md" in text
+    assert "edge-case" in text
 
 
 def test_compact_repo_map_is_deterministic_and_within_token_budget(tmp_path):
