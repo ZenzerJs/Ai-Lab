@@ -54,11 +54,13 @@ export interface ModelFamilySummary {
   savingsPct: number | null;
 }
 
-const runTokens = (r: RunRecord) =>
+const runTokens = (r: RunRecord): number | null =>
   finite(r.total_tokens)
     ? r.total_tokens
-    : (finite(r.input_tokens) ? r.input_tokens : 0) +
-      (finite(r.output_tokens) ? r.output_tokens : 0);
+    : finite(r.input_tokens) || finite(r.output_tokens)
+      ? (finite(r.input_tokens) ? r.input_tokens : 0) +
+        (finite(r.output_tokens) ? r.output_tokens : 0)
+      : null;
 
 export function modelFamilySummaries(
   runs: RunRecord[] | undefined,
@@ -86,8 +88,12 @@ export function modelFamilySummaries(
       const list = byFamily.get(family)!;
       const base = list.filter((r) => r.arm === "baseline");
       const gov = list.filter((r) => r.arm !== "baseline");
-      const meanBaselineTokens = mean(base.map(runTokens));
-      const meanGovernedTokens = mean(gov.map(runTokens));
+      const meanBaselineTokens = mean(
+        base.map(runTokens).filter((t): t is number => t != null),
+      );
+      const meanGovernedTokens = mean(
+        gov.map(runTokens).filter((t): t is number => t != null),
+      );
       const baselineCostUsd = meanCost(base);
       const governedCostUsd = meanCost(gov);
       return {

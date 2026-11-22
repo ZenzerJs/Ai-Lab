@@ -7,7 +7,7 @@ import {
   Search,
 } from "lucide-react";
 import { ArmStats, DashboardPayload, TaskSummaryItem } from "../../types";
-import { armNames, experimentNames, finite, governedArm, governedArmName, suiteBootstrapCI } from "../../lib/workspace";
+import { armNames, experimentNames, finite, governedArm, suiteBootstrapCI } from "../../lib/workspace";
 import { isPricedRun, pairedDiffStats, suitePairs } from "../../lib/analytics";
 import { formatArm, formatCurrency, formatSignedPercent, formatTokens } from "../../lib/formatters";
 import AdaptiveICM from "./AdaptiveICM";
@@ -191,6 +191,27 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
               ),
             ]),
           );
+          const armBadges = (name: string) =>
+            statsByArm[name]?.effectSize ? (
+              <span className="effect-badges">
+                <span className="badge badge-blue">
+                  d<sub>z</sub>{" "}
+                  {statsByArm[name]!.cohensDz != null
+                    ? Math.abs(statsByArm[name]!.cohensDz!).toFixed(2)
+                    : "—"}{" "}
+                  · {statsByArm[name]!.effectSize}
+                </span>{" "}
+                {statsByArm[name]!.significant != null && (
+                  <span
+                    className={`badge ${statsByArm[name]!.significant ? "badge-green" : "badge-amber"}`}
+                  >
+                    {statsByArm[name]!.significant
+                      ? "significant"
+                      : "not significant"}
+                  </span>
+                )}
+              </span>
+            ) : null;
           return (
             <article key={cardKey} className="panel experiment-card">
               <div className="experiment-card-heading">
@@ -228,10 +249,15 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
                       <span>Baseline tok / pass</span>
                       <strong>{formatTokens(bTok)}</strong>
                     </div>
-                    <div>
-                      <span>{formatArm(governedArmName(task))} tok / pass</span>
-                      <strong>{formatTokens(gTok)}</strong>
-                    </div>
+                    {governedNames.map((name) => (
+                      <div key={name}>
+                        <span>{formatArm(name)} tok / pass</span>
+                        <strong>
+                          {formatTokens(task.arms[name]?.tokens_per_passing_patch)}
+                        </strong>
+                        {armBadges(name)}
+                      </div>
+                    ))}
                     <div>
                       <span>
                         {lower ? "Token reduction" : "Token overhead"}
@@ -277,28 +303,7 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
                               {formatSignedPercent(ci[1])}
                             </span>
                           )}
-                          {statsByArm[name]?.effectSize && (
-                            <span className="effect-badges">
-                              <span className="badge badge-blue">
-                                d<sub>z</sub>{" "}
-                                {statsByArm[name]!.cohensDz != null
-                                  ? Math.abs(
-                                      statsByArm[name]!.cohensDz!,
-                                    ).toFixed(2)
-                                  : "—"}{" "}
-                                · {statsByArm[name]!.effectSize}
-                              </span>{" "}
-                              {statsByArm[name]!.significant != null && (
-                                <span
-                                  className={`badge ${statsByArm[name]!.significant ? "badge-green" : "badge-amber"}`}
-                                >
-                                  {statsByArm[name]!.significant
-                                    ? "significant"
-                                    : "not significant"}
-                                </span>
-                              )}
-                            </span>
-                          )}
+                          {armBadges(name)}
                         </div>
                       );
                     })}

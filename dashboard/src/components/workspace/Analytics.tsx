@@ -26,6 +26,8 @@ interface SuiteEffectRow {
   arm: string;
   metricLabel: "Cost" | "Tokens";
   stats: PairedStats;
+  cardKey: string;
+  rowModel: string;
 }
 
 function EffectBadges({ stats }: { stats: PairedStats }) {
@@ -67,7 +69,15 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
   const effectRows = useMemo(() => {
     const rows: SuiteEffectRow[] = [];
     for (const task of data.tasks || []) {
+      const rowModel =
+        task.model ||
+        task.arms.baseline?.model ||
+        armNames(task)
+          .map((n) => task.arms[n]?.model)
+          .find(Boolean) ||
+        "";
       for (const name of armNames(task).filter((n) => n !== "baseline")) {
+        const cardKey = task.series_id || `${task.task_id}::${rowModel}`;
         const costStats = pairedDiffStats(
           suitePairs(task, name, costMetric, scope),
         );
@@ -82,7 +92,7 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
               : costStats
                 ? [costStats, "Cost" as const]
                 : [tokenStats, "Tokens" as const];
-        if (stats) rows.push({ task, arm: name, metricLabel: label, stats });
+        if (stats) rows.push({ task, arm: name, metricLabel: label, stats, cardKey, rowModel });
       }
     }
     return rows.sort((a, b) => {
@@ -187,13 +197,14 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
               </tr>
             </thead>
             <tbody>
-              {effectRows.map(({ task, arm, metricLabel: label, stats }) => (
-                <tr key={`${task.series_id || task.task_id}::${arm}`}>
+              {effectRows.map(({ task, arm, metricLabel: label, stats, cardKey, rowModel }) => (
+                <tr key={`${cardKey}::${arm}`}>
                   <th scope="row">
                     {task.task_id}
                     <span className="cell-subtitle">
                       {experimentNames[task.task_id] || "Experiment"} ·{" "}
                       {formatArm(arm)}
+                      {rowModel ? ` · ${rowModel}` : ""}
                     </span>
                   </th>
                   <td>{label}</td>
