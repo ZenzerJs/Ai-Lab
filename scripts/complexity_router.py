@@ -25,6 +25,7 @@ _REGEX_SYMBOL_PATTERNS = (
     re.compile(r"^\s*(?:async\s+)?def\s+[a-zA-Z_]"),
     re.compile(r"^\s*class\s+[a-zA-Z_]"),
     re.compile(r"^\s*(?:export\s+)?(?:default\s+)?(?:class|interface|type|function)\s+[a-zA-Z_]"),
+    re.compile(r"^\s*(?:export\s+)?(?:const|let|var)\s+[a-zA-Z_$][\w$]*\s*=\s*(?:async\s*)?(?:\([^)]*\)|[a-zA-Z_$][\w$]*)\s*=>"),
     re.compile(r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+[a-zA-Z_]"),
     re.compile(r"^\s*func\s+(?:\([^)]+\)\s+)?[a-zA-Z_]"),
 )
@@ -51,6 +52,80 @@ class RoutingDecision:
 
 _WRAPPER_NODE_TYPES = frozenset({"export_statement", "decorated_definition"})
 _AST_SYMBOL_NODE_TYPES = frozenset(repo_map.DEF_NODE_TYPES) - _WRAPPER_NODE_TYPES
+_FUNC_VALUE_NODE_TYPES = frozenset({"arrow_function", "function_expression", "function"})
+
+
+def _is_ast_symbol_node(node: Any) -> bool:
+    if node.type in _AST_SYMBOL_NODE_TYPES:
+        return True
+    if node.type == "variable_declarator":
+        val = node.child_by_field_name("value") if hasattr(node, "child_by_field_name") else None
+        if val is not None and val.type in _FUNC_VALUE_NODE_TYPES:
+            return True
+    return False
+
+
+def extract_ast_symbol_spans(target: Path, code: str) -> Optional[List[Tuple[str, int, int]]]:
+    """Return ``(symbol_key, start_line, end_line)`` spans (1-based) for definitions in *code*."""
+    if target.suffix == ".py":
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return None
+        spans: List[Tuple[str, int, int]] = []
+
+        def _visit(node: ast.AST, prefix: str) -> None:
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    qname = f"{prefix}.{child.name}" if prefix else child.name
+                    decorator_lines = [d.lineno for d in getattr(child, "decorator_list", ()) if hasattr(d, "lineno")]
+                    start = min([child.lineno, *decorator_lines])
+                    end = getattr(child, "end_lineno", child.lineno) or child.lineno
+                    spans.append((qname, start, end))
+                    _visit(child, qname)
+                else:
+                    _visit(child, prefix)
+
+        _visit(tree, "")
+        return spans
+
+    lang = repo_map.filename_to_lang(str(target))
+    if not lang:
+        return None
+    try:
+        tc = repo_map.TreeContext(
+            filename=str(target),
+            code=code,
+            color=False,
+            line_number=False,
+            mark_lois=False,
+            margin=0,
+            parent_context=False,
+            child_context=False,
+            last_line=False,
+            loi_pad=0,
+        )
+        lines = code.splitlines()
+        seen: set[Tuple[int, int, str]] = set()
+        spans = []
+        for nodes in tc.nodes:
+            for node in nodes:
+                if not _is_ast_symbol_node(node):
+                    continue
+                pos = (node.start_point[0], node.start_point[1], node.type)
+                if pos in seen:
+                    continue
+                seen.add(pos)
+                name_node = node.child_by_field_name("name") if hasattr(node, "child_by_field_name") else None
+                if name_node is not None and hasattr(name_node, "text") and name_node.text:
+                    sym_name = name_node.text.decode("utf-8", errors="replace") if isinstance(name_node.text, bytes) else str(name_node.text)
+                else:
+                    row = node.start_point[0]
+                    sym_name = lines[row].strip() if 0 <= row < len(lines) else f"L{row + 1}"
+                spans.append((f"{node.type}:{sym_name}", node.start_point[0] + 1, node.end_point[0] + 1))
+        return spans
+    except Exception:
+        return None
 
 
 def count_ast_symbols(target: Optional[Path]) -> Optional[int]:
@@ -67,41 +142,9 @@ def count_ast_symbols(target: Optional[Path]) -> Optional[int]:
     except (OSError, UnicodeError):
         return None
 
-    if target.suffix == ".py":
-        try:
-            tree = ast.parse(code)
-            return sum(
-                1
-                for node in ast.walk(tree)
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-            )
-        except SyntaxError:
-            pass
-
-    lang = repo_map.filename_to_lang(str(target))
-    if lang:
-        try:
-            tc = repo_map.TreeContext(
-                filename=str(target),
-                code=code,
-                color=False,
-                line_number=False,
-                mark_lois=False,
-                margin=0,
-                parent_context=False,
-                child_context=False,
-                last_line=False,
-                loi_pad=0,
-            )
-            seen: set[Tuple[int, int, str]] = set()
-            for nodes in tc.nodes:
-                for node in nodes:
-                    if node.type in _AST_SYMBOL_NODE_TYPES:
-                        seen.add((node.start_point[0], node.start_point[1], node.type))
-            if seen:
-                return len(seen)
-        except Exception:
-            pass
+    spans = extract_ast_symbol_spans(target, code)
+    if spans is not None and (target.suffix == ".py" or len(spans) > 0):
+        return len(spans)
 
     return sum(
         1
