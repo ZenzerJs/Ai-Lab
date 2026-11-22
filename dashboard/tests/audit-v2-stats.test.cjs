@@ -247,7 +247,7 @@ test('UI components surface preliminary badges, n=, BH FDR, matched ICM-Lite, to
   assert.match(analyticsHtml, /ICM-Lite vs Baseline \(matched shared tasks only\)/);
 
   const overviewHtml = renderToStaticMarkup(React.createElement(Overview, { data: enriched }));
-  assert.match(overviewHtml, /\+10\.5% cost/);
+  assert.match(overviewHtml, /-1\.5% savings/);
   assert.match(overviewHtml, /macro_average/);
   assert.match(overviewHtml, /suite present, unmeasured/);
 

@@ -260,7 +260,7 @@ def test_run_benchmark_live_with_mocked_agy_cli_and_unpriced_model(tmp_path: Pat
         task_id="BENCH-002",
         arm="icm",
         run_index=1,
-        model="gemini-4-hydrogen-low",
+        model="unpriced-model-x",
         cli_cmd="agy",
         timeout_seconds=180,
         db_path=db_file,
@@ -271,7 +271,7 @@ def test_run_benchmark_live_with_mocked_agy_cli_and_unpriced_model(tmp_path: Pat
     cmd = captured_calls[0]["cmd"]
     assert cmd[0] == "agy"
     assert "--output-format" in cmd and "stream-json" in cmd
-    assert "--model" in cmd and "gemini-4-hydrogen-low" in cmd
+    assert "--model" in cmd and "unpriced-model-x" in cmd
     assert "--dangerously-skip-permissions" in cmd
     assert "--print-timeout" in cmd and "180s" in cmd
     assert captured_calls[0]["kwargs"]["stdin"] == subprocess.DEVNULL
@@ -292,7 +292,7 @@ def test_run_benchmark_live_with_mocked_agy_cli_and_unpriced_model(tmp_path: Pat
     assert res["tool_metrics"]["loop_detected"] is True
 
     # Evidence file saved with pure LF endings
-    ev_files = list(evidence_dir.glob("live_BENCH-002_gemini-4-hydrogen-low_icm_run1_*.ndjson"))
+    ev_files = list(evidence_dir.glob("live_BENCH-002_unpriced-model-x_icm_run1_*.ndjson"))
     assert len(ev_files) == 1
     assert b"\r\n" not in ev_files[0].read_bytes()
 
