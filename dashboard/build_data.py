@@ -276,13 +276,26 @@ def build_declared_benchmarks(
     if runs is not None:
         for r in runs:
             tid = r.get("task_id")
-            if tid and r.get("source_kind") != "imported":
+            if (
+                tid
+                and r.get("source_kind") == "live"
+                and not r.get("is_simulation")
+                and r.get("evidence_status") not in ("unverified", "invalid", "missing")
+            ):
                 counts[tid] = counts.get(tid, 0) + 1
     else:
         for t in tasks:
             tid = t.get("task_id")
-            if tid:
-                counts[tid] = counts.get(tid, 0) + int(t.get("total_runs") or 0)
+            if (
+                tid
+                and t.get("has_measured_data")
+                and not t.get("is_simulation")
+                and not t.get("is_demo_report")
+            ):
+                measured = t.get("measured_runs_count")
+                counts[tid] = counts.get(tid, 0) + int(
+                    measured if measured is not None else (t.get("total_runs") or 0)
+                )
     return [
         {
             "task_id": tid,

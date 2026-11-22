@@ -597,14 +597,27 @@ export function crossCheckBenchmarks(
   const counts = new Map<string, number>();
   if (runs && runs.length > 0) {
     for (const r of runs) {
-      if (r.task_id && r.source_kind !== "imported") {
+      if (
+        r.task_id &&
+        r.source_kind === "live" &&
+        !r.is_simulation &&
+        r.evidence_status !== "unverified" &&
+        r.evidence_status !== "invalid" &&
+        r.evidence_status !== "missing"
+      ) {
         counts.set(r.task_id, (counts.get(r.task_id) || 0) + 1);
       }
     }
   } else {
     for (const t of tasks || []) {
-      if (t.task_id) {
-        counts.set(t.task_id, (counts.get(t.task_id) || 0) + (t.total_runs || 0));
+      if (
+        t.task_id &&
+        t.has_measured_data &&
+        !t.is_simulation &&
+        !t.is_demo_report
+      ) {
+        const measured = t.measured_runs_count ?? t.total_runs ?? 0;
+        counts.set(t.task_id, (counts.get(t.task_id) || 0) + measured);
       }
     }
   }
