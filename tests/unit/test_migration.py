@@ -202,3 +202,103 @@ def test_mig_03_migration_failure_rollback(tmp_path: Path):
 
     conn.close()
 
+
+_NEW_CACHE_DIAG_COLS = {
+    "llm_calls_count",
+    "peak_context_tokens",
+    "avg_fresh_input_per_call",
+    "cache_bust_count",
+    "tools_per_llm_call",
+    "contract_version",
+    "contract_hash",
+}
+
+
+def test_mig_cache_diagnostics_columns_from_legacy_and_phase2_db(tmp_path: Path):
+    """
+    Verify migrate_db adds all 7 cache-diagnostic and contract columns cleanly
+    to both legacy Phase 0 and Phase 2 databases without data loss, and is idempotent.
+    """
+    # 1. Legacy Phase 0 DB
+    legacy_db = tmp_path / "legacy_cache.db"
+    conn = create_legacy_db(legacy_db)
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO runs (
+                task_id, arm, model, run_index, timestamp,
+                input_tokens, output_tokens, thinking_tokens, cache_read_tokens,
+                total_tokens, num_turns, duration_seconds
+            ) VALUES ('LEG-1', 'baseline', 'gemini-4-argon-low', 1, '2026-09-01T10:00:00Z', 1000, 100, 0, 500, 1600, 2, 4.0)
+            """
+        )
+
+    assert ledger.migrate_db(conn) is True
+    assert ledger.migrate_db(conn) is False
+
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(runs)").fetchall()}
+    assert _NEW_CACHE_DIAG_COLS.issubset(cols)
+
+    row = dict(conn.execute("SELECT * FROM runs WHERE task_id = 'LEG-1'").fetchone())
+    assert row["input_tokens"] == 1000
+    for col in _NEW_CACHE_DIAG_COLS:
+        assert row[col] is None
+    conn.close()
+
+    # 2. Pre-PR-1.2 Phase 2 DB (has source_kind & tool_calls_count, lacks the 7 new columns)
+    p2_db = tmp_path / "phase2_pre_m1.db"
+    p2_conn = sqlite3.connect(str(p2_db))
+    p2_conn.row_factory = sqlite3.Row
+    with p2_conn:
+        p2_conn.executescript("""
+            CREATE TABLE runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                arm TEXT NOT NULL,
+                model TEXT NOT NULL,
+                run_index INTEGER NOT NULL,
+                timestamp TEXT NOT NULL,
+                input_tokens INTEGER,
+                output_tokens INTEGER,
+                thinking_tokens INTEGER,
+                cache_read_tokens INTEGER,
+                total_tokens INTEGER,
+                num_turns INTEGER NOT NULL,
+                duration_seconds REAL NOT NULL,
+                source_kind TEXT NOT NULL DEFAULT 'unknown',
+                evidence_status TEXT NOT NULL DEFAULT 'unverified',
+                exclusion_reasons TEXT,
+                evidence_ref TEXT,
+                evidence_hash TEXT,
+                import_id TEXT,
+                cost_status TEXT NOT NULL DEFAULT 'unknown',
+                cost_usd REAL,
+                is_simulation INTEGER NOT NULL DEFAULT 0,
+                notes TEXT,
+                execution_status TEXT NOT NULL DEFAULT 'completed',
+                verification_status TEXT NOT NULL DEFAULT 'not_run',
+                manifest_id TEXT,
+                evaluator_hash TEXT,
+                tool_calls_count INTEGER,
+                tool_errors_count INTEGER,
+                max_consecutive_tool_streak INTEGER,
+                loop_detected INTEGER
+            );
+            INSERT INTO runs (
+                task_id, arm, model, run_index, timestamp,
+                input_tokens, output_tokens, num_turns, duration_seconds,
+                source_kind, evidence_status, tool_calls_count
+            ) VALUES ('P2-1', 'icm', 'gemini-4-argon-low', 1, '2026-10-01T10:00:00Z', 2000, 150, 2, 3.0, 'live', 'verified', 4);
+        """)
+
+    assert ledger.migrate_db(p2_conn) is True
+    assert ledger.migrate_db(p2_conn) is False
+
+    p2_cols = {r[1] for r in p2_conn.execute("PRAGMA table_info(runs)").fetchall()}
+    assert _NEW_CACHE_DIAG_COLS.issubset(p2_cols)
+    p2_row = dict(p2_conn.execute("SELECT * FROM runs WHERE task_id = 'P2-1'").fetchone())
+    assert p2_row["tool_calls_count"] == 4
+    for col in _NEW_CACHE_DIAG_COLS:
+        assert p2_row[col] is None
+    p2_conn.close()
+

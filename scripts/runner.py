@@ -2154,6 +2154,10 @@ def run_benchmark_live(
                     exclusion_reasons.append("partial_telemetry")
 
         tool_metrics = ledger.extract_ndjson_tool_metrics(stdout_lines)
+        cache_diagnostics = ledger.extract_ndjson_cache_diagnostics(
+            stdout_lines,
+            tool_calls_count=tool_metrics["tool_calls_count"],
+        )
         duration_seconds = parsed["duration_seconds"] if parsed["duration_seconds"] > 0 else wall_duration
         num_turns = parsed["num_turns"]
 
@@ -2249,6 +2253,11 @@ def run_benchmark_live(
                 tool_errors_count=tool_metrics["tool_errors_count"],
                 max_consecutive_tool_streak=tool_metrics["max_consecutive_tool_streak"],
                 loop_detected=tool_metrics["loop_detected"],
+                llm_calls_count=cache_diagnostics["llm_calls_count"],
+                peak_context_tokens=cache_diagnostics["peak_context_tokens"],
+                avg_fresh_input_per_call=cache_diagnostics["avg_fresh_input_per_call"],
+                cache_bust_count=cache_diagnostics["cache_bust_count"],
+                tools_per_llm_call=cache_diagnostics["tools_per_llm_call"],
                 conn=conn,
             )
 
@@ -2288,6 +2297,7 @@ def run_benchmark_live(
             "acus_consumed": row["acus_consumed"],
             "usage": usage,
             "tool_metrics": tool_metrics,
+            "cache_diagnostics": cache_diagnostics,
             "evidence_ref": evidence_ref,
             "evidence_hash": evidence_hash,
             "pre_hash": pre_hash,

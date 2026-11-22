@@ -204,3 +204,229 @@ def test_tel_05_conflicting_run_complete_events():
     with pytest.raises(ledger.TelemetryValidationError, match="conflicting run_complete"):
         ledger.validate_and_parse_telemetry(stream_conflict)
 
+
+def test_extract_ndjson_cache_diagnostics_multistep_and_dedup():
+    """
+    Verify extract_ndjson_cache_diagnostics deduplicates step_update by step_index,
+    orders by ascending step_index, excludes Turn-1 from avg_fresh_input_per_call,
+    and computes tools_per_llm_call both automatically and when passed explicitly.
+    """
+    lines = [
+        json.dumps({"event": "init", "init": {"model": "gemini-4-argon-low"}}),
+        # Step 1 ACTIVE then DONE (out of order with step 4, should dedup and sort)
+        json.dumps({"event": "step_update", "step_update": {"step_index": 1, "step_type": "agent_response", "state": "ACTIVE", "usage": None}}),
+        json.dumps({"event": "step_update", "step_update": {"step_index": 4, "step_type": "agent_response", "state": "DONE", "usage": {"input_tokens": 2000, "output_tokens": 80, "cache_read_tokens": 22000}}}),
+        json.dumps({"event": "step_update", "step_update": {"step_index": 1, "step_type": "agent_response", "state": "DONE", "usage": {"input_tokens": 24000, "output_tokens": 100, "cache_read_tokens": 0}}}),
+        json.dumps({"event": "step_update", "step_update": {"step_index": 2, "step_type": "tool", "state": "DONE", "tool_name": "read_file"}}),
+        json.dumps({"event": "step_update", "step_update": {"step_index": 3, "step_type": "tool", "state": "DONE", "tool_name": "edit_file"}}),
+        json.dumps({"event": "step_update", "step_update": {"step_index": 5, "step_type": "tool", "state": "DONE", "tool_name": "run_command"}}),
+        json.dumps({"event": "step_update", "step_update": {"step_index": 6, "step_type": "agent_response", "state": "DONE", "usage": {"input_tokens": 3000, "output_tokens": 120, "cache_read_tokens": 25000}}}),
+    ]
+
+    diag = ledger.extract_ndjson_cache_diagnostics(lines)
+    assert diag["llm_calls_count"] == 3
+    # Peak context: max(24000+0, 2000+22000, 3000+25000) = 28000
+    assert diag["peak_context_tokens"] == 28000
+    # Turn 2+ fresh input: mean(2000, 3000) = 2500.0 (Turn 1's 24000 excluded)
+    assert diag["avg_fresh_input_per_call"] == pytest.approx(2500.0)
+    # Cache monotonically increased: 0 -> 22000 -> 25000
+    assert diag["cache_bust_count"] == 0
+    # 3 tool steps / 3 llm calls = 1.0
+    assert diag["tools_per_llm_call"] == pytest.approx(1.0)
+
+    # Explicit tool_calls_count override
+    diag_override = ledger.extract_ndjson_cache_diagnostics("\n".join(lines), tool_calls_count=6)
+    assert diag_override["tools_per_llm_call"] == pytest.approx(2.0)
+
+
+def test_extract_ndjson_cache_diagnostics_mid_run_cache_drop():
+    """Verify simulated mid-run cache drop yields cache_bust_count == 1."""
+    lines = [
+        {"event": "step_update", "step_update": {"step_index": 1, "step_type": "agent_response", "state": "DONE", "usage": {"input_tokens": 20000, "cache_read_tokens": 0}}},
+        {"event": "step_update", "step_update": {"step_index": 3, "step_type": "agent_response", "state": "DONE", "usage": {"input_tokens": 2000, "cache_read_tokens": 22000}}},
+        {"event": "step_update", "step_update": {"step_index": 5, "step_type": "agent_response", "state": "DONE", "usage": {"input_tokens": 18000, "cache_read_tokens": 5000}}},
+        {"event": "step_update", "step_update": {"step_index": 7, "step_type": "agent_response", "state": "DONE", "usage": {"input_tokens": 1500, "cache_read_tokens": 23000}}},
+    ]
+
+    diag = ledger.extract_ndjson_cache_diagnostics(lines)
+    assert diag["llm_calls_count"] == 4
+    assert diag["cache_bust_count"] == 1
+    assert diag["peak_context_tokens"] == 24500
+    assert diag["avg_fresh_input_per_call"] == pytest.approx((2000 + 18000 + 1500) / 3.0)
+
+
+def test_extract_ndjson_cache_diagnostics_partial_missing_usage_returns_none():
+    """Verify missing or partial step usage remains None and never fakes 0."""
+    # 1. Empty / no agent_response usage
+    empty_diag = ledger.extract_ndjson_cache_diagnostics([
+        {"event": "step_update", "step_update": {"step_index": 1, "step_type": "agent_response", "state": "ACTIVE", "usage": None}},
+        {"event": "step_update", "step_update": {"step_index": 2, "step_type": "tool", "state": "DONE", "tool_name": "read_file"}},
+    ])
+    assert empty_diag == {
+        "llm_calls_count": None,
+        "peak_context_tokens": None,
+        "avg_fresh_input_per_call": None,
+        "cache_bust_count": None,
+        "tools_per_llm_call": None,
+    }
+
+    # 2. Single call: avg_fresh_input_per_call and cache_bust_count must be None
+    single_diag = ledger.extract_ndjson_cache_diagnostics([
+        {"event": "step_update", "step_update": {"step_index": 1, "step_type": "agent_response", "state": "DONE", "usage": {"input_tokens": 5000, "cache_read_tokens": 0}}},
+    ])
+    assert single_diag["llm_calls_count"] == 1
+    assert single_diag["peak_context_tokens"] == 5000
+    assert single_diag["avg_fresh_input_per_call"] is None
+    assert single_diag["cache_bust_count"] is None
+    assert single_diag["tools_per_llm_call"] == pytest.approx(0.0)
+
+    # 3. Multiple calls with missing input_tokens / cache_read_tokens (only output_tokens)
+    partial_diag = ledger.extract_ndjson_cache_diagnostics([
+        {"event": "step_update", "step_update": {"step_index": 1, "step_type": "agent_response", "state": "DONE", "usage": {"output_tokens": 40}}},
+        {"event": "step_update", "step_update": {"step_index": 2, "step_type": "agent_response", "state": "DONE", "usage": {"input_tokens": 1200, "cache_read_tokens": None, "output_tokens": 50}}},
+    ])
+    assert partial_diag["llm_calls_count"] == 2
+    assert partial_diag["peak_context_tokens"] == 1200
+    assert partial_diag["avg_fresh_input_per_call"] is None
+    assert partial_diag["cache_bust_count"] is None
+
+    # 4. Calls with neither input_tokens nor cache_read_tokens -> peak_context_tokens is None
+    no_context_diag = ledger.extract_ndjson_cache_diagnostics([
+        {"event": "step_update", "step_update": {"step_index": 1, "step_type": "agent_response", "state": "DONE", "usage": {"output_tokens": 40}}},
+    ])
+    assert no_context_diag["llm_calls_count"] == 1
+    assert no_context_diag["peak_context_tokens"] is None
+
+
+def test_record_run_to_public_run_and_backfill_cache_diagnostics(tmp_path: Path):
+    """
+    Verify record_run persists all 7 new columns, to_public_run exposes them,
+    and backfill_cache_diagnostics_from_evidence populates NULL rows idempotently.
+    """
+    db_file = tmp_path / "diag_backfill.db"
+    conn = ledger.get_connection(db_file)
+    ledger.seed_pricing(conn=conn)
+
+    ev_rel = Path("ev.ndjson")
+    ev_path = tmp_path / ev_rel
+    ev_path.write_text(
+        "\n".join([
+            json.dumps({"event": "step_update", "step_update": {"step_index": 1, "step_type": "agent_response", "state": "DONE", "usage": {"input_tokens": 10000, "cache_read_tokens": 0}}}),
+            json.dumps({"event": "step_update", "step_update": {"step_index": 2, "step_type": "tool", "state": "DONE", "tool_name": "read_file"}}),
+            json.dumps({"event": "step_update", "step_update": {"step_index": 3, "step_type": "agent_response", "state": "DONE", "usage": {"input_tokens": 1500, "cache_read_tokens": 9000}}}),
+        ]) + "\n",
+        encoding="utf-8",
+    )
+
+    rid_explicit = ledger.record_run(
+        task_id="T-DIAG",
+        arm="icm",
+        model="gemini-4-argon-low",
+        run_index=1,
+        timestamp="2026-11-22T00:00:00Z",
+        input_tokens=11500,
+        output_tokens=200,
+        cache_read_tokens=9000,
+        llm_calls_count=2,
+        peak_context_tokens=10500,
+        avg_fresh_input_per_call=1500.0,
+        cache_bust_count=0,
+        tools_per_llm_call=0.5,
+        contract_version="v2.1",
+        contract_hash="abc123",
+        conn=conn,
+    )
+    row = dict(conn.execute("SELECT * FROM runs WHERE id = ?", (rid_explicit,)).fetchone())
+    pub = ledger.to_public_run(row)
+    assert pub["llm_calls_count"] == 2
+    assert pub["peak_context_tokens"] == 10500
+    assert pub["avg_fresh_input_per_call"] == pytest.approx(1500.0)
+    assert pub["cache_bust_count"] == 0
+    assert pub["tools_per_llm_call"] == pytest.approx(0.5)
+    assert pub["contract_version"] == "v2.1"
+    assert pub["contract_hash"] == "abc123"
+
+    rid_backfill = ledger.record_run(
+        task_id="T-DIAG",
+        arm="baseline",
+        model="gemini-4-argon-low",
+        run_index=1,
+        timestamp="2026-11-22T00:01:00Z",
+        input_tokens=11500,
+        output_tokens=200,
+        cache_read_tokens=9000,
+        evidence_ref=str(ev_rel),
+        conn=conn,
+    )
+    assert ledger.backfill_cache_diagnostics_from_evidence(conn, workspace_root=tmp_path) == 1
+    assert ledger.backfill_cache_diagnostics_from_evidence(conn, workspace_root=tmp_path) == 0
+
+    bf_row = dict(conn.execute("SELECT * FROM runs WHERE id = ?", (rid_backfill,)).fetchone())
+    assert bf_row["llm_calls_count"] == 2
+    assert bf_row["peak_context_tokens"] == 10500
+    assert bf_row["avg_fresh_input_per_call"] == pytest.approx(1500.0)
+    assert bf_row["cache_bust_count"] == 0
+    assert bf_row["tools_per_llm_call"] == pytest.approx(0.5)
+    conn.close()
+
+
+def test_runner_live_wires_cache_diagnostics_offline(tmp_path: Path, monkeypatch):
+    """Verify runner.run_benchmark_live extracts and persists cache diagnostics offline."""
+    import subprocess
+    import runner
+
+    task_dir = tmp_path / "benchmarks" / "BENCH-T"
+    ws_src = task_dir / "workspace"
+    eval_dir = task_dir / "evaluator"
+    ws_src.mkdir(parents=True)
+    eval_dir.mkdir(parents=True)
+    (ws_src / "INSTRUCTIONS.md").write_text("# Task\nDo work.\n", encoding="utf-8")
+    (eval_dir / "test_ok.py").write_text("def test_ok(): assert True\n", encoding="utf-8")
+
+    db_file = tmp_path / "runner_diag.db"
+    ev_dir = tmp_path / "evidence"
+    ws_root = tmp_path / "tmp" / "workspaces"
+    monkeypatch.setattr(runner, "WORKSPACE_ROOT", tmp_path)
+    monkeypatch.setattr(runner, "DEFAULT_EVIDENCE_DIR", ev_dir)
+
+    ndjson_stdout = "\n".join([
+        json.dumps({"event": "init", "init": {"model": "gemini-4-argon-low"}}),
+        json.dumps({"event": "step_update", "step_update": {"step_index": 1, "step_type": "agent_response", "state": "DONE", "usage": {"input_tokens": 12000, "output_tokens": 50, "cache_read_tokens": 0}}}),
+        json.dumps({"event": "step_update", "step_update": {"step_index": 2, "step_type": "tool", "state": "DONE", "tool_name": "read_file"}}),
+        json.dumps({"event": "step_update", "step_update": {"step_index": 3, "step_type": "agent_response", "state": "DONE", "usage": {"input_tokens": 1000, "output_tokens": 60, "cache_read_tokens": 12000}}}),
+        json.dumps({"event": "result", "num_turns": 2, "duration_seconds": 4.0, "usage": {"input_tokens": 13000, "output_tokens": 110, "cache_read_tokens": 12000}}),
+    ]).encode("utf-8")
+
+    orig_run = subprocess.run
+
+    def fake_run(cmd, **kwargs):
+        if cmd and cmd[0] == "agy":
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout=ndjson_stdout, stderr=b"")
+        return orig_run(cmd, **kwargs)
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+
+    res = runner.run_benchmark_live(
+        task_id="BENCH-T",
+        arm="baseline",
+        run_index=1,
+        model="gemini-4-argon-low",
+        cli_cmd="agy",
+        db_path=db_file,
+        workspace_root=ws_root,
+    )
+    assert res["cache_diagnostics"]["llm_calls_count"] == 2
+    assert res["cache_diagnostics"]["peak_context_tokens"] == 13000
+    assert res["cache_diagnostics"]["avg_fresh_input_per_call"] == pytest.approx(1000.0)
+    assert res["cache_diagnostics"]["cache_bust_count"] == 0
+    assert res["cache_diagnostics"]["tools_per_llm_call"] == pytest.approx(0.5)
+
+    conn = ledger.get_connection(db_file)
+    row = dict(conn.execute("SELECT * FROM runs WHERE id = ?", (res["run_id"],)).fetchone())
+    assert row["llm_calls_count"] == 2
+    assert row["peak_context_tokens"] == 13000
+    assert row["avg_fresh_input_per_call"] == pytest.approx(1000.0)
+    assert row["cache_bust_count"] == 0
+    assert row["tools_per_llm_call"] == pytest.approx(0.5)
+    conn.close()
+
