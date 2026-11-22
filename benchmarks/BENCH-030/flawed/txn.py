@@ -53,10 +53,13 @@ class Transaction:
                     raise ConflictError(
                         f"key {key} committed at {latest.begin_ts} "
                         f"after snapshot {self.snapshot_ts}")
-            commit_ts = self.db.next_ts()
-            for key, value in self.rwset.writes.items():
-                self.db._chain(key).add(
-                    Version(commit_ts, INF, value, self.id))
+            # publish atomically against concurrent begin(): a new
+            # snapshot either sees every version of this commit or none
+            with self.db.commit_lock:
+                commit_ts = self.db.next_ts()
+                for key, value in self.rwset.writes.items():
+                    self.db._chain(key).add(
+                        Version(commit_ts, INF, value, self.id))
             self.state = "committed"
             self.db.end(self)
             return commit_ts

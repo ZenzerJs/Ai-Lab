@@ -1,4 +1,5 @@
 """MVCC database orchestrating transactions, timestamps and GC."""
+import threading
 from collector import collect
 from locks import LockTable
 from txn import Transaction
@@ -17,6 +18,9 @@ class DB:
         self.locks = LockTable()
         self.ts = 0
         self.open_snapshots = {}    # txn_id -> snapshot_ts
+        # serializes snapshot capture (begin) against commit publish:
+        # a snapshot must never observe a half-installed commit
+        self.commit_lock = threading.Lock()
 
     def next_ts(self) -> int:
         self.ts += 1
@@ -26,9 +30,10 @@ class DB:
         return self.chains.setdefault(key, VersionChain())
 
     def begin(self, txn_id: str) -> Transaction:
-        txn = Transaction(self, txn_id, self.ts)
-        self.open_snapshots[txn_id] = txn.snapshot_ts
-        return txn
+        with self.commit_lock:
+            txn = Transaction(self, txn_id, self.ts)
+            self.open_snapshots[txn_id] = txn.snapshot_ts
+            return txn
 
     def end(self, txn: Transaction) -> None:
         self.open_snapshots.pop(txn.id, None)
