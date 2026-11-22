@@ -220,6 +220,20 @@ export function Overview({ data }: { data: DashboardPayload }) {
         ? r.total_tokens
         : (finite(r.input_tokens) ? r.input_tokens : 0) +
           (finite(r.output_tokens) ? r.output_tokens : 0);
+    const hasTokens = (r: RunRecord) =>
+      finite(r.total_tokens) ||
+      finite(r.input_tokens) ||
+      finite(r.output_tokens);
+    // Runs without token telemetry are left out, so a cohort with none shows "—", not 0.
+    const tokensPerPass = (runs: RunRecord[]) => {
+      const metered = runs.filter(hasTokens);
+      const passed = metered.filter(
+        (r) => r.verification_status === "passed",
+      ).length;
+      return passed > 0
+        ? metered.reduce((s, r) => s + runTokens(r), 0) / passed
+        : null;
+    };
     const sumUsd = (runs: RunRecord[]) => {
       const priced = runs.filter(
         (r) => r.is_comparison_eligible && finite(r.cost_usd),
@@ -240,14 +254,8 @@ export function Overview({ data }: { data: DashboardPayload }) {
         const govPassed = govRuns.filter(
           (r) => r.verification_status === "passed",
         ).length;
-        const baseTokPass =
-          basePassed > 0
-            ? baseRuns.reduce((s, r) => s + runTokens(r), 0) / basePassed
-            : null;
-        const govTokPass =
-          govPassed > 0
-            ? govRuns.reduce((s, r) => s + runTokens(r), 0) / govPassed
-            : null;
+        const baseTokPass = tokensPerPass(baseRuns);
+        const govTokPass = tokensPerPass(govRuns);
         const tokDeltaPct =
           baseTokPass != null && baseTokPass > 0 && govTokPass != null
             ? ((baseTokPass - govTokPass) / baseTokPass) * 100
