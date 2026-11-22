@@ -389,3 +389,16 @@ def test_prepare_does_not_chmod_existing_workspace_root(tmp_path: Path):
     finally:
         ws.cleanup()
     assert _stat.S_IMODE(ws_root.stat().st_mode) == 0o755
+
+
+def test_group_writable_workspace_root_refused(tmp_path: Path):
+    """A base_temp writable by group/other local accounts is refused even when we own it."""
+    writable_root = tmp_path / "shared_writable"
+    writable_root.mkdir()
+    os.chmod(writable_root, 0o777)
+
+    with pytest.raises(RuntimeError, match="writable by group/other"):
+        runner.WorkspaceManager.prepare_arm_workspace(
+            snapshot_dir=_make_snapshot(tmp_path), arm="baseline",
+            workspace_root=writable_root, run_id="r",
+        )

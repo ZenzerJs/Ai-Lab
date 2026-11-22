@@ -782,11 +782,16 @@ class WorkspaceManager:
 
         if not base_temp.exists():
             base_temp.mkdir(parents=True, mode=0o700)
-        # A workspace root owned by another local account is untrusted: it could
-        # substitute the tree the evaluator grades.
-        if hasattr(os, "getuid") and base_temp.stat().st_uid != os.getuid():
+        # A workspace root other local accounts can control is untrusted: they
+        # could substitute the tree the evaluator grades.
+        base_stat = base_temp.stat()
+        if hasattr(os, "getuid") and base_stat.st_uid != os.getuid():
             raise RuntimeError(
                 f"Refusing to use workspace root '{base_temp}': owned by another local account."
+            )
+        if os.name == "posix" and stat.S_IMODE(base_stat.st_mode) & 0o022:
+            raise RuntimeError(
+                f"Refusing to use workspace root '{base_temp}': writable by group/other local accounts."
             )
         ws_name = f"{canonical_label}_{arm}" if canonical_workspace else f"{run_id}_{arm}"
         ws_dir = (base_temp / ws_name).resolve()
