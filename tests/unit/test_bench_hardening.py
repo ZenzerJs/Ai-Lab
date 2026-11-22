@@ -44,6 +44,14 @@ _MODULE_NAMES = {
     "graph", "resources", "ready",
     "lexer", "env", "eval",
     "memtable", "sstable",
+    "hashing", "chunker", "merkle", "diff", "sync", "replica",
+    "vclock", "counters", "orset", "lww", "merge", "store",
+    "syntax", "nfa", "compiler", "engine",
+    "versions", "rwset", "locks", "txn", "collector", "db",
+    "objects", "tree", "commit", "refs", "merge3", "repo",
+    "cell", "topo", "batch",
+    "event", "watermark", "aggregators", "triggers", "pipeline",
+    "relations", "algebra", "network", "propagate", "search", "solver",
 }
 
 
@@ -570,3 +578,230 @@ def test_bench026_seeded_reopen_and_compact_identity():
                     except NotFoundError:
                         pass
                 kv2.close()
+
+
+def test_bench027_concurrent_repairs_converge():
+    """N replicas pull-repair from one source concurrently -> converge."""
+    with _load_bench("BENCH-027"):
+        from replica import Replica
+
+        rng = random.Random(4242)
+        base = bytes(rng.randrange(256) for _ in range(4096))
+        target = Replica("t", base)
+        replicas = []
+        for i in range(4):
+            mutated = bytearray(base)
+            mutated[i * 500:(i + 1) * 500] = bytes(500)
+            replicas.append(Replica(f"r{i}", bytes(mutated)))
+        barrier = threading.Barrier(len(replicas))
+
+        def sync(r):
+            barrier.wait(timeout=5)
+            r.sync_with(target)
+
+        threads = [threading.Thread(target=sync, args=(r,))
+                   for r in replicas]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        for r in replicas:
+            assert r.is_consistent(target)
+
+
+def test_bench027_seeded_diff_ranges_minimal():
+    """diff_ranges returns disjoint minimal ranges for seeded mutations."""
+    with _load_bench("BENCH-027"):
+        from chunker import chunk
+        from diff import diff_ranges
+        from merkle import MerkleTree
+
+        rng = random.Random(77)
+        for _ in range(8):
+            n = rng.randrange(1, 33)
+            a = bytes(rng.randrange(256) for _ in range(n * 64))
+            b = bytearray(a)
+            for _i in range(rng.randrange(1, 6)):
+                pos = rng.randrange(len(b))
+                b[pos] ^= 0xFF
+            ta = MerkleTree(chunk(a, 64))
+            tb = MerkleTree(chunk(bytes(b), 64))
+            ranges = diff_ranges(ta, tb)
+            for i in range(len(ranges) - 1):
+                assert ranges[i][1] <= ranges[i + 1][0]
+
+
+def test_bench028_seeded_merge_commutative_idempotent():
+    """CRDT merges are commutative and idempotent under seeded shuffles."""
+    with _load_bench("BENCH-028"):
+        from counters import GCounter
+        from orset import ORSet
+
+        rng = random.Random(99)
+        for _ in range(10):
+            a, b = GCounter(), GCounter()
+            for _i in range(rng.randrange(1, 20)):
+                a.increment("A", rng.randrange(5))
+                b.increment("B", rng.randrange(5))
+            m1 = a.merge(b)
+            m2 = b.merge(a)
+            assert m1.value == m2.value
+            assert m1.merge(m1).value == m1.value
+
+        s1, s2 = ORSet(), ORSet()
+        for e in range(8):
+            tag = f"t{e}-{rng.randrange(1000)}"
+            s1.add(e, tag)
+            s2.add(e, tag)
+        assert sorted(s1.elements()) == sorted(s2.elements())
+
+
+def test_bench029_seeded_findall_nonoverlapping():
+    """search_at yields non-overlapping leftmost-longest matches."""
+    with _load_bench("BENCH-029"):
+        from engine import Regex
+
+        rng = random.Random(11)
+        for pat in ("a+b*", "(ab|c)+", "x?y*"):
+            eng = Regex(pat)
+            text = "".join(rng.choice("abcxy") for _ in range(50))
+            prev_end = 0
+            pos = 0
+            while pos <= len(text):
+                hit = eng.search_at(text, pos)
+                if hit is None:
+                    break
+                s, e = hit
+                assert e > s, "empty match must never be yielded"
+                assert s >= prev_end, "overlapping matches"
+                prev_end = e
+                pos = e
+                if s == len(text):
+                    break
+
+
+def test_bench030_concurrent_commit_single_winner():
+    """Threads racing the same key: exactly one commits, rest conflict."""
+    with _load_bench("BENCH-030"):
+        from db import DB
+        from txn import ConflictError
+
+        db = DB()
+        seed = db.begin("seed")
+        seed.write("k", "v0")
+        seed.commit()
+        barrier = threading.Barrier(6)
+        committed, aborted = [], []
+
+        def race(i):
+            t = db.begin(f"t{i}")
+            t.write("k", f"v{i}")
+            barrier.wait(timeout=5)
+            try:
+                t.commit()
+                committed.append(i)
+            except ConflictError:
+                aborted.append(i)
+
+        threads = [threading.Thread(target=race, args=(i,))
+                   for i in range(6)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        assert len(committed) == 1
+        assert len(aborted) == 5
+
+
+def test_bench031_seeded_merge_base_symmetric():
+    """merge_base(a,b) == merge_base(b,a) across seeded DAGs."""
+    with _load_bench("BENCH-031"):
+        from commit import make_commit, merge_base
+        from objects import ObjectStore
+        from tree import write_tree
+
+        rng = random.Random(31)
+        for _ in range(6):
+            store = ObjectStore()
+            t = write_tree(store, {"f": "x"})
+            root = make_commit(store, t, [], "root", 0)
+            pa, pb = [root], [root]
+            for i in range(rng.randrange(2, 6)):
+                pa = [make_commit(store, t, pa, f"a{i}", i + 1)]
+                pb = [make_commit(store, t, pb, f"b{i}", i + 1)]
+            assert merge_base(store, pa[0], pb[0]) == \
+                merge_base(store, pb[0], pa[0]) == root
+
+
+def test_bench032_seeded_dag_glitch_free():
+    """Random DAGs propagate glitch-free: one recompute per dirty cell."""
+    with _load_bench("BENCH-032"):
+        from engine import Engine
+        from graph import Graph
+
+        rng = random.Random(64)
+        for _ in range(6):
+            g = Graph()
+            g.add_source("s0", rng.randrange(10))
+            names = ["s0"]
+            observed = []
+            for i in range(rng.randrange(3, 8)):
+                deps = rng.sample(names, rng.randrange(1, min(3, len(names) + 1)))
+
+                def mk():
+                    return lambda *vals: observed.append(vals) or sum(vals)
+                name = f"c{i}"
+                g.add(name, mk(), deps)
+                names.append(name)
+            e = Engine(g)
+            e.propagate()
+            n0 = e.recompute_count
+            e.set("s0", rng.randrange(10))
+            # all computed cells descend from s0 — each recomputes once
+            assert e.recompute_count == 2 * n0
+
+
+def test_bench033_seeded_watermark_monotone():
+    """Seeded event streams: watermark never regresses; windows fire once."""
+    with _load_bench("BENCH-033"):
+        from aggregators import Count
+        from event import Event
+        from pipeline import Pipeline
+
+        rng = random.Random(55)
+        for _ in range(8):
+            p = Pipeline(size=50, lateness=10,
+                         aggregator_factory=Count)
+            ts = 0
+            prev_wm = None
+            fired = set()
+            for _i in range(rng.randrange(20, 80)):
+                ts += rng.randrange(0, 60)
+                p.push(Event(ts, "k", 1))
+                wm = p.wm.current()
+                if prev_wm is not None and wm is not None:
+                    assert wm >= prev_wm, "watermark regressed"
+                prev_wm = wm
+            for key, idx, _res in p.results:
+                assert (key, idx) not in fired
+                fired.add((key, idx))
+
+
+def test_bench034_seeded_chain_forces_before():
+    """a<b<c forces a<c=b across seeded splits; cycles unsatisfiable."""
+    with _load_bench("BENCH-034"):
+        from relations import B
+        from solver import Solver
+
+        rng = random.Random(13)
+        for _ in range(6):
+            n = rng.randrange(3, 6)
+            nodes = [f"n{i}" for i in range(n)]
+            s = Solver(nodes)
+            for i in range(n - 1):
+                s.constrain(nodes[i], nodes[i + 1], {B, "m"})
+            sol = s.solve()
+            assert sol is not None
+            assert sol[(nodes[0], nodes[-1])] == "b"

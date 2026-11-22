@@ -1,0 +1,23 @@
+{
+  "task_id": "BENCH-031",
+  "name": "Content-Addressed Version Store",
+  "category": "versioned_content",
+  "target_files": [
+    "objects.py",
+    "tree.py",
+    "commit.py",
+    "refs.py",
+    "merge3.py",
+    "repo.py"
+  ],
+  "description": "Repair a miniature content-addressed version-control store: deterministic object ids, content-based tree diffs, a true lowest-common-ancestor merge base over the commit DAG, sorted merge parents, ref bookkeeping that advances the current branch, and a three-way line merge that reports conflicts instead of silently resolving them.",
+  "expected_broken_reason": "dag_integrity_violation",
+  "planted_defect": [
+    "objects.object_id ignores kind and unsorted JSON keys",
+    "tree.tree_diff compares path names not content",
+    "commit.merge_base returns any common ancestor not the LCA",
+    "refs.advance_head always writes 'main' not current branch",
+    "merge3.merge_blobs silently keeps ours on conflict without reporting",
+    "commit.make_commit leaves parents unsorted"
+  ]
+}

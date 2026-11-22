@@ -1,0 +1,23 @@
+{
+  "task_id": "BENCH-027",
+  "name": "Merkle-Tree Anti-Entropy Replica Sync",
+  "category": "replication_sync",
+  "target_files": [
+    "hashing.py",
+    "chunker.py",
+    "merkle.py",
+    "diff.py",
+    "sync.py",
+    "replica.py"
+  ],
+  "description": "Repair domain-separated hashing, tail-preserving chunking, odd-level Merkle promotion, minimal diff ranges, pull-direction sync, and idempotent repair counts.",
+  "expected_broken_reason": "anti_entropy_invariant_violation",
+  "planted_defect": [
+    "leaf_hash missing leaf: domain prefix",
+    "chunker drops the final partial chunk",
+    "odd Merkle level re-hashes leftover instead of promoting it",
+    "diff_ranges returns the whole tree instead of minimal ranges",
+    "sync_with pushes local state into peer instead of pulling",
+    "repaired count returns op count not chunk count"
+  ]
+}

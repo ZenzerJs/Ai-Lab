@@ -1,0 +1,19 @@
+{
+  "task_id": "BENCH-032",
+  "name": "Glitch-Free Reactive Dataflow",
+  "category": "reactive_dataflow",
+  "target_files": [
+    "cell.py",
+    "graph.py",
+    "topo.py",
+    "batch.py",
+    "engine.py"
+  ],
+  "description": "Repair a spreadsheet-style reactive engine so propagation is glitch-free: dependents are marked dirty transitively, dirty cells recompute exactly once per wave in topological rank order, cycles are rejected, and batched source writes collapse into a single wave with no observable intermediate states.",
+  "expected_broken_reason": "propagation_glitch",
+  "planted_defect": [
+    "topo.topo_order returns arbitrary set order without dependency ranking",
+    "graph.dirty_from marks dependents without setting dirty flag",
+    "batch.flush propagates once per write instead of one wave"
+  ]
+}
