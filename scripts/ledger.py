@@ -17,7 +17,7 @@ import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 # Ensure UTF-8 output encoding
 if hasattr(sys.stdout, "reconfigure"):
@@ -28,6 +28,20 @@ if hasattr(sys.stderr, "reconfigure"):
 DEFAULT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB_PATH = DEFAULT_ROOT / "data" / "usage.db"
 DEFAULT_PRICING_PATH = DEFAULT_ROOT / "config" / "PRICING.json"
+
+# Trailing effort levels telemetry appends to a base model id
+# (e.g. gemini-4-argon-low -> gemini-4-argon).
+EFFORT_SUFFIXES = frozenset({"low", "medium", "high", "xhigh"})
+
+
+def base_model_id(model: str) -> str:
+    """Strip one trailing effort suffix for pricing fallback lookups."""
+    if not isinstance(model, str):
+        return model
+    base, sep, suffix = model.rpartition("-")
+    if sep and base and suffix.lower() in EFFORT_SUFFIXES:
+        return base
+    return model
 
 
 def sanitize_export_text(text: Optional[str]) -> Optional[str]:
@@ -1314,6 +1328,14 @@ def seed_pricing(
     return count
 
 
+def _declared_pricing_models() -> Set[str]:
+    """Model ids declared in config/PRICING.json."""
+    with open(DEFAULT_PRICING_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    models = data.get("models") or {}
+    return set(models) if isinstance(models, dict) else set()
+
+
 def get_pricing(model: str, conn: Optional[sqlite3.Connection] = None, db_path: Optional[Path] = None) -> Dict[str, Any]:
     """Retrieve pricing rates for a given model from DB, auto-seeding if needed."""
     should_close = False
@@ -1326,13 +1348,27 @@ def get_pricing(model: str, conn: Optional[sqlite3.Connection] = None, db_path: 
     row = cursor.fetchone()
 
     if not row:
-        # Attempt auto-seed from config/PRICING.json
+        # Seed only when a config-declared model that could satisfy this
+        # lookup (the id itself or its effort-stripped base) is missing from
+        # the table: a fresh table stays read-only and a table seeded from a
+        # custom rate card is never overwritten by the bundled card.
         try:
-            seed_pricing(conn=conn)
-            cursor.execute("SELECT * FROM pricing WHERE model = ?", (model,))
-            row = cursor.fetchone()
+            base = base_model_id(model)
+            present = {r["model"] for r in cursor.execute("SELECT model FROM pricing")}
+            missing = _declared_pricing_models() - present
+            if model in missing or base in missing:
+                seed_pricing(conn=conn)
+                cursor.execute("SELECT * FROM pricing WHERE model = ?", (model,))
+                row = cursor.fetchone()
         except Exception:
             pass
+
+    if not row:
+        # Effort-suffixed ids resolve to the base model's rate card.
+        base = base_model_id(model)
+        if base != model:
+            cursor.execute("SELECT * FROM pricing WHERE model = ?", (base,))
+            row = cursor.fetchone()
 
     if not row:
         if should_close:
