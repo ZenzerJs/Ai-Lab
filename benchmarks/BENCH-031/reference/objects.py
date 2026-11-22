@@ -1,4 +1,5 @@
 """Content-addressed objects: deterministic ids via sorted JSON."""
+import copy
 import hashlib
 import json
 
@@ -18,7 +19,9 @@ class ObjectStore:
 
     def put(self, kind: str, payload) -> str:
         oid = object_id(kind, payload)
-        self.objects[oid] = (kind, payload)
+        # deep-copy: content addresses only hold when the stored
+        # payload can't be mutated through the caller's reference
+        self.objects[oid] = (kind, copy.deepcopy(payload))
         return oid
 
     def get(self, oid: str):
