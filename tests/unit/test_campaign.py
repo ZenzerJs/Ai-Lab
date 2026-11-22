@@ -873,6 +873,82 @@ def test_execute_batch_runs_in_planned_order_and_retains_failures():
     assert len(exec_manifest.slots) == len(ordered)
 
 
+def test_execute_batch_links_ledger_runs_to_slots(tmp_path: Path):
+    """
+    Runs recorded by the live runner get manifest_id + notes.slot_id/planned_order/
+    cache linkage so manifest-based reports reconcile them instead of flagging
+    them as unscheduled (REP-02, Finding 4).
+    """
+    db_file = tmp_path / "batch_live.db"
+    manifest = campaign.plan_campaign(
+        tasks=["BENCH-01"],
+        arms=["baseline", "icm"],
+        repetitions=1,
+        random_seed=5,
+        cache_conditions=["cold", "warm"],
+    )
+
+    def fake_run(task_id, arm, run_index, model, db_path, cli_cmd, timeout_seconds, mode=None):
+        conn = ledger.get_connection(db_path)
+        try:
+            rid = ledger.record_run(
+                task_id=task_id,
+                arm=arm,
+                model=model,
+                run_index=run_index,
+                timestamp="2026-11-22T00:00:00Z",
+                input_tokens=100,
+                output_tokens=10,
+                total_tokens=110,
+                num_turns=1,
+                duration_seconds=1.0,
+                source_kind="live",
+                evidence_status="verified",
+                cost_status="usage_estimate",
+                cost_usd=0.01,
+                verification_status="passed",
+                conn=conn,
+            )
+        finally:
+            conn.close()
+        return {
+            "run_id": rid,
+            "execution_status": "completed",
+            "verification_status": "passed",
+            "cost_usd": 0.01,
+            "cost_status": "usage_estimate",
+            "usage": {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
+        }
+
+    result = campaign.execute_campaign_batch(
+        manifest,
+        db_path=db_file,
+        run_callable=fake_run,
+    )
+
+    conn = ledger.get_connection(db_file)
+    try:
+        rows = conn.execute("SELECT id, manifest_id, notes FROM runs ORDER BY id").fetchall()
+    finally:
+        conn.close()
+
+    assert len(rows) == len(manifest.slots)
+    slots_by_id = {s.slot_id: s for s in manifest.slots}
+    for row in rows:
+        assert row["manifest_id"] == manifest.campaign_id
+        notes = json.loads(row["notes"])
+        slot = slots_by_id[notes["slot_id"]]
+        assert notes["planned_order"] == slot.planned_order
+        assert notes["cache_condition"] == slot.cache_condition
+        assert notes["intended_cache_condition"] == slot.cache_condition
+
+    # Manifest-based report reconciles every live run against its scheduled slot
+    report = campaign.generate_campaign_report(manifest=result["manifest"], db_path=db_file)
+    assert report["reconciliation_issues"]["unscheduled_runs"] == []
+    assert report["reconciliation_issues"]["has_schedule_violations"] is False
+    assert report["total_executed"] == len(manifest.slots)
+
+
 def test_execute_batch_tampered_manifest_rejected_before_any_slot():
     """A tampered manifest raises ValueError before any slot executes."""
     manifest = campaign.plan_campaign(

@@ -705,15 +705,39 @@ def execute_campaign_batch(
                 target_slot.cache_read_tokens = usage.get("cache_read_tokens")
                 target_slot.total_tokens = usage.get("total_tokens")
 
-            # Link the recorded ledger run to this manifest so campaign reports reconcile (REP-02).
+            # Link the recorded ledger run to this slot so campaign reports reconcile it
+            # (REP-02/Finding 4): manifest_id + notes.slot_id/planned_order/cache strata.
             run_id = res.get("run_id")
             if db_path is not None and run_id is not None:
                 try:
                     link_conn = ledger.get_connection(db_path)
                     try:
+                        row = link_conn.execute(
+                            "SELECT notes FROM runs WHERE id = ?", (run_id,)
+                        ).fetchone()
+                        parsed_notes: Dict[str, Any] = {}
+                        if row is not None and isinstance(row["notes"], str):
+                            try:
+                                loaded_notes = json.loads(row["notes"])
+                                if isinstance(loaded_notes, dict):
+                                    parsed_notes = loaded_notes
+                            except json.JSONDecodeError:
+                                pass
+                        parsed_notes.update({
+                            "slot_id": slot.slot_id,
+                            "campaign_id": manifest.campaign_id,
+                            "planned_order": slot.planned_order,
+                            "cache_condition": slot.cache_condition,
+                            "intended_cache_condition": slot.intended_cache_condition,
+                            "observed_cache_condition": (
+                                slot.observed_cache_condition
+                                if slot.observed_cache_condition != "unknown"
+                                else slot.cache_condition
+                            ),
+                        })
                         link_conn.execute(
-                            "UPDATE runs SET manifest_id = ? WHERE id = ?",
-                            (manifest.campaign_id, run_id),
+                            "UPDATE runs SET manifest_id = ?, notes = ? WHERE id = ?",
+                            (manifest.campaign_id, json.dumps(parsed_notes), run_id),
                         )
                         link_conn.commit()
                     finally:
