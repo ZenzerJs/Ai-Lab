@@ -87,8 +87,10 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
     () => matchedArmComparison(data.tasks, "icm_lite", "baseline", scope),
     [data.tasks, scope],
   );
-  const effectRows = useMemo(() => {
+  const { effectRows, totalDroppedPairs, totalHashMismatched } = useMemo(() => {
     const rows: SuiteEffectRow[] = [];
+    let dropped = 0;
+    let hashMismatched = 0;
     for (const task of data.tasks || []) {
       const rowModel =
         task.model ||
@@ -111,13 +113,19 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
         } else if (primaryMetric === "Tokens") {
           chosen = tokenStats
             ? [tokenStats, tokenMatch, "Tokens"]
-            : [costStats, costMatch, "Cost"];
+            : costStats
+              ? [costStats, costMatch, "Cost"]
+              : [null, tokenMatch, "Tokens"];
         } else {
           chosen = costStats
             ? [costStats, costMatch, "Cost"]
-            : [tokenStats, tokenMatch, "Tokens"];
+            : tokenStats
+              ? [tokenStats, tokenMatch, "Tokens"]
+              : [null, costMatch, "Cost"];
         }
         const [stats, pairMatch, label] = chosen;
+        dropped += pairMatch.droppedCount;
+        hashMismatched += pairMatch.hashMismatchedCount;
         if (stats) {
           rows.push({ task, arm: name, metricLabel: label, stats, pairMatch, cardKey, rowModel });
         }
@@ -127,13 +135,15 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
       const d = (b.stats.meanDeltaPct ?? 0) - (a.stats.meanDeltaPct ?? 0);
       return d || a.task.task_id.localeCompare(b.task.task_id);
     });
-    return applyFdrToRows(sorted);
+    return {
+      effectRows: applyFdrToRows(sorted),
+      totalDroppedPairs: dropped,
+      totalHashMismatched: hashMismatched,
+    };
   }, [data.tasks, scope, primaryMetric]);
   const significantCount = effectRows.filter(
     (r) => r.stats.fdrSignificant === true,
   ).length;
-  const totalDroppedPairs = effectRows.reduce((s, r) => s + r.pairMatch.droppedCount, 0);
-  const totalHashMismatched = effectRows.reduce((s, r) => s + r.pairMatch.hashMismatchedCount, 0);
 
   return (
     <>
