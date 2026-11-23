@@ -1008,6 +1008,7 @@ def test_cli_plan_batch_and_execute_batch_dry_run(tmp_path: Path):
             "--model", "gemini-2.5-pro",
             "--output", str(manifest_path),
         ],
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         cwd=str(workspace_root),
@@ -1031,6 +1032,7 @@ def test_cli_plan_batch_and_execute_batch_dry_run(tmp_path: Path):
             "--manifest", str(manifest_path),
             "--dry-run",
         ],
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         cwd=str(workspace_root),
@@ -1051,6 +1053,7 @@ def test_cli_plan_batch_and_execute_batch_dry_run(tmp_path: Path):
     loaded.save(tampered_path)
     bad_proc = subprocess.run(
         [sys.executable, str(script), "execute-batch", "--manifest", str(tampered_path), "--dry-run"],
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         cwd=str(workspace_root),

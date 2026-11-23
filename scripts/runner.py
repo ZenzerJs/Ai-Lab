@@ -745,6 +745,7 @@ def _init_workspace_git(ws_dir: Path) -> None:
             cmd,
             cwd=str(ws_dir),
             env=git_env,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
