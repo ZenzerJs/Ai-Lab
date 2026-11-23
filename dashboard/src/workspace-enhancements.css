@@ -687,6 +687,7 @@
   display: inline-block;
 }
 .dot-pareto,
+.dot-cache,
 .seg-cache {
   background: var(--sea);
 }
@@ -721,8 +722,14 @@
 }
 .pareto-node {
   cursor: pointer;
+}
+.pareto-node-inner {
+  transform-origin: 0 0;
   animation: pareto-node-in 320ms var(--ease-out-quint, cubic-bezier(.23, 1, .32, 1)) both;
   animation-delay: calc(var(--node-order, 0) * 55ms);
+}
+.lineage-edge-line {
+  animation: pareto-edge-in 420ms var(--ease-out-quint, cubic-bezier(.23, 1, .32, 1)) both;
 }
 .pareto-node circle {
   transition: r 180ms var(--ease-out-quint, cubic-bezier(.23, 1, .32, 1)), stroke-width 180ms ease;
@@ -959,6 +966,14 @@
     transform: scale(1);
   }
 }
+@keyframes pareto-edge-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
 @keyframes bar-grow {
   from {
     transform: scaleX(0);
@@ -1125,7 +1140,8 @@
   .segmented-control button,
   .sandbox-card,
   .pareto-frontier-path,
-  .pareto-node,
+  .pareto-node-inner,
+  .lineage-edge-line,
   .lineage-bar-track,
   .lineage-card,
   .lineage-pill,

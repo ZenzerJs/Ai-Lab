@@ -189,8 +189,9 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
                 }}
               >
                 <option value="all">
-                  All {filter.label.toLowerCase()}
-                  {filter.label === "Evidence status" ? "es" : "s"}
+                  {filter.label === "Evidence status"
+                    ? "All statuses"
+                    : `All ${filter.label.toLowerCase()}s`}
                 </option>
                 {filter.values.sort().map((value) => (
                   <option value={value} key={value}>

@@ -342,6 +342,10 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                 >
                   <path d="M 1 2 L 8 5 L 1 8 z" fill="var(--muted)" />
                 </marker>
+                <linearGradient id={`optimal-zone-${uid}`} x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stopColor="var(--sea)" stopOpacity="0.14" />
+                  <stop offset="100%" stopColor="var(--sea)" stopOpacity="0" />
+                </linearGradient>
               </defs>
 
               {/* Hairline grid */}
@@ -421,28 +425,26 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                 Pass rate
               </text>
 
-              {/* Optimal corner callout */}
-              <g transform={`translate(${PAD.left + 8}, ${PAD.top + 8})`}>
-                <rect
-                  width="124"
-                  height="20"
-                  rx="5"
-                  fill="var(--sea-soft)"
-                  stroke="var(--sea)"
-                  strokeOpacity="0.35"
-                />
-                <text
-                  x="62"
-                  y="13.5"
-                  textAnchor="middle"
-                  fill="var(--sea)"
-                  fontSize="9.5"
-                  fontFamily="var(--mono)"
-                  fontWeight="600"
-                >
-                  ★ Optimal corner
-                </text>
-              </g>
+              {/* Subtle optimal quadrant glow + non-overlapping label above plot top */}
+              <rect
+                x={PAD.left}
+                y={PAD.top}
+                width={plotW * 0.36}
+                height={plotH * 0.36}
+                fill={`url(#optimal-zone-${uid})`}
+                pointerEvents="none"
+              />
+              <text
+                x={PAD.left + 2}
+                y={PAD.top - 12}
+                textAnchor="start"
+                fill="var(--sea)"
+                fontSize="9.5"
+                fontFamily="var(--mono)"
+                fontWeight="600"
+              >
+                ★ Optimal corner
+              </text>
 
               {/* Pareto frontier dashed envelope */}
               {frontierPathD && (
@@ -543,40 +545,42 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                       }
                     }}
                   >
-                    {isPareto && (
+                    <g className="pareto-node-inner">
+                      {isPareto && (
+                        <circle
+                          r={active ? 14 : 11}
+                          fill="none"
+                          stroke="var(--sea)"
+                          strokeWidth="1.5"
+                          strokeOpacity="0.45"
+                        />
+                      )}
+                      {active && (
+                        <circle
+                          r="16"
+                          fill="none"
+                          stroke="var(--iris)"
+                          strokeWidth="1.5"
+                          strokeOpacity="0.4"
+                        />
+                      )}
                       <circle
-                        r={active ? 14 : 11}
-                        fill="none"
-                        stroke="var(--sea)"
-                        strokeWidth="1.5"
-                        strokeOpacity="0.45"
+                        r={active ? 8 : 6.5}
+                        fill={fill}
+                        stroke={stroke}
+                        strokeWidth={regressed || isBase ? 2.5 : 2}
                       />
-                    )}
-                    {active && (
-                      <circle
-                        r="16"
-                        fill="none"
-                        stroke="var(--iris)"
-                        strokeWidth="1.5"
-                        strokeOpacity="0.4"
-                      />
-                    )}
-                    <circle
-                      r={active ? 8 : 6.5}
-                      fill={fill}
-                      stroke={stroke}
-                      strokeWidth={regressed || isBase ? 2.5 : 2}
-                    />
-                    <text
-                      y={labelAbove ? -14 : 20}
-                      textAnchor="middle"
-                      fill="var(--ink)"
-                      fontSize="10.5"
-                      fontFamily="var(--mono)"
-                      fontWeight={active || isPareto ? "600" : "500"}
-                    >
-                      {p.label}
-                    </text>
+                      <text
+                        y={labelAbove ? -14 : 22}
+                        textAnchor="middle"
+                        fill="var(--ink)"
+                        fontSize="10.5"
+                        fontFamily="var(--mono)"
+                        fontWeight={active || isPareto ? "600" : "500"}
+                      >
+                        {p.label}
+                      </text>
+                    </g>
                   </g>
                 );
               })}
