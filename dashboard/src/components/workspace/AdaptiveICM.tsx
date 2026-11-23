@@ -30,7 +30,7 @@ export default function AdaptiveICM({ data }: { data?: DashboardPayload }) {
       armTotals.set(name, cur);
     }
   }
-  const order = ["baseline", "icm", "icm_lite"];
+  const order = ["baseline", "icm", "icm_v2", "icm_v3", "icm_staged", "icm_lite"];
   const names = Array.from(armTotals.keys()).sort(
     (a, b) => (order.indexOf(a) === -1 ? 9 : order.indexOf(a)) -
       (order.indexOf(b) === -1 ? 9 : order.indexOf(b)) ||
@@ -43,21 +43,28 @@ export default function AdaptiveICM({ data }: { data?: DashboardPayload }) {
           <span className="eyebrow"><Layers3 size={14} /> ADAPTIVE ICM</span>
           <h2>The right amount of structure.</h2>
         </div>
-        <span className="badge badge-purple">~150 LOC / 2+ file break-even</span>
+        <span className="badge badge-purple">3-tier search-space policy</span>
       </div>
-      <div className="adaptive-regimes">
+      <div className="adaptive-regimes adaptive-regimes-3">
         <div>
           <span className="badge badge-purple">{formatArm("icm_lite")}</span>
           <h3>Micro-tasks</h3>
-          <p>&lt;150 LOC <strong>and</strong> exactly 1 target file.</p>
+          <p>&lt;150 LOC <strong>and</strong> exactly 1 target file (≤12 files / ≤1,500 LOC search space).</p>
           <span className="adaptive-detail">One compact contract. Less fixed governance overhead.</span>
         </div>
         <ArrowRight className="adaptive-arrow" size={22} aria-hidden="true" />
         <div>
-          <span className="badge badge-purple">{formatArm("icm")}</span>
-          <h3>Larger or multi-file work</h3>
-          <p>≥150 LOC <strong>or</strong> 2+ target files.</p>
-          <span className="adaptive-detail">Full five-stage governance. Unknown scope defaults here, too.</span>
+          <span className="badge badge-purple">{formatArm("icm_v3")}</span>
+          <h3>Batch-first governance</h3>
+          <p>≥150 LOC <strong>or</strong> 2+ target files (13–50 files in search space).</p>
+          <span className="adaptive-detail">3-turn batch-first cadence + static AST map. Unknown scope defaults here, too.</span>
+        </div>
+        <ArrowRight className="adaptive-arrow" size={22} aria-hidden="true" />
+        <div>
+          <span className="badge badge-purple">{formatArm("icm_staged")}</span>
+          <h3>Two-session staged</h3>
+          <p>&gt;50 files in search space <strong>or</strong> multi-stage refactor.</p>
+          <span className="adaptive-detail">Phase 1 read-only Plan → Phase 2 fresh-context Exec sheds exploration bloat.</span>
         </div>
       </div>
       <p className="adaptive-note">

@@ -24,7 +24,7 @@ export function selectGovernedArmName(
   preferred?: string,
 ) {
   if (preferred && preferred !== "baseline" && arms[preferred]) return preferred;
-  return ["icm-subagents", "icm", "delegation", "governed", "icm_lite"].find(
+  return ["icm-subagents", "icm", "delegation", "governed", "icm_v3", "icm_staged", "icm_v2", "icm_lite"].find(
     (key) => arms[key],
   ) || Object.keys(arms).find((key) => key !== "baseline" && arms[key]);
 }
@@ -41,7 +41,7 @@ export function governedArm(task: TaskSummaryItem) {
 // Every populated arm on a task, baseline first, then governed arms in
 // precedence order (icm before icm_lite), then any extras alphabetically.
 export function armNames(task: TaskSummaryItem): string[] {
-  const order = ["baseline", "icm", "icm_lite"];
+  const order = ["baseline", "icm", "icm_v3", "icm_staged", "icm_v2", "icm_lite"];
   const present = Object.keys(task.arms).filter((n) => task.arms[n]);
   return present.sort(
     (a, b) =>

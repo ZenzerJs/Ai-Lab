@@ -43,7 +43,16 @@ export interface OperationalBenchmark {
 
 export type ScaleMode = '1x' | '1m' | '10m' | '100m';
 
-export type ArmName = 'baseline' | 'icm' | 'icm_lite' | 'icm-subagents' | 'delegation' | (string & {});
+export type ArmName =
+  | 'baseline'
+  | 'icm'
+  | 'icm_lite'
+  | 'icm-subagents'
+  | 'delegation'
+  | 'icm_v2'
+  | 'icm_v3'
+  | 'icm_staged'
+  | (string & {});
 
 export interface RunRecord {
   id: number;
@@ -78,6 +87,13 @@ export interface RunRecord {
   tool_errors_count?: number | null;
   max_consecutive_tool_streak?: number | null;
   loop_detected?: boolean | number | null;
+  llm_calls_count?: number | null;
+  peak_context_tokens?: number | null;
+  avg_fresh_input_per_call?: number | null;
+  cache_bust_count?: number | null;
+  tools_per_llm_call?: number | null;
+  contract_version?: string | null;
+  contract_hash?: string | null;
 }
 
 export interface ArmStats {
@@ -112,6 +128,11 @@ export interface ArmStats {
   total_tool_calls?: number;
   total_tool_errors?: number;
   loop_runs_count?: number;
+  mean_llm_calls?: number | null;
+  mean_tools_per_llm_call?: number | null;
+  mean_avg_fresh_input_per_call?: number | null;
+  peak_context_tokens?: number | null;
+  total_cache_busts?: number | null;
   runs: RunRecord[];
 }
 
@@ -368,9 +389,56 @@ export interface QualityRubricBlock {
 
 export type QualityRubricData = QualityRubricBlock;
 
+export interface IterationLineageEntry {
+  version: string;
+  arm: string;
+  model: string;
+  hypothesis?: string | null;
+  changes_from_prev?: string[];
+  parent_version?: string | null;
+  execution_strategy?: string | null;
+  task_ids?: string[];
+  matched_baseline_task_ids?: string[];
+  n_runs: number;
+  passed_count: number;
+  pass_rate: number | null;
+  priced_n_runs: number;
+  mean_cost_usd: number | null;
+  cost_per_passing_patch_usd: number | null;
+  mean_llm_calls: number | null;
+  mean_cache_hit_ratio: number | null;
+  mean_tools_per_call: number | null;
+  total_cache_busts: number | null;
+  cost_delta_vs_baseline_pct: number | null;
+  savings_vs_baseline_pct?: number | null;
+  cost_delta_vs_prev_version_pct?: number | null;
+}
+
+export interface IterationContractMeta {
+  id: string;
+  file?: string;
+  exec_file?: string;
+  sha256?: string;
+  plan_sha256?: string;
+  exec_sha256?: string;
+  parent_version?: string | null;
+  hypothesis?: string | null;
+  changes_from_prev?: string[];
+  inject_repo_map?: boolean;
+  repo_map_max_tokens?: number;
+  execution_strategy?: string | null;
+}
+
+export interface IterationLineagePayload {
+  has_data: boolean;
+  versions: IterationLineageEntry[];
+  contracts: IterationContractMeta[];
+}
+
 export interface DashboardPayload {
   operational?: OperationalBenchmark;
   quality_rubric?: QualityRubricBlock | null;
+  iteration_lineage?: IterationLineagePayload;
   generated_at: string;
   build_identity?: string;
   has_data: boolean;

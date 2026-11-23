@@ -9,9 +9,9 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { DashboardPayload } from "../../types";
-import { downloadJson, snapshotDate } from "../../lib/workspace";
+import { downloadJson, finite, snapshotDate } from "../../lib/workspace";
 import { isPricedRun } from "../../lib/analytics";
-import { formatArm, formatCurrency, formatTokens } from "../../lib/formatters";
+import { formatArm, formatCurrency, formatPercent, formatTokens } from "../../lib/formatters";
 import { ProviderIcon } from "./ProviderIcon";
 
 export default function Evidence({ data }: { data: DashboardPayload }) {
@@ -229,14 +229,25 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
                 </th>
                 <th scope="col">Experiment / model</th>
                 <th scope="col">Arm / source</th>
-                <th scope="col">Input tokens</th>
-                <th scope="col">Cost</th>
+                <th scope="col">Contract</th>
+                <th scope="col" className="num-col">Input tokens</th>
+                <th scope="col" className="num-col">LLM Calls</th>
+                <th scope="col" className="num-col">Cache Hit %</th>
+                <th scope="col" className="num-col">Cache Busts</th>
+                <th scope="col" className="num-col">Cost</th>
                 <th scope="col">Evidence</th>
                 <th scope="col">Details</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((run) => (
+              {rows.map((run) => {
+                const cacheHitPct =
+                  finite(run.input_tokens) &&
+                  finite(run.cache_read_tokens) &&
+                  run.input_tokens + run.cache_read_tokens > 0
+                    ? (run.cache_read_tokens / (run.input_tokens + run.cache_read_tokens)) * 100
+                    : null;
+                return (
                 <tr key={run.id}>
                   <th scope="row" className="mono">
                     #{run.id}
@@ -261,8 +272,21 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
                       {run.is_simulation ? " · simulation" : ""}
                     </span>
                   </td>
-                  <td>{formatTokens(run.input_tokens)}</td>
                   <td>
+                    {run.contract_version ? formatArm(run.contract_version) : "—"}
+                    {run.contract_hash && (
+                      <span className="cell-subtitle mono">{run.contract_hash.slice(0, 7)}</span>
+                    )}
+                  </td>
+                  <td className="num-col">{formatTokens(run.input_tokens)}</td>
+                  <td className="num-col">
+                    {run.llm_calls_count != null ? String(run.llm_calls_count) : "—"}
+                  </td>
+                  <td className="num-col">{formatPercent(cacheHitPct)}</td>
+                  <td className="num-col">
+                    {run.cache_bust_count != null ? String(run.cache_bust_count) : "—"}
+                  </td>
+                  <td className="num-col">
                     {formatCurrency(run.cost_usd)}
                     <span className="cell-subtitle">
                       {run.cost_status || "unknown"}
@@ -295,6 +319,25 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
                         </dd>
                         <dt>Comparison eligible</dt>
                         <dd>{run.is_comparison_eligible ? "Yes" : "No"}</dd>
+                        {(run.contract_version || run.contract_hash) && (
+                          <>
+                            <dt>Contract</dt>
+                            <dd>
+                              {run.contract_version ? formatArm(run.contract_version) : "—"}
+                              {run.contract_hash ? ` · ${run.contract_hash.slice(0, 12)}` : ""}
+                            </dd>
+                          </>
+                        )}
+                        {(run.llm_calls_count != null || run.cache_bust_count != null || run.peak_context_tokens != null) && (
+                          <>
+                            <dt>LLM calls / peak ctx / busts</dt>
+                            <dd>
+                              {run.llm_calls_count ?? "—"} calls ·{" "}
+                              {run.peak_context_tokens != null ? `${formatTokens(run.peak_context_tokens)} peak` : "—"} ·{" "}
+                              {run.cache_bust_count != null ? `${run.cache_bust_count} busts` : "—"}
+                            </dd>
+                          </>
+                        )}
                         <dt>Input / cache / output / thinking</dt>
                         <dd>
                           {formatTokens(run.input_tokens)} /{" "}
@@ -330,7 +373,8 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
                     </details>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
