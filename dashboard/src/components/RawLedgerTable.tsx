@@ -26,7 +26,8 @@ import { Button, buttonVariants } from './ui/button';
 import { Input } from './ui/input';
 import { SelectNative } from './ui/select-native';
 import { Empty, EmptyIcon, EmptyTitle, EmptyDescription } from './ui/empty';
-import { formatCurrency, formatTokens } from '../lib/formatters';
+import { formatArm, formatCurrency, formatPercent, formatTokens } from '../lib/formatters';
+import { finite } from '../lib/workspace';
 import { cn, getPublicUrl } from '../lib/utils';
 
 interface RawLedgerTableProps {
@@ -320,6 +321,7 @@ export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs, generatedA
                 <TableHead>Source</TableHead>
                 <TableHead>Evidence</TableHead>
                 <TableHead>Status / Eligibility</TableHead>
+                <TableHead>Contract</TableHead>
                 <TableHead>Model</TableHead>
                 <TableHead className="text-center">
                   <button
@@ -352,6 +354,9 @@ export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs, generatedA
                     Cache Read <ArrowUpDown className="size-3" />
                   </button>
                 </TableHead>
+                <TableHead className="text-right">LLM Calls</TableHead>
+                <TableHead className="text-right">Cache Hit %</TableHead>
+                <TableHead className="text-right">Cache Busts</TableHead>
                 <TableHead className="text-right">
                   <button
                     type="button"
@@ -371,6 +376,12 @@ export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs, generatedA
                 const source = r.source_kind || 'unknown';
                 const evidence = r.evidence_status || 'unverified';
                 const isEligible = r.is_comparison_eligible;
+                const cacheHitPct =
+                  finite(r.input_tokens) &&
+                  finite(r.cache_read_tokens) &&
+                  r.input_tokens + r.cache_read_tokens > 0
+                    ? (r.cache_read_tokens / (r.input_tokens + r.cache_read_tokens)) * 100
+                    : null;
 
                 let sourceBadgeColor = 'bg-gray-500/10 text-gray-400 border-gray-500/30';
                 if (source === 'live') sourceBadgeColor = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
@@ -420,6 +431,9 @@ export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs, generatedA
                           </span>
                         )}
                       </TableCell>
+                      <TableCell className="text-gray-300 text-[11px] font-mono">
+                        {r.contract_version ? formatArm(r.contract_version) : '—'}
+                      </TableCell>
                       <TableCell className="text-gray-400 text-[11px] font-mono">{r.model}</TableCell>
                       <TableCell className="text-center text-gray-300 font-mono">{r.run_index}</TableCell>
                       <TableCell className="text-right font-bold text-gray-100 font-mono">
@@ -436,6 +450,15 @@ export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs, generatedA
                       >
                         {formatTokens(r.cache_read_tokens)}
                       </TableCell>
+                      <TableCell className="text-right text-gray-300 font-mono tabular-nums">
+                        {r.llm_calls_count != null ? String(r.llm_calls_count) : '—'}
+                      </TableCell>
+                      <TableCell className="text-right text-gray-300 font-mono tabular-nums">
+                        {formatPercent(cacheHitPct)}
+                      </TableCell>
+                      <TableCell className="text-right text-gray-300 font-mono tabular-nums">
+                        {r.cache_bust_count != null ? String(r.cache_bust_count) : '—'}
+                      </TableCell>
                       <TableCell className="text-right text-gray-400 font-mono">
                         {r.duration_seconds.toFixed(1)}s
                       </TableCell>
@@ -444,7 +467,7 @@ export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs, generatedA
                     {/* Expandable Evidence & Provenance Details Row */}
                     {isExpanded && (
                       <TableRow className="bg-background/80 border-b border-surface-border">
-                        <TableCell colSpan={12} className="p-4 text-xs font-mono">
+                        <TableCell colSpan={16} className="p-4 text-xs font-mono">
                           <div className="p-3 rounded-lg bg-surface/90 border border-surface-border space-y-2">
                             <div className="flex items-center justify-between text-muted-foreground border-b border-surface-border/50 pb-2">
                               <span className="text-white font-semibold">Run #{r.id} Evidence & Provenance Ledger</span>
@@ -505,7 +528,7 @@ export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs, generatedA
               })}
               {sortedRuns.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={12} className="py-8">
+                  <TableCell colSpan={16} className="py-8">
                     <Empty>
                       <EmptyIcon>
                         <Database className="size-6 text-muted-foreground" />

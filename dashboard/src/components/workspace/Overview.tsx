@@ -24,6 +24,7 @@ import {
 } from "../../lib/analytics";
 import { armNames, experimentNames, finite, governedArm, governedArmName } from "../../lib/workspace";
 import AdaptiveICM from "./AdaptiveICM";
+import IterationLineage from "./IterationLineage";
 
 function ContextOrbit() {
   return (
@@ -414,6 +415,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
           </a>
         </div>
       )}
+      <IterationLineage data={data} />
       <div className="overview-grid">
         <section
           className="panel comparison-panel"

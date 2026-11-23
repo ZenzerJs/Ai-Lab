@@ -8,6 +8,10 @@ export function formatArm(arm: string | null | undefined): string {
   const labels: Record<string, string> = {
     baseline: "Baseline",
     icm: "ICM",
+    icm_v1: "ICM v1",
+    icm_v2: "ICM v2",
+    icm_v3: "ICM v3",
+    icm_staged: "ICM Staged",
     icm_lite: "ICM-Lite",
     "icm-subagents": "ICM + subagents",
     delegation: "Delegation",
@@ -60,4 +64,20 @@ export function formatTokens(val: number | null | undefined): string {
     return '—';
   }
   return Math.round(val).toLocaleString();
+}
+
+export function formatPercent(val: number | null | undefined, digits = 1): string {
+  if (val === null || val === undefined || typeof val !== 'number' || !Number.isFinite(val)) {
+    return '—';
+  }
+  const normalized = Math.abs(val) < 1e-9 ? 0 : val;
+  return `${normalized.toFixed(digits)}%`;
+}
+
+export function formatDecimal(val: number | null | undefined, digits = 1): string {
+  if (val === null || val === undefined || typeof val !== 'number' || !Number.isFinite(val)) {
+    return '—';
+  }
+  const normalized = Math.abs(val) < 1e-9 ? 0 : val;
+  return normalized.toFixed(digits);
 }

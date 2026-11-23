@@ -333,3 +333,16 @@ class TestDashboardBrowserLive:
         assert refresh.count() > 0 or page.get_by_title("Refresh").count() > 0, (
             "No Refresh button found"
         )
+
+    def test_iteration_lineage_and_themed_scrollbars(self):
+        page = self._page_obj()
+        lineage = page.locator('[aria-labelledby="lineage-section-title"]')
+        assert lineage.count() > 0, "IterationLineage section not rendered on Overview"
+        svg_box = lineage.locator("svg.lineage-svg").bounding_box()
+        assert svg_box and svg_box["width"] > 200 and svg_box["height"] > 100, (
+            f"IterationLineage SVG did not render with valid dimensions: {svg_box}"
+        )
+        scrollbar_width = page.evaluate(
+            "() => getComputedStyle(document.documentElement).scrollbarWidth"
+        )
+        assert scrollbar_width == "thin", f"Expected thin themed scrollbar, got {scrollbar_width!r}"
