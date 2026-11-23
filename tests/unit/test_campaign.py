@@ -1059,3 +1059,77 @@ def test_cli_plan_batch_and_execute_batch_dry_run(tmp_path: Path):
     assert bad_proc.returncode == 1
     assert "integrity" in bad_proc.stderr.lower()
 
+
+def test_execute_batch_dispatches_icm_v3_and_icm_staged_modes():
+    """execute_campaign_batch routes icm_v3 and icm_staged slots via ARM_ROUTING_MODES."""
+    manifest = campaign.plan_campaign(
+        tasks=["BENCH-01"],
+        arms=["icm_v3", "icm_staged"],
+        repetitions=1,
+        random_seed=11,
+    )
+    dispatched: list = []
+
+    def fake_run(**kwargs):  # noqa: ANN001
+        dispatched.append((kwargs.get("arm"), kwargs.get("mode")))
+        return {"execution_status": "completed", "verification_status": "passed"}
+
+    res = campaign.execute_campaign_batch(manifest, dry_run=False, run_callable=fake_run)
+    assert res["executed_count"] == 2
+    assert sorted(dispatched) == [("icm_staged", "icm-staged"), ("icm_v3", "icm-v3")]
+
+
+def test_execute_batch_links_default_db_when_db_path_none(tmp_path: Path, monkeypatch):
+    """When run_callable is None and db_path is None, slot notes link against ledger.DEFAULT_DB_PATH."""
+    import runner
+
+    default_db = tmp_path / "default_usage.db"
+    conn = ledger.get_connection(default_db)
+    conn.close()
+    monkeypatch.setattr(ledger, "DEFAULT_DB_PATH", default_db)
+
+    manifest = campaign.plan_campaign(
+        tasks=["BENCH-01"],
+        arms=["icm_v3"],
+        repetitions=1,
+        random_seed=5,
+    )
+
+    def fake_live(**kwargs):  # noqa: ANN001
+        assert kwargs["db_path"] is None
+        run_id = ledger.record_run(
+            task_id=kwargs["task_id"],
+            arm=kwargs["arm"],
+            model=kwargs["model"],
+            run_index=kwargs["run_index"],
+            timestamp="2026-11-22T00:00:00Z",
+            input_tokens=100,
+            output_tokens=20,
+            total_tokens=120,
+            num_turns=1,
+            duration_seconds=1.0,
+            source_kind="live",
+            evidence_status="verified",
+            db_path=default_db,
+        )
+        return {
+            "run_id": run_id,
+            "execution_status": "completed",
+            "verification_status": "passed",
+        }
+
+    monkeypatch.setattr(runner, "run_benchmark_live", fake_live)
+    res = campaign.execute_campaign_batch(manifest, db_path=None, dry_run=False)
+    assert res["executed_count"] == 1
+
+    check_conn = ledger.get_connection(default_db)
+    try:
+        row = check_conn.execute("SELECT manifest_id, notes FROM runs WHERE id = ?", (res["results"][0]["run_id"],)).fetchone()
+        assert row["manifest_id"] == manifest.campaign_id
+        notes = json.loads(row["notes"])
+        assert notes["slot_id"] == manifest.slots[0].slot_id
+        assert notes["planned_order"] == manifest.slots[0].planned_order
+    finally:
+        check_conn.close()
+
+
