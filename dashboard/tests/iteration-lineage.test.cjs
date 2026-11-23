@@ -79,7 +79,7 @@ test('formatArm, formatPercent, formatDecimal, and governed arm selection suppor
   assert.equal(selectGovernedArmName({ baseline: {}, icm_v2: {}, icm_lite: {} }), 'icm_v2');
 });
 
-test('resolveLineageModels derives priced and unpriced model cohorts from the 782-run snapshot', () => {
+test('resolveLineageModels derives priced and unpriced model cohorts from the 790-run snapshot', () => {
   const cohorts = resolveLineageModels(snapshot);
   assert.ok(cohorts.length >= 7);
 
@@ -104,9 +104,13 @@ test('resolveLineageModels derives priced and unpriced model cohorts from the 78
   const flash = cohorts.find((c) => c.model === 'gemini-3.8-flash-low');
   assert.ok(flash);
   assert.equal(flash.hasPricing, true);
+  assert.ok(
+    flash.points.some((p) => p.version === 'icm_v3' && p.n_runs === 8),
+    'gemini-3.8-flash-low must surface the 8 live icm_v3 runs',
+  );
   assert.equal(
     flash.points.reduce((sum, p) => sum + p.n_runs, 0),
-    50,
+    58,
     'imported runs must be excluded from live lineage counts',
   );
 });
@@ -217,6 +221,7 @@ test('IterationLineage SSR renders snapshot, unpriced tool fallback, and empty s
 
   const unpricedOnly = {
     ...snapshot,
+    iteration_lineage: undefined,
     runs: snapshot.runs.filter((r) => r.model === 'gemini-4-neon-devin'),
   };
   const unpricedHtml = renderToStaticMarkup(
@@ -226,7 +231,7 @@ test('IterationLineage SSR renders snapshot, unpriced tool fallback, and empty s
   assert.match(unpricedHtml, /ICM v2/);
 
   const emptyHtml = renderToStaticMarkup(
-    React.createElement(IterationLineage, { data: { ...snapshot, runs: [] } }),
+    React.createElement(IterationLineage, { data: { ...snapshot, iteration_lineage: undefined, runs: [] } }),
   );
   assert.match(emptyHtml, /Iteration lineage starts with verified runs/);
 });
