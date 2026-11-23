@@ -217,6 +217,8 @@ test('IterationLineage SSR renders snapshot, unpriced tool fallback, and empty s
   assert.match(html, /Pareto frontier/);
   assert.match(html, /gemini-3\.8-flash-low/);
   assert.match(html, /Cost \/ Verified Pass/);
+  assert.match(html, /Show unpriced quality cohorts \(3\)/);
+  assert.doesNotMatch(html, /gemini-4-neon-devin/);
   assert.doesNotMatch(html, />icm_lite</);
 
   const unpricedOnly = {
@@ -236,13 +238,29 @@ test('IterationLineage SSR renders snapshot, unpriced tool fallback, and empty s
   assert.match(emptyHtml, /Iteration lineage starts with verified runs/);
 });
 
-test('AdaptiveICM documents 3-tier routing and Evidence / RawLedgerTable include contract & cache columns', () => {
+test('AdaptiveICM documents 3-tier routing and Evidence / RawLedgerTable isolate unpriced runs by default', () => {
   const adaptiveHtml = renderToStaticMarkup(React.createElement(AdaptiveICM, { data: snapshot }));
   assert.match(adaptiveHtml, /ICM-Lite/);
   assert.match(adaptiveHtml, /ICM v3/);
   assert.match(adaptiveHtml, /ICM Staged/);
   assert.match(adaptiveHtml, /13–50 files/);
   assert.match(adaptiveHtml, /&gt;50 files/);
+
+  const snapshotEvidenceHtml = renderToStaticMarkup(
+    React.createElement(Evidence, { data: snapshot }),
+  ).replace(/<!-- -->/g, '');
+  assert.match(snapshotEvidenceHtml, /Show unpriced quality history \(412\/600 pass\)/);
+  assert.match(snapshotEvidenceHtml, /1–10 of 190 records/);
+  assert.match(snapshotEvidenceHtml, /<span>1 \/ 19<\/span>/);
+  const evidenceTbody = snapshotEvidenceHtml.split('<tbody>')[1] || '';
+  assert.doesNotMatch(evidenceTbody, /swe-2-max-lightning/);
+  assert.doesNotMatch(evidenceTbody, /gemini-4-neon-devin/);
+
+  const snapshotLedgerHtml = renderToStaticMarkup(
+    React.createElement(RawLedgerTable, { runs: snapshot.runs }),
+  ).replace(/<!-- -->/g, '');
+  assert.match(snapshotLedgerHtml, /Showing 190 of 790 runs/);
+  assert.match(snapshotLedgerHtml, /Show unpriced \(412\/600 pass\)/);
 
   const customRuns = [
     makeRun({

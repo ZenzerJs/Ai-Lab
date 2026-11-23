@@ -14,8 +14,9 @@ from typing import Any, Optional
 def validate_acus_consumed(value: Any) -> Optional[float]:
     """Validate and normalize a raw `acus_consumed` value.
 
-    Returns `None` for `None`. Raises `ValueError` for booleans, non-numeric
-    values, NaN/Inf, or negative numbers.
+    Returns `None` for `None` or `0.0` (unmetered/zero ACUs on completed Devin
+    sessions are treated as unavailable rather than free). Raises `ValueError`
+    for booleans, non-numeric values, NaN/Inf, or negative numbers.
     """
     if value is None:
         return None
@@ -29,4 +30,6 @@ def validate_acus_consumed(value: Any) -> Optional[float]:
         raise ValueError(f"acus_consumed must be finite, got {value!r}")
     if fval < 0.0:
         raise ValueError(f"acus_consumed cannot be negative: {fval}")
+    if fval == 0.0:
+        return None
     return round(fval, 6)

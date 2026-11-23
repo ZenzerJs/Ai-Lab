@@ -27,6 +27,15 @@
 .table-scroll {
   overflow-y: hidden;
 }
+.ledger-toolbar {
+  flex-wrap: wrap;
+}
+.ledger-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
 .provider-icon[data-provider="OpenAI"] img {
   width: 28px;
   height: 28px;
@@ -616,6 +625,13 @@
   border-color: var(--iris);
   color: var(--ink);
   font-weight: 600;
+}
+.lineage-pill-toggle {
+  border-style: dashed;
+  background: transparent;
+}
+.lineage-pill-toggle.is-active {
+  border-style: solid;
 }
 .lineage-pill-meta {
   font-size: 10.5px;

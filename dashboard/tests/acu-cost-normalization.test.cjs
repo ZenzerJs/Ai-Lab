@@ -65,15 +65,25 @@ test('ACU metadata stays separate from priced cost_usd scope', () => {
     cost_status: 'unavailable',
   });
 
+  const zeroAcu = makeRun({
+    id: 3,
+    model: 'devin-session-v3',
+    acus_consumed: 0,
+    cost_usd: null,
+    cost_status: 'unavailable',
+  });
+
   assert.equal(isPricedRun(direct), true);
   assert.equal(hasAcuTelemetry(direct), false);
 
   assert.equal(isPricedRun(devinAcu), false);
   assert.equal(hasAcuTelemetry(devinAcu), true);
+  assert.equal(isPricedRun(zeroAcu), false);
+  assert.equal(hasAcuTelemetry(zeroAcu), false);
 
-  const runs = [direct, devinAcu];
+  const runs = [direct, devinAcu, zeroAcu];
   assert.deepEqual(scopeRuns(runs, 'priced').map((r) => r.id), [1]);
-  assert.deepEqual(scopeRuns(runs, 'unpriced').map((r) => r.id), [2]);
+  assert.deepEqual(scopeRuns(runs, 'unpriced').map((r) => r.id), [2, 3]);
 
   const summary = acuTelemetrySummary(runs);
   assert.equal(summary.runsWithAcus, 1);

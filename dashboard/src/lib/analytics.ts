@@ -9,11 +9,13 @@ import { bootstrapPercentCI, finite } from "./workspace";
 export type CostScope = "all" | "priced" | "unpriced";
 
 export function isPricedRun(run: RunRecord): boolean {
+  const status = String(run.cost_status || "").toLowerCase();
+  if (status === "unavailable" || status === "incomplete") return false;
   return finite(run.cost_usd);
 }
 
 export function hasAcuTelemetry(run: RunRecord): boolean {
-  return finite(run.acus_consumed);
+  return finite(run.acus_consumed) && run.acus_consumed > 0;
 }
 
 export interface AcuTelemetrySummary {
@@ -32,9 +34,9 @@ export function acuTelemetrySummary(
   let runsWithAcus = 0;
   let totalAcus = 0;
   for (const r of list) {
-    if (finite(r.acus_consumed)) {
+    if (hasAcuTelemetry(r)) {
       runsWithAcus += 1;
-      totalAcus += r.acus_consumed;
+      totalAcus += r.acus_consumed as number;
     }
   }
   return {

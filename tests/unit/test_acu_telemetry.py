@@ -38,7 +38,9 @@ class _FakeHTTPResponse:
 
 def test_validate_acus_consumed():
     assert pricing.validate_acus_consumed(None) is None
-    assert pricing.validate_acus_consumed(0) == 0.0
+    assert pricing.validate_acus_consumed(0) is None
+    assert pricing.validate_acus_consumed(0.0) is None
+    assert pricing.validate_acus_consumed("0") is None
     assert pricing.validate_acus_consumed(1.23456789) == pytest.approx(1.234568)
     assert pricing.validate_acus_consumed("0.5") == pytest.approx(0.5)
 
@@ -52,6 +54,7 @@ def test_extract_and_fetch_devin_session_acus():
     assert runner.extract_acus_consumed({"usage": {"acus_consumed": 1.5}}) == pytest.approx(1.5)
     assert runner.extract_acus_consumed({"session": {"acus_consumed": 2.0}}) == pytest.approx(2.0)
     assert runner.extract_acus_consumed({"session_id": "devin-abc"}) is None
+    assert runner.extract_acus_consumed({"acus_consumed": 0.0}) is None
 
     with pytest.raises(ValueError):
         runner.extract_acus_consumed({"acus_consumed": -0.5})
@@ -75,6 +78,17 @@ def test_extract_and_fetch_devin_session_acus():
     assert captured["url"] == "https://api.devin.ai/v3/organizations/org-123/sessions/devin-xyz"
     assert captured["auth"] == "Bearer test-token-value"
     assert captured["method"] == "GET"
+
+    with mock.patch(
+        "urllib.request.urlopen",
+        return_value=_FakeHTTPResponse({"session_id": "devin-zero", "acus_consumed": 0.0}),
+    ):
+        zero_acus = runner.fetch_devin_session_acus(
+            devin_id="devin-zero",
+            org_id="org-123",
+            api_key="test-token-value",
+        )
+    assert zero_acus is None
 
 
 def test_ndjson_nested_result_usage_and_replay_dedup():

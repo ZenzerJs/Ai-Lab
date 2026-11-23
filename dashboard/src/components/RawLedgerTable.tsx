@@ -27,6 +27,7 @@ import { Input } from './ui/input';
 import { SelectNative } from './ui/select-native';
 import { Empty, EmptyIcon, EmptyTitle, EmptyDescription } from './ui/empty';
 import { formatArm, formatCurrency, formatPercent, formatTokens } from '../lib/formatters';
+import { isPricedRun } from '../lib/analytics';
 import { finite } from '../lib/workspace';
 import { cn, getPublicUrl } from '../lib/utils';
 
@@ -54,10 +55,19 @@ export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs, generatedA
   const [armFilter, setArmFilter] = useState<string>('all');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [evidenceFilter, setEvidenceFilter] = useState<string>('all');
+  const [showUnpriced, setShowUnpriced] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedRunId, setExpandedRunId] = useState<number | null>(null);
   const pageSize = 10;
+
+  const pricedCount = useMemo(() => runs.filter(isPricedRun).length, [runs]);
+  const unpricedRuns = useMemo(() => runs.filter((r) => !isPricedRun(r)), [runs]);
+  const unpricedCount = unpricedRuns.length;
+  const unpricedPassedCount = useMemo(
+    () => unpricedRuns.filter((r) => r.verification_status === 'passed').length,
+    [unpricedRuns],
+  );
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -86,6 +96,9 @@ export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs, generatedA
 
   const filteredRuns = useMemo(() => {
     return runs.filter((r) => {
+      if (pricedCount > 0 && !showUnpriced && !isPricedRun(r)) {
+        return false;
+      }
       if (taskFilter !== 'all' && r.task_id !== taskFilter) {
         return false;
       }
@@ -108,7 +121,7 @@ export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs, generatedA
       }
       return true;
     });
-  }, [runs, taskFilter, armFilter, sourceFilter, evidenceFilter, searchQuery]);
+  }, [runs, pricedCount, showUnpriced, taskFilter, armFilter, sourceFilter, evidenceFilter, searchQuery]);
 
   const sortedRuns = useMemo(() => {
     return [...filteredRuns].sort((a, b) => {
@@ -265,6 +278,25 @@ export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs, generatedA
               ))}
             </SelectNative>
           </div>
+
+          {/* Priced-only vs Unpriced Quality Toggle */}
+          {pricedCount > 0 && unpricedCount > 0 && (
+            <Button
+              type="button"
+              variant={showUnpriced ? "default" : "outline"}
+              size="sm"
+              aria-pressed={showUnpriced}
+              onClick={() => {
+                setShowUnpriced((cur) => !cur);
+                setCurrentPage(1);
+              }}
+              className="h-8 text-xs font-mono"
+            >
+              {showUnpriced
+                ? `Priced only (${pricedCount})`
+                : `Show unpriced (${unpricedPassedCount}/${unpricedCount} pass)`}
+            </Button>
+          )}
 
           {/* Download JSON */}
           <a

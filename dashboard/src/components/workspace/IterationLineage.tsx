@@ -47,23 +47,42 @@ function formatAxisX(val: number, hasPricing: boolean): string {
 export default function IterationLineage({ data }: { data: DashboardPayload }) {
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const cohorts = useMemo(() => resolveLineageModels(data), [data]);
+  const pricedCohorts = useMemo(
+    () => cohorts.filter((c) => c.hasPricing),
+    [cohorts],
+  );
+  const unpricedCohorts = useMemo(
+    () => cohorts.filter((c) => !c.hasPricing),
+    [cohorts],
+  );
+  const [showUnpricedCohorts, setShowUnpricedCohorts] = useState(false);
+  const visibleCohorts = useMemo(
+    () =>
+      pricedCohorts.length > 0 && !showUnpricedCohorts
+        ? pricedCohorts
+        : cohorts,
+    [cohorts, pricedCohorts, showUnpricedCohorts],
+  );
   const [selectedModel, setSelectedModel] = useState<string>(() =>
-    pickDefaultModel(cohorts),
+    pickDefaultModel(visibleCohorts),
   );
   const [costAxis, setCostAxis] = useState<CostAxisMode>("cost_per_run");
   const [lockedVersion, setLockedVersion] = useState<string | null>(null);
   const [hoveredVersion, setHoveredVersion] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!cohorts.length) return;
-    if (!cohorts.some((c) => c.model === selectedModel)) {
-      setSelectedModel(pickDefaultModel(cohorts));
+    if (!visibleCohorts.length) return;
+    if (!visibleCohorts.some((c) => c.model === selectedModel)) {
+      setSelectedModel(pickDefaultModel(visibleCohorts));
     }
-  }, [cohorts, selectedModel]);
+  }, [visibleCohorts, selectedModel]);
 
   const activeCohort = useMemo(
-    () => cohorts.find((c) => c.model === selectedModel) || cohorts[0] || null,
-    [cohorts, selectedModel],
+    () =>
+      visibleCohorts.find((c) => c.model === selectedModel) ||
+      visibleCohorts[0] ||
+      null,
+    [visibleCohorts, selectedModel],
   );
 
   useEffect(() => {
@@ -269,7 +288,7 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
         role="group"
         aria-label="Select model cohort"
       >
-        {cohorts.map((c) => {
+        {visibleCohorts.map((c) => {
           const active = c.model === activeCohort.model;
           return (
             <button
@@ -288,6 +307,18 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
             </button>
           );
         })}
+        {pricedCohorts.length > 0 && unpricedCohorts.length > 0 && (
+          <button
+            type="button"
+            className={`lineage-pill lineage-pill-toggle ${showUnpricedCohorts ? "is-active" : ""}`}
+            aria-pressed={showUnpricedCohorts}
+            onClick={() => setShowUnpricedCohorts((cur) => !cur)}
+          >
+            {showUnpricedCohorts
+              ? "Hide unpriced cohorts"
+              : `Show unpriced quality cohorts (${unpricedCohorts.length})`}
+          </button>
+        )}
       </div>
 
       <div className="lineage-visual-grid">

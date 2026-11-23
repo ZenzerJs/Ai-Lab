@@ -15,19 +15,28 @@ import { formatArm, formatCurrency, formatPercent, formatTokens } from "../../li
 import { ProviderIcon } from "./ProviderIcon";
 
 export default function Evidence({ data }: { data: DashboardPayload }) {
+  const runs = data.runs || [];
+  const pricedCount = useMemo(() => runs.filter(isPricedRun).length, [runs]);
+  const unpricedRuns = useMemo(() => runs.filter((r) => !isPricedRun(r)), [runs]);
+  const unpricedCount = unpricedRuns.length;
+  const unpricedPassedCount = useMemo(
+    () => unpricedRuns.filter((r) => r.verification_status === "passed").length,
+    [unpricedRuns],
+  );
+  const defaultCost = pricedCount > 0 ? "priced" : "all";
   const [query, setQuery] = useState("");
   const [task, setTask] = useState("all");
   const [model, setModel] = useState("all");
   const [arm, setArm] = useState("all");
   const [source, setSource] = useState("all");
   const [evidence, setEvidence] = useState("all");
-  const [cost, setCost] = useState("all");
+  const [cost, setCost] = useState(defaultCost);
   const [ascending, setAscending] = useState(true);
   const [page, setPage] = useState(1);
   const [exported, setExported] = useState(false);
   const filtered = useMemo(
     () =>
-      (data.runs || [])
+      runs
         .filter(
           (run) =>
             (task === "all" || run.task_id === task) &&
@@ -43,7 +52,7 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
               .includes(query.toLowerCase()),
         )
         .sort((a, b) => (ascending ? a.id - b.id : b.id - a.id)),
-    [data.runs, query, task, model, arm, source, evidence, cost, ascending],
+    [runs, query, task, model, arm, source, evidence, cost, ascending],
   );
   const pages = Math.max(1, Math.ceil(filtered.length / 10));
   const currentPage = Math.min(page, pages);
@@ -55,7 +64,7 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
     setArm("all");
     setSource("all");
     setEvidence("all");
-    setCost("all");
+    setCost(defaultCost);
     setPage(1);
   };
   return (
@@ -113,24 +122,41 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
               }}
             />
           </label>
-          <button
-            className="button button-outline"
-            onClick={() => {
-              downloadJson(
-                {
-                  generated_at: data.generated_at,
-                  build_identity: data.build_identity,
-                  filters: { query, task, model, arm, source, evidence, cost },
-                  runs: filtered,
-                },
-                "ai-lab-evidence.json",
-              );
-              setExported(true);
-            }}
-          >
-            <ArrowDownToLine size={16} />
-            Export filtered JSON
-          </button>
+          <div className="ledger-toolbar-actions">
+            {pricedCount > 0 && unpricedCount > 0 && (
+              <button
+                type="button"
+                className="button button-outline"
+                aria-pressed={cost !== "priced"}
+                onClick={() => {
+                  setCost((cur) => (cur === "priced" ? "all" : "priced"));
+                  setPage(1);
+                }}
+              >
+                {cost === "priced"
+                  ? `Show unpriced quality history (${unpricedPassedCount}/${unpricedCount} pass)`
+                  : `Priced runs only (${pricedCount})`}
+              </button>
+            )}
+            <button
+              className="button button-outline"
+              onClick={() => {
+                downloadJson(
+                  {
+                    generated_at: data.generated_at,
+                    build_identity: data.build_identity,
+                    filters: { query, task, model, arm, source, evidence, cost },
+                    runs: filtered,
+                  },
+                  "ai-lab-evidence.json",
+                );
+                setExported(true);
+              }}
+            >
+              <ArrowDownToLine size={16} />
+              Export filtered JSON
+            </button>
+          </div>
         </div>
         <div className="ledger-filters">
           {[
@@ -195,7 +221,13 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
                 </option>
                 {filter.values.sort().map((value) => (
                   <option value={value} key={value}>
-                    {filter.label === "Arm" ? formatArm(value) : value}
+                    {filter.label === "Arm"
+                      ? formatArm(value)
+                      : filter.label === "Cost"
+                        ? value === "priced"
+                          ? "Priced only"
+                          : "Unpriced only"
+                        : value}
                   </option>
                 ))}
               </select>
