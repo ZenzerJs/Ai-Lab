@@ -1,8 +1,8 @@
 :root {
   --motion-enter: 220ms;
   --motion-quick: 180ms;
-  --ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-move: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-enter: var(--ease-out);
+  --ease-move: var(--ease-in-out);
 }
 
 /* Preserve provider geometry; monochrome marks adapt to each surface. */
@@ -155,11 +155,10 @@
   color: var(--muted);
 }
 .metric-tag {
-  color: var(--muted);
-  background: transparent;
-  border: 1px solid var(--line);
-  border-left: 2px solid var(--iris);
-  border-radius: 3px;
+  color: var(--iris-dark);
+  background: var(--iris-soft);
+  border: 1px solid var(--tinted-line, var(--line));
+  border-radius: 5px;
 }
 .ledger-record {
   display: flex;
@@ -374,6 +373,11 @@
   background: transparent;
   border-color: var(--line);
 }
+[data-theme="dark"] .metric-tag {
+  color: var(--iris);
+  background: var(--iris-soft);
+  border-color: var(--tinted-line);
+}
 [data-theme="dark"] .thesis-panel,
 [data-theme="dark"] .simulation-result {
   background: var(--panel-lavender);
@@ -540,7 +544,7 @@
 .segmented-control button,
 .sandbox-card {
   transition:
-    transform 100ms ease-out,
+    transform 160ms var(--ease-out),
     background-color 150ms ease,
     border-color 150ms ease,
     color 150ms ease,
@@ -552,7 +556,7 @@
 .sandbox-card:active,
 .lineage-pill:active,
 .lineage-bar-row:active {
-  transform: scale(0.98);
+  transform: scale(0.97);
 }
 
 /* Iteration Lineage & Pareto Frontier */
@@ -598,7 +602,7 @@
   color: var(--muted);
   font-size: 12px;
   transition:
-    transform 100ms ease-out,
+    transform 160ms var(--ease-out),
     background-color 160ms ease,
     border-color 160ms ease,
     color 160ms ease;
@@ -718,28 +722,37 @@
 }
 .pareto-frontier-path {
   stroke-dashoffset: 0;
-  animation: pareto-draw 650ms var(--ease-out-quint, cubic-bezier(.23, 1, .32, 1)) both;
+  animation: pareto-draw 520ms var(--ease-out) both;
 }
 .pareto-node {
   cursor: pointer;
 }
-.pareto-node-inner {
-  transform-origin: 0 0;
-  animation: pareto-node-in 320ms var(--ease-out-quint, cubic-bezier(.23, 1, .32, 1)) both;
-  animation-delay: calc(var(--node-order, 0) * 55ms);
-}
-.lineage-edge-line {
-  animation: pareto-edge-in 420ms var(--ease-out-quint, cubic-bezier(.23, 1, .32, 1)) both;
-}
-.pareto-node circle {
-  transition: r 180ms var(--ease-out-quint, cubic-bezier(.23, 1, .32, 1)), stroke-width 180ms ease;
-}
-.pareto-node:focus-visible {
+.pareto-node:focus {
   outline: none;
 }
-.pareto-node:focus-visible circle:last-of-type {
-  stroke: var(--iris);
-  stroke-width: 3;
+.pareto-node-inner {
+  transform-origin: 0 0;
+  animation: pareto-node-in 300ms var(--ease-out) both;
+  animation-delay: calc(var(--node-order, 0) * 50ms);
+}
+.lineage-edge-line {
+  animation: pareto-edge-in 320ms var(--ease-out) both;
+}
+.pareto-node circle {
+  transition: opacity 160ms ease, stroke-width 160ms ease;
+}
+.pareto-focus-ring {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+.pareto-node:focus-visible .pareto-focus-ring {
+  opacity: 1;
+}
+@media (hover: hover) and (pointer: fine) {
+  .pareto-node:hover .pareto-node-inner circle:not(.pareto-focus-ring) {
+    opacity: 0.92;
+  }
 }
 .lineage-omitted-note {
   font-size: 11.5px;
@@ -753,6 +766,9 @@
   border-radius: 12px;
   background: var(--paper);
   padding: 14px 16px;
+}
+.lineage-readout-body {
+  animation: readout-swap 160ms var(--ease-out) both;
 }
 .lineage-readout-title {
   display: flex;
@@ -800,7 +816,7 @@
   border: 1px solid var(--line);
   background: var(--paper);
   transition:
-    transform 100ms ease-out,
+    transform 160ms var(--ease-out),
     border-color 160ms ease,
     background-color 160ms ease;
 }
@@ -845,7 +861,7 @@
   overflow: hidden;
   background: var(--subtle);
   transform-origin: left center;
-  animation: bar-grow 480ms var(--ease-out-quint, cubic-bezier(.23, 1, .32, 1)) both;
+  animation: bar-grow 340ms var(--ease-out) both;
   animation-delay: calc(var(--bar-order, 0) * 60ms);
 }
 .lineage-bar-track > span {
@@ -876,18 +892,24 @@
   gap: 10px;
   cursor: pointer;
   transition:
-    transform 180ms var(--ease-out-quint, cubic-bezier(.23, 1, .32, 1)),
-    border-color 180ms ease,
-    box-shadow 180ms ease;
+    transform 160ms var(--ease-out),
+    border-color 160ms ease,
+    background-color 160ms ease;
 }
 .lineage-card:hover {
-  transform: translateY(-2px);
   border-color: var(--iris);
+}
+@media (hover: hover) and (pointer: fine) {
+  .lineage-card:hover {
+    transform: translateY(-2px);
+  }
+}
+.lineage-card:active {
+  transform: scale(0.985);
 }
 .lineage-card.is-active {
   border-color: var(--iris);
-  background: var(--paper);
-  box-shadow: var(--shadow);
+  background: var(--iris-soft);
 }
 .lineage-card-head {
   display: flex;
@@ -976,15 +998,33 @@
 }
 @keyframes bar-grow {
   from {
-    transform: scaleX(0);
+    opacity: 0.2;
+    transform: scaleX(0.08);
   }
   to {
+    opacity: 1;
     transform: scaleX(1);
+  }
+}
+@keyframes readout-swap {
+  from {
+    opacity: 0.35;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 @media (max-width: 1023px) {
   .lineage-visual-grid {
     grid-template-columns: 1fr;
+  }
+}
+@media (pointer: coarse), (max-width: 767px) {
+  .lineage-pill {
+    min-height: 44px;
+    padding: 8px 14px;
   }
 }
 @media (max-width: 767px) {
@@ -1124,10 +1164,24 @@
   *,
   *::before,
   *::after {
-    animation: none !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     animation-delay: 0s !important;
-    transition: none !important;
     scroll-behavior: auto !important;
+  }
+  .button,
+  .icon-button,
+  .segmented-control button,
+  .sandbox-card,
+  .lineage-pill,
+  .lineage-bar-row,
+  .lineage-card,
+  .pareto-focus-ring {
+    transition:
+      background-color 120ms ease,
+      border-color 120ms ease,
+      color 120ms ease,
+      opacity 120ms ease;
   }
   .workspace-page,
   .experiment-card,
@@ -1143,6 +1197,7 @@
   .pareto-node-inner,
   .lineage-edge-line,
   .lineage-bar-track,
+  .lineage-readout-body,
   .lineage-card,
   .lineage-pill,
   .lineage-bar-row {
