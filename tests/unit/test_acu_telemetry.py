@@ -41,6 +41,8 @@ def test_validate_acus_consumed():
     assert pricing.validate_acus_consumed(0) is None
     assert pricing.validate_acus_consumed(0.0) is None
     assert pricing.validate_acus_consumed("0") is None
+    assert pricing.validate_acus_consumed(1e-7) is None
+    assert pricing.validate_acus_consumed(1e-6) == pytest.approx(1e-6)
     assert pricing.validate_acus_consumed(1.23456789) == pytest.approx(1.234568)
     assert pricing.validate_acus_consumed("0.5") == pytest.approx(0.5)
 

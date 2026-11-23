@@ -30,6 +30,7 @@ def validate_acus_consumed(value: Any) -> Optional[float]:
         raise ValueError(f"acus_consumed must be finite, got {value!r}")
     if fval < 0.0:
         raise ValueError(f"acus_consumed cannot be negative: {fval}")
-    if fval == 0.0:
+    rounded = round(fval, 6)
+    if rounded == 0.0:
         return None
-    return round(fval, 6)
+    return rounded

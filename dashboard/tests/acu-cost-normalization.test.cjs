@@ -25,6 +25,7 @@ const {
   hasAcuTelemetry,
   isPricedRun,
   modelFamilySummaries,
+  pricingSplit,
   scopeRuns,
 } = require('../src/lib/analytics.ts');
 const Analytics = require('../src/components/workspace/Analytics.tsx').default;
@@ -88,6 +89,19 @@ test('ACU metadata stays separate from priced cost_usd scope', () => {
   const summary = acuTelemetrySummary(runs);
   assert.equal(summary.runsWithAcus, 1);
   assert.equal(summary.totalAcus, 0.8);
+
+  const devinUnpricedFailed = makeRun({
+    id: 4,
+    model: 'devin-session-v3',
+    cost_usd: null,
+    cost_status: 'unavailable',
+    verification_status: 'failed',
+  });
+  assert.deepEqual(pricingSplit([direct, devinAcu, zeroAcu, devinUnpricedFailed]), {
+    priced: 1,
+    unpriced: 3,
+    unpricedPassed: 2,
+  });
 });
 
 test('modelFamilySummaries and Analytics UI surface ACU metadata while keeping Devin runs Unpriced', () => {

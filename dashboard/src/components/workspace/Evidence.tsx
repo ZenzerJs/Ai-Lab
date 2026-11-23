@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowDownToLine,
   ArrowDownUp,
@@ -9,20 +9,25 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { DashboardPayload } from "../../types";
-import { downloadJson, finite, snapshotDate } from "../../lib/workspace";
-import { isPricedRun } from "../../lib/analytics";
+import {
+  downloadJson,
+  finite,
+  readDestination,
+  readHashParams,
+  snapshotDate,
+  writeHashParams,
+} from "../../lib/workspace";
+import { isPricedRun, pricingSplit } from "../../lib/analytics";
 import { formatArm, formatCurrency, formatPercent, formatTokens } from "../../lib/formatters";
 import { ProviderIcon } from "./ProviderIcon";
 
 export default function Evidence({ data }: { data: DashboardPayload }) {
-  const runs = data.runs || [];
-  const pricedCount = useMemo(() => runs.filter(isPricedRun).length, [runs]);
-  const unpricedRuns = useMemo(() => runs.filter((r) => !isPricedRun(r)), [runs]);
-  const unpricedCount = unpricedRuns.length;
-  const unpricedPassedCount = useMemo(
-    () => unpricedRuns.filter((r) => r.verification_status === "passed").length,
-    [unpricedRuns],
-  );
+  const runs = useMemo(() => data.runs || [], [data.runs]);
+  const {
+    priced: pricedCount,
+    unpriced: unpricedCount,
+    unpricedPassed: unpricedPassedCount,
+  } = useMemo(() => pricingSplit(runs), [runs]);
   const defaultCost = pricedCount > 0 ? "priced" : "all";
   const [query, setQuery] = useState("");
   const [task, setTask] = useState("all");
@@ -30,10 +35,18 @@ export default function Evidence({ data }: { data: DashboardPayload }) {
   const [arm, setArm] = useState("all");
   const [source, setSource] = useState("all");
   const [evidence, setEvidence] = useState("all");
-  const [cost, setCost] = useState(defaultCost);
+  const [cost, setCost] = useState(() => {
+    if (readDestination() === "audit" && readHashParams().get("unpriced") === "1") {
+      return "all";
+    }
+    return defaultCost;
+  });
   const [ascending, setAscending] = useState(true);
   const [page, setPage] = useState(1);
   const [exported, setExported] = useState(false);
+  useEffect(() => {
+    writeHashParams("audit", { unpriced: cost !== "priced" ? "1" : null });
+  }, [cost]);
   const filtered = useMemo(
     () =>
       runs

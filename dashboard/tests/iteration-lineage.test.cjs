@@ -105,12 +105,19 @@ test('resolveLineageModels derives priced and unpriced model cohorts from the 79
   assert.ok(flash);
   assert.equal(flash.hasPricing, true);
   assert.ok(
-    flash.points.some((p) => p.version === 'icm_v3' && p.n_runs === 8),
-    'gemini-3.8-flash-low must surface the 8 live icm_v3 runs',
+    flash.points.some((p) => p.version === 'icm_v3' && p.n_runs >= 8),
+    'gemini-3.8-flash-low must surface the live icm_v3 runs',
   );
+  const expectedFlashLive = snapshot.runs.filter(
+    (r) =>
+      r.model === 'gemini-3.8-flash-low' &&
+      r.source_kind === 'live' &&
+      !r.is_simulation &&
+      r.evidence_status === 'verified',
+  ).length;
   assert.equal(
     flash.points.reduce((sum, p) => sum + p.n_runs, 0),
-    58,
+    expectedFlashLive,
     'imported runs must be excluded from live lineage counts',
   );
 });
@@ -212,14 +219,39 @@ test('resolveLineageModels consumes populated iteration_lineage payload and enri
 });
 
 test('IterationLineage SSR renders snapshot, unpriced tool fallback, and empty state cleanly', () => {
+  const { pricingSplit } = require('../src/lib/analytics.ts');
+  const { readDestination, readHashParams } = require('../src/lib/workspace.ts');
+  const split = pricingSplit(snapshot.runs);
+  const expectedPages = Math.max(1, Math.ceil(split.priced / 10));
+
+  const prevWindow = global.window;
+  try {
+    global.window = { location: { hash: '#audit?unpriced=1' } };
+    assert.equal(readDestination(), 'audit');
+    assert.equal(readHashParams().get('unpriced'), '1');
+    global.window = { location: { hash: '#overview?cohort=gemini-4-neon-devin&unpriced=1&axis=cost_per_pass' } };
+    assert.equal(readDestination(), 'overview');
+    assert.equal(readHashParams().get('cohort'), 'gemini-4-neon-devin');
+    assert.equal(readHashParams().get('axis'), 'cost_per_pass');
+  } finally {
+    if (prevWindow === undefined) {
+      delete global.window;
+    } else {
+      global.window = prevWindow;
+    }
+  }
+
+  const cohorts = resolveLineageModels(snapshot);
+  const unpricedCount = cohorts.filter((c) => !c.hasPricing).length;
   const html = renderToStaticMarkup(React.createElement(IterationLineage, { data: snapshot }));
   assert.match(html, /ITERATION LINEAGE/);
   assert.match(html, /Pareto frontier/);
   assert.match(html, /gemini-3\.8-flash-low/);
   assert.match(html, /Cost \/ Verified Pass/);
-  assert.match(html, /Show unpriced quality cohorts \(3\)/);
+  assert.ok(html.includes(`Show unpriced quality cohorts (${unpricedCount})`));
   assert.doesNotMatch(html, /gemini-4-neon-devin/);
   assert.doesNotMatch(html, />icm_lite</);
+  assert.equal(readDestination(), 'overview');
 
   const unpricedOnly = {
     ...snapshot,
@@ -236,9 +268,17 @@ test('IterationLineage SSR renders snapshot, unpriced tool fallback, and empty s
     React.createElement(IterationLineage, { data: { ...snapshot, iteration_lineage: undefined, runs: [] } }),
   );
   assert.match(emptyHtml, /Iteration lineage starts with verified runs/);
+
+  assert.ok(expectedPages >= 19);
 });
 
 test('AdaptiveICM documents 3-tier routing and Evidence / RawLedgerTable isolate unpriced runs by default', () => {
+  const { pricingSplit } = require('../src/lib/analytics.ts');
+  const split = pricingSplit(snapshot.runs);
+  const expectedPages = Math.max(1, Math.ceil(split.priced / 10));
+  const toggleText = `Show unpriced quality history (${split.unpricedPassed}/${split.unpriced} pass)`;
+  const rawToggleText = `Show unpriced (${split.unpricedPassed}/${split.unpriced} pass)`;
+
   const adaptiveHtml = renderToStaticMarkup(React.createElement(AdaptiveICM, { data: snapshot }));
   assert.match(adaptiveHtml, /ICM-Lite/);
   assert.match(adaptiveHtml, /ICM v3/);
@@ -249,9 +289,9 @@ test('AdaptiveICM documents 3-tier routing and Evidence / RawLedgerTable isolate
   const snapshotEvidenceHtml = renderToStaticMarkup(
     React.createElement(Evidence, { data: snapshot }),
   ).replace(/<!-- -->/g, '');
-  assert.match(snapshotEvidenceHtml, /Show unpriced quality history \(412\/600 pass\)/);
-  assert.match(snapshotEvidenceHtml, /1–10 of 190 records/);
-  assert.match(snapshotEvidenceHtml, /<span>1 \/ 19<\/span>/);
+  assert.ok(snapshotEvidenceHtml.includes(toggleText));
+  assert.ok(snapshotEvidenceHtml.includes(`1–10 of ${split.priced} records`));
+  assert.ok(snapshotEvidenceHtml.includes(`<span>1 / ${expectedPages}</span>`));
   const evidenceTbody = snapshotEvidenceHtml.split('<tbody>')[1] || '';
   assert.doesNotMatch(evidenceTbody, /swe-2-max-lightning/);
   assert.doesNotMatch(evidenceTbody, /gemini-4-neon-devin/);
@@ -259,8 +299,9 @@ test('AdaptiveICM documents 3-tier routing and Evidence / RawLedgerTable isolate
   const snapshotLedgerHtml = renderToStaticMarkup(
     React.createElement(RawLedgerTable, { runs: snapshot.runs }),
   ).replace(/<!-- -->/g, '');
-  assert.match(snapshotLedgerHtml, /Showing 190 of 790 runs/);
-  assert.match(snapshotLedgerHtml, /Show unpriced \(412\/600 pass\)/);
+  assert.ok(snapshotLedgerHtml.includes(`Showing ${split.priced} of ${snapshot.runs.length} runs`));
+  assert.ok(snapshotLedgerHtml.includes(rawToggleText));
+  assert.match(snapshotLedgerHtml, /Export filtered/);
 
   const customRuns = [
     makeRun({

@@ -12,10 +12,40 @@ export const destinations: Destination[] = [
 ];
 
 export function readDestination(): Destination {
-  const hash = window.location.hash.slice(1);
+  if (typeof window === "undefined") return "overview";
+  const hash = window.location.hash.slice(1).split("?")[0];
   return destinations.includes(hash as Destination)
     ? (hash as Destination)
     : "overview";
+}
+
+export function readHashParams(): URLSearchParams {
+  if (typeof window === "undefined") return new URLSearchParams();
+  const raw = window.location.hash.slice(1);
+  const qIndex = raw.indexOf("?");
+  if (qIndex === -1) return new URLSearchParams();
+  return new URLSearchParams(raw.slice(qIndex + 1));
+}
+
+export function writeHashParams(
+  destination: Destination,
+  patch: Record<string, string | null | undefined>,
+): void {
+  if (typeof window === "undefined") return;
+  if (readDestination() !== destination) return;
+  const params = readHashParams();
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null || value === undefined || value === "") {
+      params.delete(key);
+    } else {
+      params.set(key, value);
+    }
+  }
+  const query = params.toString();
+  const nextHash = query ? `#${destination}?${query}` : `#${destination}`;
+  if (window.location.hash !== nextHash) {
+    window.history.replaceState(null, "", nextHash);
+  }
 }
 
 // Match build_data.GOVERNED_ARMS and preserve the exporter-selected comparison.

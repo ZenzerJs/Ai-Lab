@@ -1,2 +1,5 @@
 # Evidence telemetry artifacts must remain byte-exact LF files
 experiments/evidence/*.ndjson -text
+
+# Keep large exported dashboard snapshots collapsible in GitHub PR diffs
+dashboard/public/data.json -diff linguist-generated=true

@@ -15,7 +15,7 @@ import {
   lineageEdges,
   resolveLineageModels,
 } from "../../lib/lineage";
-import { finite } from "../../lib/workspace";
+import { finite, readHashParams, writeHashParams } from "../../lib/workspace";
 
 type CostAxisMode = "cost_per_run" | "cost_per_pass";
 
@@ -55,7 +55,9 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
     () => cohorts.filter((c) => !c.hasPricing),
     [cohorts],
   );
-  const [showUnpricedCohorts, setShowUnpricedCohorts] = useState(false);
+  const [showUnpricedCohorts, setShowUnpricedCohorts] = useState<boolean>(
+    () => readHashParams().get("unpriced") === "1",
+  );
   const visibleCohorts = useMemo(
     () =>
       pricedCohorts.length > 0 && !showUnpricedCohorts
@@ -63,10 +65,18 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
         : cohorts,
     [cohorts, pricedCohorts, showUnpricedCohorts],
   );
-  const [selectedModel, setSelectedModel] = useState<string>(() =>
-    pickDefaultModel(visibleCohorts),
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    const requested = readHashParams().get("cohort");
+    if (requested && visibleCohorts.some((c) => c.model === requested)) {
+      return requested;
+    }
+    return pickDefaultModel(visibleCohorts);
+  });
+  const [costAxis, setCostAxis] = useState<CostAxisMode>(() =>
+    readHashParams().get("axis") === "cost_per_pass"
+      ? "cost_per_pass"
+      : "cost_per_run",
   );
-  const [costAxis, setCostAxis] = useState<CostAxisMode>("cost_per_run");
   const [lockedVersion, setLockedVersion] = useState<string | null>(null);
   const [hoveredVersion, setHoveredVersion] = useState<string | null>(null);
 
@@ -89,6 +99,18 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
     setLockedVersion(null);
     setHoveredVersion(null);
   }, [activeCohort?.model]);
+
+  useEffect(() => {
+    if (!activeCohort) return;
+    writeHashParams("overview", {
+      cohort: activeCohort.model,
+      unpriced: showUnpricedCohorts ? "1" : null,
+      axis:
+        activeCohort.hasPricing && costAxis === "cost_per_pass"
+          ? "cost_per_pass"
+          : null,
+    });
+  }, [activeCohort, showUnpricedCohorts, costAxis]);
 
   if (!activeCohort || !activeCohort.points.length) {
     return (

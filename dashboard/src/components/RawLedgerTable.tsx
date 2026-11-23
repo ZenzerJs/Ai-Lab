@@ -22,14 +22,14 @@ import {
 } from './ui/table';
 import { Badge } from './ui/badge';
 import { Card, CardHeader, CardTitle, CardContent } from './ui/card';
-import { Button, buttonVariants } from './ui/button';
+import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { SelectNative } from './ui/select-native';
 import { Empty, EmptyIcon, EmptyTitle, EmptyDescription } from './ui/empty';
 import { formatArm, formatCurrency, formatPercent, formatTokens } from '../lib/formatters';
-import { isPricedRun } from '../lib/analytics';
-import { finite } from '../lib/workspace';
-import { cn, getPublicUrl } from '../lib/utils';
+import { isPricedRun, pricingSplit } from '../lib/analytics';
+import { downloadJson, finite } from '../lib/workspace';
+import { cn } from '../lib/utils';
 
 interface RawLedgerTableProps {
   runs: RunRecord[];
@@ -61,13 +61,11 @@ export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs, generatedA
   const [expandedRunId, setExpandedRunId] = useState<number | null>(null);
   const pageSize = 10;
 
-  const pricedCount = useMemo(() => runs.filter(isPricedRun).length, [runs]);
-  const unpricedRuns = useMemo(() => runs.filter((r) => !isPricedRun(r)), [runs]);
-  const unpricedCount = unpricedRuns.length;
-  const unpricedPassedCount = useMemo(
-    () => unpricedRuns.filter((r) => r.verification_status === 'passed').length,
-    [unpricedRuns],
-  );
+  const {
+    priced: pricedCount,
+    unpriced: unpricedCount,
+    unpricedPassed: unpricedPassedCount,
+  } = useMemo(() => pricingSplit(runs), [runs]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -298,20 +296,36 @@ export const RawLedgerTable: React.FC<RawLedgerTableProps> = ({ runs, generatedA
             </Button>
           )}
 
-          {/* Download JSON */}
-          <a
-            href={getPublicUrl('data.json')}
-            download="antigravity_usage_ledger.json"
-            aria-label="Download raw ledger data as JSON"
-            className={buttonVariants({
-              variant: "outline",
-              size: "sm",
-              className: "gap-1.5 text-xs text-primary border-primary/30 hover:bg-surface-hover h-8",
-            })}
+          {/* Export Filtered Runs JSON */}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label="Export filtered ledger runs as JSON"
+            disabled={filteredRuns.length === 0}
+            onClick={() =>
+              downloadJson(
+                {
+                  generated_at: generatedAt,
+                  build_identity: buildIdentity,
+                  filters: {
+                    showUnpriced,
+                    task: taskFilter,
+                    arm: armFilter,
+                    source: sourceFilter,
+                    evidence: evidenceFilter,
+                    query: searchQuery,
+                  },
+                  runs: filteredRuns,
+                },
+                'antigravity_usage_ledger_filtered.json',
+              )
+            }
+            className="gap-1.5 text-xs text-primary border-primary/30 hover:bg-surface-hover h-8"
           >
             <Download className="size-3.5" />
-            <span>Export</span>
-          </a>
+            <span>Export filtered</span>
+          </Button>
         </div>
       </CardHeader>
 
