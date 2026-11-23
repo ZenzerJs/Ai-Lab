@@ -434,8 +434,14 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                 fill={`url(#optimal-zone-${uid})`}
                 pointerEvents="none"
               />
+              <path
+                d="M 4 0 L 5.2 2.8 L 8 4 L 5.2 5.2 L 4 8 L 2.8 5.2 L 0 4 L 2.8 2.8 Z"
+                transform={`translate(${PAD.left}, ${PAD.top - 19})`}
+                fill="var(--sea)"
+                aria-hidden="true"
+              />
               <text
-                x={PAD.left + 2}
+                x={PAD.left + 12}
                 y={PAD.top - 12}
                 textAnchor="start"
                 fill="var(--sea)"
@@ -443,7 +449,7 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                 fontFamily="var(--mono)"
                 fontWeight="600"
               >
-                ★ Optimal corner
+                Optimal corner
               </text>
 
               {/* Pareto frontier dashed envelope */}
@@ -546,6 +552,15 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                     }}
                   >
                     <g className="pareto-node-inner">
+                      <circle r="18" fill="transparent" />
+                      <circle
+                        className="pareto-focus-ring"
+                        r="19"
+                        fill="none"
+                        stroke="var(--iris)"
+                        strokeWidth="2"
+                        strokeDasharray="3 2"
+                      />
                       {isPareto && (
                         <circle
                           r={active ? 14 : 11}
@@ -571,7 +586,7 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                         strokeWidth={regressed || isBase ? 2.5 : 2}
                       />
                       <text
-                        y={labelAbove ? -14 : 22}
+                        y={labelAbove ? -20 : 25}
                         textAnchor="middle"
                         fill="var(--ink)"
                         fontSize="10.5"
@@ -600,6 +615,7 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
               aria-live="polite"
               aria-label="Selected harness version details"
             >
+              <div className="lineage-readout-body" key={inspectedPoint.version}>
               <div className="lineage-readout-title">
                 <strong>{inspectedPoint.label}</strong>
                 <div className="lineage-readout-badges">
@@ -685,6 +701,7 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                   </dd>
                 </div>
               </dl>
+              </div>
             </div>
           )}
         </div>
