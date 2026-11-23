@@ -2019,6 +2019,15 @@ def _extract_partial_step_usage(lines: List[str]) -> Optional[Dict[str, Optional
 MAX_PHASE1_PLAN_CHARS = 12000
 
 _QUOTA_SIGNALS = ("quota", "resource_exhausted", "rate limit", "rate_limit", "429", "exhausted", "capacity")
+_INFRA_ERROR_SIGNALS = (
+    "failed to start conversation",
+    "empty conversation id",
+    "connection reset",
+    "service unavailable",
+    "502 bad gateway",
+    "503 service unavailable",
+    "504 gateway timeout",
+)
 
 
 def _resolve_cli_binary(cli_cmd: str) -> str:
@@ -2232,6 +2241,12 @@ def _invoke_cli_phase(
     )
     if quota_exhausted and "quota_exhausted" not in phase_exclusions:
         phase_exclusions.append("quota_exhausted")
+    infra_error = bool(
+        execution_status == "failed"
+        and (quota_exhausted or any(sig in combined_err for sig in _INFRA_ERROR_SIGNALS))
+    )
+    if infra_error and "infra_error" not in phase_exclusions:
+        phase_exclusions.append("infra_error")
 
     evidence_file.write_bytes(clean_bytes)
     evidence_hash = hashlib.sha256(clean_bytes).hexdigest()
@@ -2303,6 +2318,7 @@ def _invoke_cli_phase(
         "execution_status": execution_status,
         "exclusion_reasons": phase_exclusions,
         "quota_exhausted": quota_exhausted,
+        "infra_error": infra_error,
         "stderr_text": stderr_text,
         "evidence_ref": evidence_ref,
         "evidence_hash": evidence_hash,
@@ -2317,6 +2333,77 @@ def _invoke_cli_phase(
         "num_turns": num_turns,
         "acus_consumed": resolved_acus,
     }
+
+
+def _invoke_cli_phase_with_infra_retry(
+    *,
+    cmd_bin: str,
+    prompt: str,
+    workspace_path: Path,
+    model: str,
+    timeout_seconds: int,
+    evidence_file: Path,
+    workspace: Optional[DisposableWorkspace] = None,
+    max_infra_retries: int = 1,
+    infra_retry_backoff_seconds: float = 3.0,
+    devin_session_id: Optional[str] = None,
+    devin_org_id: Optional[str] = None,
+    devin_api_key: Optional[str] = None,
+    acus_consumed: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Invoke CLI phase and retry zero-token startup/infra failures up to `max_infra_retries`."""
+    bundle = _invoke_cli_phase(
+        cmd_bin=cmd_bin,
+        prompt=prompt,
+        workspace_path=workspace_path,
+        model=model,
+        timeout_seconds=timeout_seconds,
+        evidence_file=evidence_file,
+        devin_session_id=devin_session_id,
+        devin_org_id=devin_org_id,
+        devin_api_key=devin_api_key,
+        acus_consumed=acus_consumed,
+    )
+    attempts: List[Dict[str, Any]] = []
+    retries_used = 0
+    while (
+        retries_used < max(0, int(max_infra_retries))
+        and bundle.get("execution_status") == "failed"
+        and bundle.get("infra_error")
+        and int(((bundle.get("usage") or {}).get("input_tokens")) or 0) == 0
+    ):
+        attempts.append(
+            {
+                "attempt": retries_used + 1,
+                "evidence_ref": bundle.get("evidence_ref"),
+                "evidence_hash": bundle.get("evidence_hash"),
+                "stderr_excerpt": str(bundle.get("stderr_text") or "")[:200],
+                "exclusion_reasons": list(bundle.get("exclusion_reasons") or []),
+            }
+        )
+        if workspace is not None:
+            workspace.rollback_to_backup()
+        if infra_retry_backoff_seconds > 0:
+            time.sleep(infra_retry_backoff_seconds)
+        retries_used += 1
+        attempt_file = evidence_file.with_name(
+            f"{evidence_file.stem}_attempt{retries_used + 1}{evidence_file.suffix}"
+        )
+        bundle = _invoke_cli_phase(
+            cmd_bin=cmd_bin,
+            prompt=prompt,
+            workspace_path=workspace_path,
+            model=model,
+            timeout_seconds=timeout_seconds,
+            evidence_file=attempt_file,
+            devin_session_id=devin_session_id,
+            devin_org_id=devin_org_id,
+            devin_api_key=devin_api_key,
+            acus_consumed=acus_consumed,
+        )
+    bundle = dict(bundle)
+    bundle["infra_retry_attempts"] = attempts
+    return bundle
 
 
 def _combine_staged_telemetry(p1: Dict[str, Any], p2: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -2443,6 +2530,8 @@ def _run_staged_two_phase(
     evidence_dir: Path,
     safe_model: str,
     start_epoch: float,
+    max_infra_retries: int = 1,
+    infra_retry_backoff_seconds: float = 3.0,
     devin_session_id: Optional[str] = None,
     devin_org_id: Optional[str] = None,
     devin_api_key: Optional[str] = None,
@@ -2454,13 +2543,16 @@ def _run_staged_two_phase(
 
     phase1_prompt, _ = build_staged_prompts(instructions_text, workspace=snapshot_dir)
     phase1_file = evidence_dir / f"live_{task_id}_{safe_model}_{arm}_phase1_run{run_index}_{ts}.ndjson"
-    p1 = _invoke_cli_phase(
+    p1 = _invoke_cli_phase_with_infra_retry(
         cmd_bin=cmd_bin,
         prompt=phase1_prompt,
         workspace_path=workspace.path,
         model=model,
         timeout_seconds=timeout_seconds,
         evidence_file=phase1_file,
+        workspace=workspace,
+        max_infra_retries=max_infra_retries,
+        infra_retry_backoff_seconds=infra_retry_backoff_seconds,
         devin_session_id=devin_session_id,
         devin_org_id=devin_org_id,
         devin_api_key=devin_api_key,
@@ -2536,6 +2628,7 @@ def _run_staged_two_phase(
 
     return {
         **agg,
+        "infra_retry_attempts": list(p1.get("infra_retry_attempts") or []),
         "exclusion_reasons": exclusion_reasons,
         "evidence_ref": evidence_ref,
         "evidence_hash": evidence_hash,
@@ -2562,6 +2655,8 @@ def run_benchmark_live(
     devin_api_key: Optional[str] = None,
     acus_consumed: Optional[float] = None,
     canonical_workspace: bool = False,
+    max_infra_retries: int = 1,
+    infra_retry_backoff_seconds: float = 3.0,
 ) -> Dict[str, Any]:
     """
     Execute a live benchmark task using the agy CLI in an isolated DisposableWorkspace.
@@ -2652,6 +2747,8 @@ def run_benchmark_live(
                 evidence_dir=evidence_dir,
                 safe_model=safe_model,
                 start_epoch=start_epoch,
+                max_infra_retries=max_infra_retries,
+                infra_retry_backoff_seconds=infra_retry_backoff_seconds,
                 devin_session_id=devin_session_id,
                 devin_org_id=devin_org_id,
                 devin_api_key=devin_api_key,
@@ -2675,19 +2772,25 @@ def run_benchmark_live(
             else:
                 prompt = build_mode_prompt(instructions_text, arm, workspace=snapshot_dir)
             evidence_file = evidence_dir / f"live_{task_id}_{safe_model}_{arm}_run{run_index}_{int(start_epoch)}.ndjson"
-            exec_bundle = _invoke_cli_phase(
+            exec_bundle = _invoke_cli_phase_with_infra_retry(
                 cmd_bin=cmd_bin,
                 prompt=prompt,
                 workspace_path=workspace.path,
                 model=model,
                 timeout_seconds=timeout_seconds,
                 evidence_file=evidence_file,
+                workspace=workspace,
+                max_infra_retries=max_infra_retries,
+                infra_retry_backoff_seconds=infra_retry_backoff_seconds,
                 devin_session_id=devin_session_id,
                 devin_org_id=devin_org_id,
                 devin_api_key=devin_api_key,
                 acus_consumed=acus_consumed,
             )
             stderr_excerpt = exec_bundle["stderr_text"][:400]
+
+        infra_retry_attempts = list(exec_bundle.get("infra_retry_attempts") or [])
+        run_notes_json = json.dumps({"infra_retry_attempts": infra_retry_attempts}) if infra_retry_attempts else None
 
         execution_status = exec_bundle["execution_status"]
         exclusion_reasons: List[str] = list(exec_bundle["exclusion_reasons"])
@@ -2778,6 +2881,7 @@ def run_benchmark_live(
                 tools_per_llm_call=cache_diagnostics["tools_per_llm_call"],
                 contract_version=contract_version,
                 contract_hash=contract_hash,
+                notes=run_notes_json,
                 conn=conn,
             )
 
@@ -2831,6 +2935,7 @@ def run_benchmark_live(
             "quota_exhausted": quota_exhausted,
             "stderr_excerpt": stderr_excerpt,
             "exclusion_reasons": exclusion_reasons,
+            "infra_retry_attempts": infra_retry_attempts,
             "scope": scope,
             **staged_meta,
         }

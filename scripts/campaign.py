@@ -349,6 +349,7 @@ def plan_campaign(
     resource_budget: Optional[Dict[str, Any]] = None,
     arm_configs: Optional[Dict[str, Dict[str, Any]]] = None,
     campaign_id: Optional[str] = None,
+    start_repetition: int = 1,
 ) -> CampaignManifest:
     """
     Schedule controlled evaluation matrices: Tasks × Arms × Repetitions with predeclared, randomized arm order (REP-01).
@@ -364,11 +365,14 @@ def plan_campaign(
         resource_budget: Resource budgets (timeout_seconds, max_cost_usd, max_turns).
         arm_configs: Custom arm configurations mapping arm name to settings.
         campaign_id: Unique campaign identifier.
+        start_repetition: Starting 1-based repetition index (default 1).
     """
     if not tasks:
         raise ValueError("Campaign must include at least one task.")
     if repetitions < 1:
         raise ValueError("Campaign repetitions must be >= 1.")
+    if start_repetition < 1:
+        raise ValueError("Campaign start_repetition must be >= 1.")
 
     selected_arms = list(arms or ["baseline", "icm"])
     for a in selected_arms:
@@ -416,7 +420,7 @@ def plan_campaign(
         tid = task_info["task_id"]
         tver = task_info["task_version"]
 
-        for rep_idx in range(1, repetitions + 1):
+        for rep_idx in range(start_repetition, start_repetition + repetitions):
             for cond in active_cache_conds:
                 # Predeclared randomized arm order within this block (REP-01)
                 shuffled_arms = list(selected_arms)
@@ -1918,6 +1922,7 @@ def main() -> None:
     plan_parser.add_argument("--tasks", required=True, help="Comma-separated task IDs (e.g. BENCH-001,BENCH-002)")
     plan_parser.add_argument("--arms", default="baseline,icm", help="Comma-separated arms (default: baseline,icm)")
     plan_parser.add_argument("--repetitions", type=int, default=1, help="Repetitions per task-arm slot")
+    plan_parser.add_argument("--start-repetition", type=int, default=1, help="Starting repetition index (default: 1)")
     plan_parser.add_argument("--seed", type=int, default=42, help="Seed for randomized arm ordering")
     plan_parser.add_argument("--cache-conditions", default="cold", help="Comma-separated cache conditions (cold,warm)")
     plan_parser.add_argument("--model", default="gemini-2.5-pro", help="Target model identifier")
@@ -1928,6 +1933,7 @@ def main() -> None:
     plan_batch_parser.add_argument("--tasks", required=True, help="Comma-separated task IDs (e.g. BENCH-001,BENCH-002)")
     plan_batch_parser.add_argument("--arms", default="baseline,icm", help="Comma-separated arms (default: baseline,icm)")
     plan_batch_parser.add_argument("--repetitions", type=int, default=1, help="Repetitions per task-arm slot")
+    plan_batch_parser.add_argument("--start-repetition", type=int, default=1, help="Starting repetition index (default: 1)")
     plan_batch_parser.add_argument("--seed", type=int, default=42, help="Seed for randomized arm ordering")
     plan_batch_parser.add_argument("--cache-conditions", default="cold", help="Comma-separated cache conditions (cold,warm)")
     plan_batch_parser.add_argument("--model", default="gemini-2.5-pro", help="Target model identifier")
@@ -1963,6 +1969,7 @@ def main() -> None:
             random_seed=args.seed,
             cache_conditions=cond_list,
             model=args.model,
+            start_repetition=args.start_repetition,
         )
         out_p = Path(args.output)
         manifest.save(out_p)
