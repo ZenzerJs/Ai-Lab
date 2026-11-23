@@ -15,7 +15,7 @@ import {
   lineageEdges,
   resolveLineageModels,
 } from "../../lib/lineage";
-import { finite } from "../../lib/workspace";
+import { finite, readHashParams, writeHashParams } from "../../lib/workspace";
 
 type CostAxisMode = "cost_per_run" | "cost_per_pass";
 
@@ -47,29 +47,70 @@ function formatAxisX(val: number, hasPricing: boolean): string {
 export default function IterationLineage({ data }: { data: DashboardPayload }) {
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const cohorts = useMemo(() => resolveLineageModels(data), [data]);
-  const [selectedModel, setSelectedModel] = useState<string>(() =>
-    pickDefaultModel(cohorts),
+  const pricedCohorts = useMemo(
+    () => cohorts.filter((c) => c.hasPricing),
+    [cohorts],
   );
-  const [costAxis, setCostAxis] = useState<CostAxisMode>("cost_per_run");
+  const unpricedCohorts = useMemo(
+    () => cohorts.filter((c) => !c.hasPricing),
+    [cohorts],
+  );
+  const [showUnpricedCohorts, setShowUnpricedCohorts] = useState<boolean>(
+    () => readHashParams().get("unpriced") === "1",
+  );
+  const visibleCohorts = useMemo(
+    () =>
+      pricedCohorts.length > 0 && !showUnpricedCohorts
+        ? pricedCohorts
+        : cohorts,
+    [cohorts, pricedCohorts, showUnpricedCohorts],
+  );
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    const requested = readHashParams().get("cohort");
+    if (requested && visibleCohorts.some((c) => c.model === requested)) {
+      return requested;
+    }
+    return pickDefaultModel(visibleCohorts);
+  });
+  const [costAxis, setCostAxis] = useState<CostAxisMode>(() =>
+    readHashParams().get("axis") === "cost_per_pass"
+      ? "cost_per_pass"
+      : "cost_per_run",
+  );
   const [lockedVersion, setLockedVersion] = useState<string | null>(null);
   const [hoveredVersion, setHoveredVersion] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!cohorts.length) return;
-    if (!cohorts.some((c) => c.model === selectedModel)) {
-      setSelectedModel(pickDefaultModel(cohorts));
+    if (!visibleCohorts.length) return;
+    if (!visibleCohorts.some((c) => c.model === selectedModel)) {
+      setSelectedModel(pickDefaultModel(visibleCohorts));
     }
-  }, [cohorts, selectedModel]);
+  }, [visibleCohorts, selectedModel]);
 
   const activeCohort = useMemo(
-    () => cohorts.find((c) => c.model === selectedModel) || cohorts[0] || null,
-    [cohorts, selectedModel],
+    () =>
+      visibleCohorts.find((c) => c.model === selectedModel) ||
+      visibleCohorts[0] ||
+      null,
+    [visibleCohorts, selectedModel],
   );
 
   useEffect(() => {
     setLockedVersion(null);
     setHoveredVersion(null);
   }, [activeCohort?.model]);
+
+  useEffect(() => {
+    if (!activeCohort) return;
+    writeHashParams("overview", {
+      cohort: activeCohort.model,
+      unpriced: showUnpricedCohorts ? "1" : null,
+      axis:
+        activeCohort.hasPricing && costAxis === "cost_per_pass"
+          ? "cost_per_pass"
+          : null,
+    });
+  }, [activeCohort, showUnpricedCohorts, costAxis]);
 
   if (!activeCohort || !activeCohort.points.length) {
     return (
@@ -269,7 +310,7 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
         role="group"
         aria-label="Select model cohort"
       >
-        {cohorts.map((c) => {
+        {visibleCohorts.map((c) => {
           const active = c.model === activeCohort.model;
           return (
             <button
@@ -288,6 +329,18 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
             </button>
           );
         })}
+        {pricedCohorts.length > 0 && unpricedCohorts.length > 0 && (
+          <button
+            type="button"
+            className={`lineage-pill lineage-pill-toggle ${showUnpricedCohorts ? "is-active" : ""}`}
+            aria-pressed={showUnpricedCohorts}
+            onClick={() => setShowUnpricedCohorts((cur) => !cur)}
+          >
+            {showUnpricedCohorts
+              ? "Hide unpriced cohorts"
+              : `Show unpriced quality cohorts (${unpricedCohorts.length})`}
+          </button>
+        )}
       </div>
 
       <div className="lineage-visual-grid">
@@ -434,8 +487,14 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                 fill={`url(#optimal-zone-${uid})`}
                 pointerEvents="none"
               />
+              <path
+                d="M 4 0 L 5.2 2.8 L 8 4 L 5.2 5.2 L 4 8 L 2.8 5.2 L 0 4 L 2.8 2.8 Z"
+                transform={`translate(${PAD.left}, ${PAD.top - 19})`}
+                fill="var(--sea)"
+                aria-hidden="true"
+              />
               <text
-                x={PAD.left + 2}
+                x={PAD.left + 12}
                 y={PAD.top - 12}
                 textAnchor="start"
                 fill="var(--sea)"
@@ -443,7 +502,7 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                 fontFamily="var(--mono)"
                 fontWeight="600"
               >
-                ★ Optimal corner
+                Optimal corner
               </text>
 
               {/* Pareto frontier dashed envelope */}
@@ -546,6 +605,15 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                     }}
                   >
                     <g className="pareto-node-inner">
+                      <circle r="18" fill="transparent" />
+                      <circle
+                        className="pareto-focus-ring"
+                        r="19"
+                        fill="none"
+                        stroke="var(--iris)"
+                        strokeWidth="2"
+                        strokeDasharray="3 2"
+                      />
                       {isPareto && (
                         <circle
                           r={active ? 14 : 11}
@@ -571,7 +639,7 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                         strokeWidth={regressed || isBase ? 2.5 : 2}
                       />
                       <text
-                        y={labelAbove ? -14 : 22}
+                        y={labelAbove ? -20 : 25}
                         textAnchor="middle"
                         fill="var(--ink)"
                         fontSize="10.5"
@@ -600,6 +668,7 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
               aria-live="polite"
               aria-label="Selected harness version details"
             >
+              <div className="lineage-readout-body" key={inspectedPoint.version}>
               <div className="lineage-readout-title">
                 <strong>{inspectedPoint.label}</strong>
                 <div className="lineage-readout-badges">
@@ -685,6 +754,7 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                   </dd>
                 </div>
               </dl>
+              </div>
             </div>
           )}
         </div>

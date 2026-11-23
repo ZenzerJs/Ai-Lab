@@ -29,7 +29,7 @@ import pytest
 # Fixtures & helpers
 # ---------------------------------------------------------------------------
 
-BASE_URL = os.environ.get("DASHBOARD_BASE_URL", "http://localhost:4173/Ai-Lab")
+BASE_URL = os.environ.get("DASHBOARD_BASE_URL", "http://localhost:4173").rstrip("/")
 REPO_ROOT = Path(__file__).parent.parent.parent
 DASHBOARD_DIR = REPO_ROOT / "dashboard"
 DATA_JSON = DASHBOARD_DIR / "public" / "data.json"
@@ -261,7 +261,8 @@ class TestDashboardBrowserLive:
     """
 
     @pytest.fixture(scope="class", autouse=True)
-    def browser_page(self):
+    @classmethod
+    def browser_page(cls):
         """Launch Playwright browser and navigate to dashboard."""
         try:
             from playwright.sync_api import sync_playwright
@@ -272,9 +273,9 @@ class TestDashboardBrowserLive:
             browser = pw.chromium.launch(headless=True)
             ctx = browser.new_context()
             page = ctx.new_page()
-            self._page = page
-            self._errors: list[str] = []
-            page.on("console", lambda msg: self._errors.append(msg.text) if msg.type == "error" else None)
+            cls._page = page
+            cls._errors: list[str] = []
+            page.on("console", lambda msg: cls._errors.append(msg.text) if msg.type == "error" else None)
             page.goto(f"{BASE_URL}/", wait_until="networkidle", timeout=15000)
             yield page
             browser.close()
@@ -288,27 +289,24 @@ class TestDashboardBrowserLive:
 
     def test_data_json_loaded(self):
         page = self._page_obj()
-        result = page.evaluate("() => window.__dashboardData || null")
-        # Alternatively check that the header rendered a run count
         header_text = page.locator("header").inner_text()
         assert header_text, "Header is empty"
+        assert page.locator(".snapshot-label").count() > 0, "Snapshot date badge missing"
 
     def test_tabs_render(self):
         page = self._page_obj()
-        for tab_label in ("Overview", "Matrix", "Evidence", "Audit"):
-            tab = page.get_by_role("tab", name=tab_label)
-            if tab.count() > 0:
-                tab.click()
-                page.wait_for_timeout(400)
-                # Panel should have some content
-                panel = page.get_by_role("tabpanel")
-                assert panel.inner_text().strip(), f"Tab '{tab_label}' rendered empty panel"
+        for dest in ("overview", "tasks", "analytics", "audit"):
+            nav_link = page.locator(f'a[href="#{dest}"]')
+            if nav_link.count() > 0:
+                nav_link.first.click()
+                page.wait_for_timeout(300)
+                main_el = page.locator("#main-content")
+                assert main_el.inner_text().strip(), f"View '{dest}' rendered empty content"
 
     def test_demo_banner_visible_for_fixture_data(self):
         page = self._page_obj()
         data = _load_data_json()
         if data.get("is_demo_report"):
-            # Some visual indicator of demo/fixture should be present
             banner_text = page.locator("body").inner_text()
             assert any(kw in banner_text.upper() for kw in ("DEMO", "FIXTURE", "NO MEASURED")), (
                 "is_demo_report=True but no demo/fixture indicator visible on page"
@@ -336,6 +334,10 @@ class TestDashboardBrowserLive:
 
     def test_iteration_lineage_and_themed_scrollbars(self):
         page = self._page_obj()
+        overview_link = page.locator('a[href="#overview"]')
+        if overview_link.count() > 0:
+            overview_link.first.click()
+            page.wait_for_timeout(300)
         lineage = page.locator('[aria-labelledby="lineage-section-title"]')
         assert lineage.count() > 0, "IterationLineage section not rendered on Overview"
         svg_box = lineage.locator("svg.lineage-svg").bounding_box()

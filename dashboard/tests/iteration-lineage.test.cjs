@@ -79,7 +79,7 @@ test('formatArm, formatPercent, formatDecimal, and governed arm selection suppor
   assert.equal(selectGovernedArmName({ baseline: {}, icm_v2: {}, icm_lite: {} }), 'icm_v2');
 });
 
-test('resolveLineageModels derives priced and unpriced model cohorts from the 782-run snapshot', () => {
+test('resolveLineageModels derives priced and unpriced model cohorts from the 790-run snapshot', () => {
   const cohorts = resolveLineageModels(snapshot);
   assert.ok(cohorts.length >= 7);
 
@@ -104,9 +104,20 @@ test('resolveLineageModels derives priced and unpriced model cohorts from the 78
   const flash = cohorts.find((c) => c.model === 'gemini-3.8-flash-low');
   assert.ok(flash);
   assert.equal(flash.hasPricing, true);
+  assert.ok(
+    flash.points.some((p) => p.version === 'icm_v3' && p.n_runs >= 8),
+    'gemini-3.8-flash-low must surface the live icm_v3 runs',
+  );
+  const expectedFlashLive = snapshot.runs.filter(
+    (r) =>
+      r.model === 'gemini-3.8-flash-low' &&
+      r.source_kind === 'live' &&
+      !r.is_simulation &&
+      r.evidence_status === 'verified',
+  ).length;
   assert.equal(
     flash.points.reduce((sum, p) => sum + p.n_runs, 0),
-    50,
+    expectedFlashLive,
     'imported runs must be excluded from live lineage counts',
   );
 });
@@ -208,15 +219,43 @@ test('resolveLineageModels consumes populated iteration_lineage payload and enri
 });
 
 test('IterationLineage SSR renders snapshot, unpriced tool fallback, and empty state cleanly', () => {
+  const { pricingSplit } = require('../src/lib/analytics.ts');
+  const { readDestination, readHashParams } = require('../src/lib/workspace.ts');
+  const split = pricingSplit(snapshot.runs);
+  const expectedPages = Math.max(1, Math.ceil(split.priced / 10));
+
+  const prevWindow = global.window;
+  try {
+    global.window = { location: { hash: '#audit?unpriced=1' } };
+    assert.equal(readDestination(), 'audit');
+    assert.equal(readHashParams().get('unpriced'), '1');
+    global.window = { location: { hash: '#overview?cohort=gemini-4-neon-devin&unpriced=1&axis=cost_per_pass' } };
+    assert.equal(readDestination(), 'overview');
+    assert.equal(readHashParams().get('cohort'), 'gemini-4-neon-devin');
+    assert.equal(readHashParams().get('axis'), 'cost_per_pass');
+  } finally {
+    if (prevWindow === undefined) {
+      delete global.window;
+    } else {
+      global.window = prevWindow;
+    }
+  }
+
+  const cohorts = resolveLineageModels(snapshot);
+  const unpricedCount = cohorts.filter((c) => !c.hasPricing).length;
   const html = renderToStaticMarkup(React.createElement(IterationLineage, { data: snapshot }));
   assert.match(html, /ITERATION LINEAGE/);
   assert.match(html, /Pareto frontier/);
   assert.match(html, /gemini-3\.8-flash-low/);
   assert.match(html, /Cost \/ Verified Pass/);
+  assert.ok(html.includes(`Show unpriced quality cohorts (${unpricedCount})`));
+  assert.doesNotMatch(html, /gemini-4-neon-devin/);
   assert.doesNotMatch(html, />icm_lite</);
+  assert.equal(readDestination(), 'overview');
 
   const unpricedOnly = {
     ...snapshot,
+    iteration_lineage: undefined,
     runs: snapshot.runs.filter((r) => r.model === 'gemini-4-neon-devin'),
   };
   const unpricedHtml = renderToStaticMarkup(
@@ -226,18 +265,43 @@ test('IterationLineage SSR renders snapshot, unpriced tool fallback, and empty s
   assert.match(unpricedHtml, /ICM v2/);
 
   const emptyHtml = renderToStaticMarkup(
-    React.createElement(IterationLineage, { data: { ...snapshot, runs: [] } }),
+    React.createElement(IterationLineage, { data: { ...snapshot, iteration_lineage: undefined, runs: [] } }),
   );
   assert.match(emptyHtml, /Iteration lineage starts with verified runs/);
+
+  assert.ok(expectedPages >= 19);
 });
 
-test('AdaptiveICM documents 3-tier routing and Evidence / RawLedgerTable include contract & cache columns', () => {
+test('AdaptiveICM documents 3-tier routing and Evidence / RawLedgerTable isolate unpriced runs by default', () => {
+  const { pricingSplit } = require('../src/lib/analytics.ts');
+  const split = pricingSplit(snapshot.runs);
+  const expectedPages = Math.max(1, Math.ceil(split.priced / 10));
+  const toggleText = `Show unpriced quality history (${split.unpricedPassed}/${split.unpriced} pass)`;
+  const rawToggleText = `Show unpriced (${split.unpricedPassed}/${split.unpriced} pass)`;
+
   const adaptiveHtml = renderToStaticMarkup(React.createElement(AdaptiveICM, { data: snapshot }));
   assert.match(adaptiveHtml, /ICM-Lite/);
   assert.match(adaptiveHtml, /ICM v3/);
   assert.match(adaptiveHtml, /ICM Staged/);
   assert.match(adaptiveHtml, /13–50 files/);
   assert.match(adaptiveHtml, /&gt;50 files/);
+
+  const snapshotEvidenceHtml = renderToStaticMarkup(
+    React.createElement(Evidence, { data: snapshot }),
+  ).replace(/<!-- -->/g, '');
+  assert.ok(snapshotEvidenceHtml.includes(toggleText));
+  assert.ok(snapshotEvidenceHtml.includes(`1–10 of ${split.priced} records`));
+  assert.ok(snapshotEvidenceHtml.includes(`<span>1 / ${expectedPages}</span>`));
+  const evidenceTbody = snapshotEvidenceHtml.split('<tbody>')[1] || '';
+  assert.doesNotMatch(evidenceTbody, /swe-2-max-lightning/);
+  assert.doesNotMatch(evidenceTbody, /gemini-4-neon-devin/);
+
+  const snapshotLedgerHtml = renderToStaticMarkup(
+    React.createElement(RawLedgerTable, { runs: snapshot.runs }),
+  ).replace(/<!-- -->/g, '');
+  assert.ok(snapshotLedgerHtml.includes(`Showing ${split.priced} of ${snapshot.runs.length} runs`));
+  assert.ok(snapshotLedgerHtml.includes(rawToggleText));
+  assert.match(snapshotLedgerHtml, /Export filtered/);
 
   const customRuns = [
     makeRun({
