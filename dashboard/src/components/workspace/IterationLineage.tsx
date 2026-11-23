@@ -199,6 +199,137 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
     });
   }
 
+  type LabelAnchor = "middle" | "start" | "end";
+  type LabelRect = { x1: number; y1: number; x2: number; y2: number };
+  const rectsOverlap = (a: LabelRect, b: LabelRect, pad = 0): boolean =>
+    a.x1 - pad < b.x2 && a.x2 + pad > b.x1 && a.y1 - pad < b.y2 && a.y2 + pad > b.y1;
+
+  const labelPosByVersion = new Map<
+    string,
+    { dx: number; dy: number; anchor: LabelAnchor }
+  >();
+  const placedLabelRects: LabelRect[] = [];
+
+  for (const p of plottedPoints) {
+    const coord = coordsByVersion.get(p.version);
+    if (!coord) continue;
+    const w = Math.max(36, p.label.length * 6.5);
+    const candidates: Array<{
+      dx: number;
+      dy: number;
+      anchor: LabelAnchor;
+      rect: LabelRect;
+    }> = [
+      {
+        dx: 0,
+        dy: -20,
+        anchor: "middle",
+        rect: {
+          x1: coord.cx - w / 2,
+          x2: coord.cx + w / 2,
+          y1: coord.cy - 29,
+          y2: coord.cy - 17,
+        },
+      },
+      {
+        dx: 0,
+        dy: 25,
+        anchor: "middle",
+        rect: {
+          x1: coord.cx - w / 2,
+          x2: coord.cx + w / 2,
+          y1: coord.cy + 15,
+          y2: coord.cy + 27,
+        },
+      },
+      {
+        dx: -15,
+        dy: 4,
+        anchor: "end",
+        rect: {
+          x1: coord.cx - 15 - w,
+          x2: coord.cx - 15,
+          y1: coord.cy - 6,
+          y2: coord.cy + 6,
+        },
+      },
+      {
+        dx: 15,
+        dy: 4,
+        anchor: "start",
+        rect: {
+          x1: coord.cx + 15,
+          x2: coord.cx + 15 + w,
+          y1: coord.cy - 6,
+          y2: coord.cy + 6,
+        },
+      },
+    ];
+
+    let best = candidates[0];
+    let bestScore = Number.POSITIVE_INFINITY;
+
+    candidates.forEach((cand, idx) => {
+      let score = idx;
+      const { x1, y1, x2, y2 } = cand.rect;
+      if (
+        x1 < PAD.left + 2 ||
+        x2 > W - PAD.right - 2 ||
+        y1 < PAD.top - 10 ||
+        y2 > H - PAD.bottom - 2
+      ) {
+        score += 1000;
+      }
+
+      for (const other of plottedPoints) {
+        if (other.version === p.version) continue;
+        const oc = coordsByVersion.get(other.version);
+        if (!oc) continue;
+        const nodeRect: LabelRect = {
+          x1: oc.cx - 16,
+          y1: oc.cy - 16,
+          x2: oc.cx + 16,
+          y2: oc.cy + 16,
+        };
+        if (rectsOverlap(cand.rect, nodeRect)) {
+          score += 500;
+        }
+      }
+
+      for (const placed of placedLabelRects) {
+        if (rectsOverlap(cand.rect, placed, 4)) {
+          score += 500;
+        }
+      }
+
+      for (const edge of edges) {
+        const fromC = coordsByVersion.get(edge.from);
+        const toC = coordsByVersion.get(edge.to);
+        if (!fromC || !toC) continue;
+        for (const t of [0.25, 0.5, 0.75]) {
+          const px = fromC.cx + (toC.cx - fromC.cx) * t;
+          const py = fromC.cy + (toC.cy - fromC.cy) * t;
+          if (px >= x1 && px <= x2 && py >= y1 && py <= y2) {
+            score += 40;
+            break;
+          }
+        }
+      }
+
+      if (score < bestScore) {
+        bestScore = score;
+        best = cand;
+      }
+    });
+
+    labelPosByVersion.set(p.version, {
+      dx: best.dx,
+      dy: best.dy,
+      anchor: best.anchor,
+    });
+    placedLabelRects.push(best.rect);
+  }
+
   const frontierSorted = plottedPoints
     .filter((p) => paretoSet.has(p.version))
     .sort((a, b) => (xAccessor(a) as number) - (xAccessor(b) as number));
@@ -569,7 +700,11 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                     : isPareto
                       ? "var(--sea)"
                       : "var(--iris)";
-                const labelAbove = coord.cy > PAD.top + 34;
+                const labelPos = labelPosByVersion.get(p.version) ?? {
+                  dx: 0,
+                  dy: coord.cy > PAD.top + 34 ? -20 : 25,
+                  anchor: "middle" as const,
+                };
                 return (
                   <g
                     key={p.version}
@@ -639,8 +774,9 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                         strokeWidth={regressed || isBase ? 2.5 : 2}
                       />
                       <text
-                        y={labelAbove ? -20 : 25}
-                        textAnchor="middle"
+                        x={labelPos.dx}
+                        y={labelPos.dy}
+                        textAnchor={labelPos.anchor}
                         fill="var(--ink)"
                         fontSize="10.5"
                         fontFamily="var(--mono)"
