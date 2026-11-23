@@ -120,6 +120,8 @@ CACHE_CONDITIONS = ("cold", "warm")
 ARM_ROUTING_MODES: Dict[str, str] = {
     "icm_lite": "icm-lite",
     "icm_v2": "icm-v2",
+    "icm_v3": "icm-v3",
+    "icm_staged": "icm-staged",
 }
 
 
@@ -723,9 +725,10 @@ def execute_campaign_batch(
             # Link the recorded ledger run to this slot so campaign reports reconcile it
             # (REP-02/Finding 4): manifest_id + notes.slot_id/planned_order/cache strata.
             run_id = res.get("run_id")
-            if db_path is not None and run_id is not None:
+            link_db = db_path if db_path is not None else (ledger.DEFAULT_DB_PATH if run_callable is None else None)
+            if link_db is not None and run_id is not None:
                 try:
-                    link_conn = ledger.get_connection(db_path)
+                    link_conn = ledger.get_connection(link_db)
                     try:
                         row = link_conn.execute(
                             "SELECT notes FROM runs WHERE id = ?", (run_id,)

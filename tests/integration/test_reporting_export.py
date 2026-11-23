@@ -791,4 +791,253 @@ def test_unmigrated_legacy_database_export_safe_handling(tmp_path: Path):
     assert payload["runs"][0]["is_eligible"] is False
 
 
+def test_processed_runs_and_arm_stats_expose_cache_diagnostics(tmp_path: Path, monkeypatch):
+    """processed_runs and ArmStats expose cache diagnostics and contract metadata cleanly (None when absent)."""
+    monkeypatch.setattr(build_data, "OPS_DB_PATH", tmp_path / "missing.db")
+    db_file = tmp_path / "cache_diag.db"
+    conn = ledger.get_connection(db_file)
+    ledger.seed_pricing(conn=conn)
+
+    ev_file = tmp_path / "ev.ndjson"
+    ev_file.write_text('{"event": "start"}\n{"event": "complete"}\n', encoding="utf-8")
+    ev_hash = hashlib.sha256(ev_file.read_bytes()).hexdigest()
+
+    ledger.record_run(
+        task_id="DIAG-WITH",
+        arm="baseline",
+        model="gemini-2.5-pro",
+        run_index=1,
+        timestamp="2026-11-22T10:00:00Z",
+        input_tokens=10_000,
+        output_tokens=1_000,
+        cache_read_tokens=2_000,
+        source_kind="live",
+        evidence_status="verified",
+        evidence_ref=str(ev_file),
+        evidence_hash=ev_hash,
+        verification_status="passed",
+        llm_calls_count=6,
+        peak_context_tokens=18_000,
+        avg_fresh_input_per_call=2_500.0,
+        cache_bust_count=2,
+        tools_per_llm_call=1.5,
+        conn=conn,
+    )
+    ledger.record_run(
+        task_id="DIAG-WITH",
+        arm="icm_v3",
+        model="gemini-2.5-pro",
+        run_index=1,
+        timestamp="2026-11-22T10:01:00Z",
+        input_tokens=4_000,
+        output_tokens=500,
+        cache_read_tokens=6_000,
+        source_kind="live",
+        evidence_status="verified",
+        evidence_ref=str(ev_file),
+        evidence_hash=ev_hash,
+        verification_status="passed",
+        llm_calls_count=3,
+        peak_context_tokens=9_500,
+        avg_fresh_input_per_call=1_200.0,
+        cache_bust_count=0,
+        tools_per_llm_call=3.0,
+        contract_version="icm_v3",
+        contract_hash="abc123",
+        conn=conn,
+    )
+    ledger.record_run(
+        task_id="DIAG-WITHOUT",
+        arm="baseline",
+        model="gemini-2.5-pro",
+        run_index=1,
+        timestamp="2026-11-22T10:02:00Z",
+        input_tokens=5_000,
+        output_tokens=500,
+        source_kind="live",
+        evidence_status="verified",
+        evidence_ref=str(ev_file),
+        evidence_hash=ev_hash,
+        verification_status="passed",
+        conn=conn,
+    )
+    conn.close()
+
+    payload = build_data.build_data_payload(db_path=db_file)
+
+    v3_run = next(r for r in payload["runs"] if r["arm"] == "icm_v3")
+    for key in (
+        "llm_calls_count",
+        "peak_context_tokens",
+        "avg_fresh_input_per_call",
+        "cache_bust_count",
+        "tools_per_llm_call",
+        "contract_version",
+        "contract_hash",
+    ):
+        assert key in v3_run
+    assert v3_run["llm_calls_count"] == 3
+    assert v3_run["peak_context_tokens"] == 9_500
+    assert v3_run["avg_fresh_input_per_call"] == 1_200.0
+    assert v3_run["cache_bust_count"] == 0
+    assert v3_run["tools_per_llm_call"] == 3.0
+    assert v3_run["contract_version"] == "icm_v3"
+    assert v3_run["contract_hash"] == "abc123"
+
+    tasks_by_id = {t["task_id"]: t for t in payload["tasks"]}
+    v3_arm_stats = tasks_by_id["DIAG-WITH"]["arms"]["icm_v3"]
+    assert v3_arm_stats["mean_llm_calls"] == 3.0
+    assert v3_arm_stats["mean_tools_per_llm_call"] == 3.0
+    assert v3_arm_stats["mean_avg_fresh_input_per_call"] == 1_200.0
+    assert v3_arm_stats["peak_context_tokens"] == 9_500
+    assert v3_arm_stats["total_cache_busts"] == 0
+
+    absent_arm_stats = tasks_by_id["DIAG-WITHOUT"]["arms"]["baseline"]
+    assert absent_arm_stats["mean_llm_calls"] is None
+    assert absent_arm_stats["mean_tools_per_llm_call"] is None
+    assert absent_arm_stats["mean_avg_fresh_input_per_call"] is None
+    assert absent_arm_stats["peak_context_tokens"] is None
+    assert absent_arm_stats["total_cache_busts"] is None
+
+
+def test_iteration_lineage_rep06_zero_passes_and_rep05_zero_baseline(tmp_path: Path, monkeypatch):
+    """REP-06: cost_per_passing_patch_usd is None on 0 passes; REP-05: delta is None when baseline cost is 0."""
+    monkeypatch.setattr(build_data, "OPS_DB_PATH", tmp_path / "missing.db")
+    db_file = tmp_path / "rep_edge.db"
+    conn = ledger.get_connection(db_file)
+    ledger.seed_pricing(conn=conn)
+
+    ev_file = tmp_path / "ev.ndjson"
+    ev_file.write_text('{"event": "done"}\n', encoding="utf-8")
+    ev_hash = hashlib.sha256(ev_file.read_bytes()).hexdigest()
+
+    # Zero-cost baseline (REP-05)
+    ledger.record_run(
+        task_id="BENCH-ZERO",
+        arm="baseline",
+        model="gemini-2.5-pro",
+        run_index=1,
+        timestamp="2026-11-22T11:00:00Z",
+        input_tokens=0,
+        output_tokens=0,
+        source_kind="live",
+        evidence_status="verified",
+        evidence_ref=str(ev_file),
+        evidence_hash=ev_hash,
+        verification_status="passed",
+        conn=conn,
+    )
+    # Passing icm_v3 on zero-cost baseline task
+    ledger.record_run(
+        task_id="BENCH-ZERO",
+        arm="icm_v3",
+        model="gemini-2.5-pro",
+        run_index=1,
+        timestamp="2026-11-22T11:01:00Z",
+        input_tokens=1_000,
+        output_tokens=500,
+        source_kind="live",
+        evidence_status="verified",
+        evidence_ref=str(ev_file),
+        evidence_hash=ev_hash,
+        verification_status="passed",
+        contract_version="icm_v3",
+        conn=conn,
+    )
+    # Failing icm_v2 run (REP-06: passed_count == 0 even though priced_n_runs == 1)
+    ledger.record_run(
+        task_id="BENCH-ZERO",
+        arm="icm_v2",
+        model="gemini-2.5-pro",
+        run_index=1,
+        timestamp="2026-11-22T11:02:00Z",
+        input_tokens=2_000,
+        output_tokens=500,
+        source_kind="live",
+        evidence_status="verified",
+        evidence_ref=str(ev_file),
+        evidence_hash=ev_hash,
+        verification_status="failed",
+        contract_version="icm_v2",
+        conn=conn,
+    )
+    conn.close()
+
+    payload = build_data.build_data_payload(db_path=db_file)
+    lineage = payload["iteration_lineage"]
+    assert lineage["has_data"] is True
+    by_ver = {v["version"]: v for v in lineage["versions"]}
+
+    # REP-05: baseline matched cost is 0.0 -> deltas must be None
+    v3 = by_ver["icm_v3"]
+    assert v3["matched_baseline_task_ids"] == ["BENCH-ZERO"]
+    assert v3["cost_delta_vs_baseline_pct"] is None
+    assert v3["savings_vs_baseline_pct"] is None
+
+    # REP-06: 0 passes -> cost_per_passing_patch_usd must be None (never 0.0)
+    v2 = by_ver["icm_v2"]
+    assert v2["n_runs"] == 1
+    assert v2["passed_count"] == 0
+    assert v2["pass_rate"] == 0.0
+    assert v2["priced_n_runs"] == 1
+    assert v2["mean_cost_usd"] is not None and v2["mean_cost_usd"] > 0
+    assert v2["cost_per_passing_patch_usd"] is None
+
+
+def test_iteration_lineage_empty_placeholder_and_secret_redaction(tmp_path: Path, monkeypatch):
+    """Empty DB placeholder includes iteration_lineage and payload sanitization redacts secrets."""
+    out_file = tmp_path / "placeholder.json"
+    monkeypatch.setenv("AI_LAB_DB_PATH", str(tmp_path / "missing.db"))
+    monkeypatch.setenv("AI_LAB_OUTPUT_PATH", str(out_file))
+    build_data.main()
+    placeholder = json.loads(out_file.read_text(encoding="utf-8"))
+    assert placeholder["iteration_lineage"] == {"has_data": False, "versions": [], "contracts": []}
+
+    # Secret/private-path redaction across iteration_lineage contracts and run payload
+    monkeypatch.setattr(build_data, "OPS_DB_PATH", tmp_path / "missing_ops.db")
+    db_file = tmp_path / "redact.db"
+    conn = ledger.get_connection(db_file)
+    ledger.seed_pricing(conn=conn)
+    ev_file = tmp_path / "ev.ndjson"
+    ev_file.write_text('{"event":"ok"}\n', encoding="utf-8")
+    ev_hash = hashlib.sha256(ev_file.read_bytes()).hexdigest()
+    ledger.record_run(
+        task_id="SEC-1",
+        arm="icm_v3",
+        model="gemini-2.5-pro",
+        run_index=1,
+        timestamp="2026-11-22T12:00:00Z",
+        input_tokens=1000,
+        output_tokens=100,
+        source_kind="live",
+        evidence_status="verified",
+        evidence_ref=str(ev_file),
+        evidence_hash=ev_hash,
+        verification_status="passed",
+        notes=r"C:\Users\PrivatePerson\secret.txt ghp_1234567890abcdef1234567890abcdef12345678",
+        conn=conn,
+    )
+    conn.close()
+
+    monkeypatch.setattr(
+        build_data,
+        "load_contract_registry",
+        lambda: {
+            "icm_v3": {
+                "id": "icm_v3",
+                "hypothesis": "Path /home/secretuser/repo key sk-ant-api03-abcdef1234567890abcdef12345678",
+                "changes_from_prev": [r"C:\Users\PrivatePerson\notes"],
+                "parent_version": "icm_v2",
+                "execution_strategy": "single_session",
+            }
+        },
+    )
+    dumped = json.dumps(build_data.build_data_payload(db_path=db_file))
+    assert "PrivatePerson" not in dumped
+    assert "secretuser" not in dumped
+    assert "ghp_1234567890" not in dumped
+    assert "sk-ant-api03" not in dumped
+    assert "[REDACTED_SECRET]" in dumped
+
+
 

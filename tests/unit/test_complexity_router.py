@@ -384,3 +384,22 @@ def test_lite_evidence_is_imported_under_its_own_arm(tmp_path, name):
     assert ledger.import_orphan_evidence_runs(evidence_dir=evidence_dir, db_path=db) == 1
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT arm FROM runs").fetchall() == [("icm_lite",)]
+
+
+def test_classify_mode_populates_contract_metadata(tmp_path):
+    from complexity_router import load_contract_registry
+
+    reg = load_contract_registry()
+    d_lite = classify_mode("auto", {"target_files": ["a.py"], "estimated_loc": 20}, tmp_path)
+    assert d_lite.arm == "icm_lite"
+    assert d_lite.contract_version == "icm_lite"
+    assert d_lite.contract_hash == reg["icm_lite"]["sha256"]
+
+    d_icm = classify_mode("auto", {"target_files": ["a.py", "b.py"], "estimated_loc": 200}, tmp_path)
+    assert d_icm.arm == "icm"
+    assert d_icm.contract_version == "icm_v1"
+    assert d_icm.contract_hash == reg["icm_v1"]["sha256"]
+
+    d_base = classify_mode("baseline", {}, tmp_path)
+    assert d_base.contract_version is None
+    assert d_base.contract_hash is None

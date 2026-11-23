@@ -26,6 +26,7 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 DEFAULT_ROOT = Path(__file__).resolve().parent.parent
+WORKSPACE_ROOT = DEFAULT_ROOT
 DEFAULT_DB_PATH = DEFAULT_ROOT / "data" / "usage.db"
 DEFAULT_PRICING_PATH = DEFAULT_ROOT / "config" / "PRICING.json"
 
@@ -34,6 +35,16 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from pricing import validate_acus_consumed  # noqa: E402
+
+_CACHE_DIAGNOSTIC_COLUMNS: Tuple[Tuple[str, str], ...] = (
+    ("llm_calls_count", "INTEGER"),
+    ("peak_context_tokens", "INTEGER"),
+    ("avg_fresh_input_per_call", "REAL"),
+    ("cache_bust_count", "INTEGER"),
+    ("tools_per_llm_call", "REAL"),
+    ("contract_version", "TEXT"),
+    ("contract_hash", "TEXT"),
+)
 
 # Trailing effort levels telemetry appends to a base model id
 # (e.g. gemini-4-argon-low -> gemini-4-argon).
@@ -112,6 +123,13 @@ PUBLIC_RUN_KEYS = {
     "tool_errors_count",
     "max_consecutive_tool_streak",
     "loop_detected",
+    "llm_calls_count",
+    "peak_context_tokens",
+    "avg_fresh_input_per_call",
+    "cache_bust_count",
+    "tools_per_llm_call",
+    "contract_version",
+    "contract_hash",
 }
 
 
@@ -245,17 +263,16 @@ def _extract_target_path(step_update: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def extract_ndjson_tool_metrics(
-    stream: Any,
-    streak_threshold: int = 6,
-    error_threshold: int = 3,
-) -> Dict[str, Any]:
+def _is_numeric_nonbool(value: Any) -> bool:
+    """Return True if value is a finite int/float and not a bool."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _deduplicate_step_updates(raw_lines: List[Any]) -> List[Dict[str, Any]]:
     """
-    Parse agy stream-json NDJSON lines for tool calls, tool errors, and loop detection.
-    Deduplicates `step_update` records by `step_index`, keeping the final state per step,
-    and computes metrics over steps with `step_type == "tool"`.
+    Parse raw NDJSON items/lines and deduplicate `step_update` records by numeric
+    `step_index`, keeping the final state per step in ascending step_index order.
     """
-    raw_lines = _iter_ndjson_lines(stream)
     steps_by_index: Dict[Tuple[int, int], Dict[str, Any]] = {}
     anon_seq = 0
 
@@ -289,10 +306,23 @@ def extract_ndjson_tool_metrics(
             key = (1, anon_seq)
         steps_by_index[key] = su
 
+    return [steps_by_index[k] for k in sorted(steps_by_index.keys())]
+
+
+def extract_ndjson_tool_metrics(
+    stream: Any,
+    streak_threshold: int = 6,
+    error_threshold: int = 3,
+) -> Dict[str, Any]:
+    """
+    Parse agy stream-json NDJSON lines for tool calls, tool errors, and loop detection.
+    Deduplicates `step_update` records by `step_index`, keeping the final state per step,
+    and computes metrics over steps with `step_type == "tool"`.
+    """
+    raw_lines = _iter_ndjson_lines(stream)
+    ordered_steps = _deduplicate_step_updates(raw_lines)
     tool_steps = [
-        steps_by_index[k]
-        for k in sorted(steps_by_index.keys())
-        if steps_by_index[k].get("step_type") == "tool"
+        step for step in ordered_steps if step.get("step_type") == "tool"
     ]
 
     tool_calls_count = len(tool_steps)
@@ -341,6 +371,87 @@ def extract_ndjson_tool_metrics(
         "max_consecutive_tool_streak": max_streak,
         "loop_detected": loop_detected,
         "events": events,
+    }
+
+
+def extract_ndjson_cache_diagnostics(
+    stream: Any,
+    tool_calls_count: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Extract per-call LLM turn and cache-health diagnostics from agy NDJSON stream.
+    Deduplicates `step_update` records by numeric `step_index`, keeping the final
+    state per step, and inspects `step_type == "agent_response"` steps with dict usage.
+    """
+    raw_lines = _iter_ndjson_lines(stream)
+    ordered_steps = _deduplicate_step_updates(raw_lines)
+    calls: List[Dict[str, Any]] = [
+        step["usage"]
+        for step in ordered_steps
+        if step.get("step_type") == "agent_response" and isinstance(step.get("usage"), dict)
+    ]
+
+    llm_calls_count: Optional[int] = len(calls) if calls else None
+
+    context_totals: List[int] = []
+    for u in calls:
+        inp = u.get("input_tokens")
+        cr = u.get("cache_read_tokens")
+        if _is_numeric_nonbool(inp) or _is_numeric_nonbool(cr):
+            context_totals.append(
+                (int(inp) if _is_numeric_nonbool(inp) else 0)
+                + (int(cr) if _is_numeric_nonbool(cr) else 0)
+            )
+    peak_context_tokens: Optional[int] = max(context_totals) if context_totals else None
+
+    valid_input_calls = [u for u in calls if _is_numeric_nonbool(u.get("input_tokens"))]
+    if len(valid_input_calls) >= 2:
+        turn2_plus_inputs = [
+            int(u["input_tokens"])
+            for u in calls[1:]
+            if _is_numeric_nonbool(u.get("input_tokens"))
+        ]
+        avg_fresh_input_per_call: Optional[float] = (
+            sum(turn2_plus_inputs) / len(turn2_plus_inputs)
+            if turn2_plus_inputs
+            else None
+        )
+    else:
+        avg_fresh_input_per_call = None
+
+    numeric_cache_calls = sum(
+        1 for u in calls if _is_numeric_nonbool(u.get("cache_read_tokens"))
+    )
+    if numeric_cache_calls < 2:
+        cache_bust_count: Optional[int] = None
+    else:
+        busts = 0
+        for i in range(1, len(calls)):
+            prev_cr = calls[i - 1].get("cache_read_tokens")
+            curr_cr = calls[i].get("cache_read_tokens")
+            if _is_numeric_nonbool(prev_cr) and _is_numeric_nonbool(curr_cr):
+                if float(curr_cr) < float(prev_cr):
+                    busts += 1
+        cache_bust_count = busts
+
+    if tool_calls_count is None:
+        tool_calls_count = extract_ndjson_tool_metrics(raw_lines)["tool_calls_count"]
+
+    if (
+        llm_calls_count is not None
+        and llm_calls_count > 0
+        and _is_numeric_nonbool(tool_calls_count)
+    ):
+        tools_per_llm_call: Optional[float] = int(tool_calls_count) / llm_calls_count
+    else:
+        tools_per_llm_call = None
+
+    return {
+        "llm_calls_count": llm_calls_count,
+        "peak_context_tokens": peak_context_tokens,
+        "avg_fresh_input_per_call": avg_fresh_input_per_call,
+        "cache_bust_count": cache_bust_count,
+        "tools_per_llm_call": tools_per_llm_call,
     }
 
 
@@ -1023,7 +1134,14 @@ def init_db(conn: sqlite3.Connection) -> None:
                     tool_calls_count INTEGER,
                     tool_errors_count INTEGER,
                     max_consecutive_tool_streak INTEGER,
-                    loop_detected INTEGER
+                    loop_detected INTEGER,
+                    llm_calls_count INTEGER,
+                    peak_context_tokens INTEGER,
+                    avg_fresh_input_per_call REAL,
+                    cache_bust_count INTEGER,
+                    tools_per_llm_call REAL,
+                    contract_version TEXT,
+                    contract_hash TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS run_events (
@@ -1088,6 +1206,9 @@ def init_db(conn: sqlite3.Connection) -> None:
                     conn.execute("ALTER TABLE runs ADD COLUMN loop_detected INTEGER")
                 if "acus_consumed" not in cols:
                     conn.execute("ALTER TABLE runs ADD COLUMN acus_consumed REAL")
+                for col_name, col_type in _CACHE_DIAGNOSTIC_COLUMNS:
+                    if col_name not in cols:
+                        conn.execute(f"ALTER TABLE runs ADD COLUMN {col_name} {col_type}")
 
         with conn:
             conn.execute("""
@@ -1177,6 +1298,10 @@ def migrate_db(conn: sqlite3.Connection) -> bool:
             if "acus_consumed" not in cols:
                 conn.execute("ALTER TABLE runs ADD COLUMN acus_consumed REAL")
                 applied_upgrade = True
+            for col_name, col_type in _CACHE_DIAGNOSTIC_COLUMNS:
+                if col_name not in cols:
+                    conn.execute(f"ALTER TABLE runs ADD COLUMN {col_name} {col_type}")
+                    applied_upgrade = True
             if not run_events_exists:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS run_events (
@@ -1234,7 +1359,14 @@ def migrate_db(conn: sqlite3.Connection) -> bool:
                 tool_calls_count INTEGER,
                 tool_errors_count INTEGER,
                 max_consecutive_tool_streak INTEGER,
-                loop_detected INTEGER
+                loop_detected INTEGER,
+                llm_calls_count INTEGER,
+                peak_context_tokens INTEGER,
+                avg_fresh_input_per_call REAL,
+                cache_bust_count INTEGER,
+                tools_per_llm_call REAL,
+                contract_version TEXT,
+                contract_hash TEXT
             )
         """)
 
@@ -1648,6 +1780,13 @@ def record_run(
     tool_errors_count: Optional[int] = None,
     max_consecutive_tool_streak: Optional[int] = None,
     loop_detected: Optional[Any] = None,
+    llm_calls_count: Optional[int] = None,
+    peak_context_tokens: Optional[int] = None,
+    avg_fresh_input_per_call: Optional[float] = None,
+    cache_bust_count: Optional[int] = None,
+    tools_per_llm_call: Optional[float] = None,
+    contract_version: Optional[str] = None,
+    contract_hash: Optional[str] = None,
     conn: Optional[sqlite3.Connection] = None,
     db_path: Optional[Path] = None,
 ) -> int:
@@ -1748,180 +1887,58 @@ def record_run(
 
     with conn:
         if "source_kind" in cols:
-            if "execution_status" in cols and "tool_calls_count" in cols and "acus_consumed" in cols:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO runs (
-                        task_id, arm, model, run_index, timestamp,
-                        input_tokens, output_tokens, thinking_tokens, cache_read_tokens,
-                        total_tokens, num_turns, duration_seconds,
-                        source_kind, evidence_status, exclusion_reasons,
-                        evidence_ref, evidence_hash, import_id,
-                        cost_status, cost_usd, acus_consumed, is_simulation, notes,
-                        execution_status, verification_status, manifest_id, evaluator_hash,
-                        tool_calls_count, tool_errors_count, max_consecutive_tool_streak, loop_detected
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        task_id,
-                        arm,
-                        model,
-                        run_index,
-                        timestamp,
-                        input_tokens,
-                        output_tokens,
-                        thinking_tokens,
-                        cache_read_tokens,
-                        total_tokens,
-                        int(num_turns),
-                        float(duration_seconds),
-                        source_kind,
-                        evidence_status,
-                        reasons_json,
-                        evidence_ref,
-                        evidence_hash,
-                        import_id,
-                        cost_status,
-                        cost_usd,
-                        validated_acus,
-                        1 if is_simulation else 0,
-                        notes,
-                        execution_status,
-                        verification_status,
-                        manifest_id,
-                        evaluator_hash,
-                        tool_calls_count,
-                        tool_errors_count,
-                        max_consecutive_tool_streak,
-                        loop_val,
-                    ),
-                )
-            elif "execution_status" in cols and "tool_calls_count" in cols:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO runs (
-                        task_id, arm, model, run_index, timestamp,
-                        input_tokens, output_tokens, thinking_tokens, cache_read_tokens,
-                        total_tokens, num_turns, duration_seconds,
-                        source_kind, evidence_status, exclusion_reasons,
-                        evidence_ref, evidence_hash, import_id,
-                        cost_status, cost_usd, is_simulation, notes,
-                        execution_status, verification_status, manifest_id, evaluator_hash,
-                        tool_calls_count, tool_errors_count, max_consecutive_tool_streak, loop_detected
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        task_id,
-                        arm,
-                        model,
-                        run_index,
-                        timestamp,
-                        input_tokens,
-                        output_tokens,
-                        thinking_tokens,
-                        cache_read_tokens,
-                        total_tokens,
-                        int(num_turns),
-                        float(duration_seconds),
-                        source_kind,
-                        evidence_status,
-                        reasons_json,
-                        evidence_ref,
-                        evidence_hash,
-                        import_id,
-                        cost_status,
-                        cost_usd,
-                        1 if is_simulation else 0,
-                        notes,
-                        execution_status,
-                        verification_status,
-                        manifest_id,
-                        evaluator_hash,
-                        tool_calls_count,
-                        tool_errors_count,
-                        max_consecutive_tool_streak,
-                        loop_val,
-                    ),
-                )
-            elif "execution_status" in cols:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO runs (
-                        task_id, arm, model, run_index, timestamp,
-                        input_tokens, output_tokens, thinking_tokens, cache_read_tokens,
-                        total_tokens, num_turns, duration_seconds,
-                        source_kind, evidence_status, exclusion_reasons,
-                        evidence_ref, evidence_hash, import_id,
-                        cost_status, cost_usd, is_simulation, notes,
-                        execution_status, verification_status, manifest_id, evaluator_hash
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        task_id,
-                        arm,
-                        model,
-                        run_index,
-                        timestamp,
-                        input_tokens,
-                        output_tokens,
-                        thinking_tokens,
-                        cache_read_tokens,
-                        total_tokens,
-                        int(num_turns),
-                        float(duration_seconds),
-                        source_kind,
-                        evidence_status,
-                        reasons_json,
-                        evidence_ref,
-                        evidence_hash,
-                        import_id,
-                        cost_status,
-                        cost_usd,
-                        1 if is_simulation else 0,
-                        notes,
-                        execution_status,
-                        verification_status,
-                        manifest_id,
-                        evaluator_hash,
-                    ),
-                )
-            else:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO runs (
-                        task_id, arm, model, run_index, timestamp,
-                        input_tokens, output_tokens, thinking_tokens, cache_read_tokens,
-                        total_tokens, num_turns, duration_seconds,
-                        source_kind, evidence_status, exclusion_reasons,
-                        evidence_ref, evidence_hash, import_id,
-                        cost_status, cost_usd, is_simulation, notes
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        task_id,
-                        arm,
-                        model,
-                        run_index,
-                        timestamp,
-                        input_tokens,
-                        output_tokens,
-                        thinking_tokens,
-                        cache_read_tokens,
-                        total_tokens,
-                        int(num_turns),
-                        float(duration_seconds),
-                        source_kind,
-                        evidence_status,
-                        reasons_json,
-                        evidence_ref,
-                        evidence_hash,
-                        import_id,
-                        cost_status,
-                        cost_usd,
-                        1 if is_simulation else 0,
-                        notes,
-                    ),
-                )
+            insert_fields: List[Tuple[str, Any]] = [
+                ("task_id", task_id),
+                ("arm", arm),
+                ("model", model),
+                ("run_index", run_index),
+                ("timestamp", timestamp),
+                ("input_tokens", input_tokens),
+                ("output_tokens", output_tokens),
+                ("thinking_tokens", thinking_tokens),
+                ("cache_read_tokens", cache_read_tokens),
+                ("total_tokens", total_tokens),
+                ("num_turns", int(num_turns)),
+                ("duration_seconds", float(duration_seconds)),
+                ("source_kind", source_kind),
+                ("evidence_status", evidence_status),
+                ("exclusion_reasons", reasons_json),
+                ("evidence_ref", evidence_ref),
+                ("evidence_hash", evidence_hash),
+                ("import_id", import_id),
+                ("cost_status", cost_status),
+                ("cost_usd", cost_usd),
+                ("is_simulation", 1 if is_simulation else 0),
+                ("notes", notes),
+            ]
+            optional_fields: List[Tuple[str, Any]] = [
+                ("acus_consumed", validated_acus),
+                ("execution_status", execution_status),
+                ("verification_status", verification_status),
+                ("manifest_id", manifest_id),
+                ("evaluator_hash", evaluator_hash),
+                ("tool_calls_count", tool_calls_count),
+                ("tool_errors_count", tool_errors_count),
+                ("max_consecutive_tool_streak", max_consecutive_tool_streak),
+                ("loop_detected", loop_val),
+                ("llm_calls_count", llm_calls_count),
+                ("peak_context_tokens", peak_context_tokens),
+                ("avg_fresh_input_per_call", avg_fresh_input_per_call),
+                ("cache_bust_count", cache_bust_count),
+                ("tools_per_llm_call", tools_per_llm_call),
+                ("contract_version", contract_version),
+                ("contract_hash", contract_hash),
+            ]
+            for col_name, col_val in optional_fields:
+                if col_name in cols:
+                    insert_fields.append((col_name, col_val))
+
+            col_names = ", ".join(k for k, _ in insert_fields)
+            placeholders = ", ".join("?" for _ in insert_fields)
+            cursor = conn.execute(
+                f"INSERT INTO runs ({col_names}) VALUES ({placeholders})",
+                tuple(v for _, v in insert_fields),
+            )
         else:
             # Legacy table fallback: insert into legacy schema
             cursor = conn.execute(
@@ -2029,6 +2046,17 @@ def get_run_events(
             conn.close()
 
 
+def _resolve_evidence_path(ev_ref: str, workspace_root: Optional[Path] = None) -> Optional[Path]:
+    """Resolve an evidence_ref path directly or relative to workspace_root."""
+    root = Path(workspace_root) if workspace_root is not None else WORKSPACE_ROOT
+    p = Path(ev_ref)
+    if not p.is_file() and not p.is_absolute():
+        candidate = root / p
+        if candidate.is_file():
+            p = candidate
+    return p if p.is_file() else None
+
+
 def backfill_tool_metrics_from_evidence(
     conn: Optional[sqlite3.Connection] = None,
     db_path: Optional[Path] = None,
@@ -2066,13 +2094,8 @@ def backfill_tool_metrics_from_evidence(
 
         with conn:
             for row in candidates:
-                ev_ref = row["evidence_ref"]
-                p = Path(ev_ref)
-                if not p.is_file() and not p.is_absolute():
-                    candidate = DEFAULT_ROOT / p
-                    if candidate.is_file():
-                        p = candidate
-                if not p.is_file():
+                p = _resolve_evidence_path(row["evidence_ref"])
+                if p is None:
                     continue
                 try:
                     metrics = extract_ndjson_tool_metrics(p)
@@ -2102,8 +2125,85 @@ def backfill_tool_metrics_from_evidence(
             conn.close()
 
 
+def backfill_cache_diagnostics_from_evidence(
+    conn: Optional[sqlite3.Connection] = None,
+    workspace_root: Optional[Path] = WORKSPACE_ROOT,
+    db_path: Optional[Path] = None,
+) -> int:
+    """
+    Idempotently populate llm_calls_count, peak_context_tokens,
+    avg_fresh_input_per_call, cache_bust_count, and tools_per_llm_call for runs
+    rows whose evidence_ref exists on disk and llm_calls_count IS NULL.
+    """
+    should_close = False
+    if conn is None:
+        conn = get_connection(db_path)
+        should_close = True
+
+    root = Path(workspace_root) if workspace_root is not None else WORKSPACE_ROOT
+    updated = 0
+    try:
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(runs)")
+        cols = {row[1] for row in cursor.fetchall()}
+        if "llm_calls_count" not in cols:
+            if "source_kind" in cols:
+                init_db(conn)
+            else:
+                return 0
+
+        cursor.execute(
+            """
+            SELECT id, evidence_ref, tool_calls_count FROM runs
+            WHERE llm_calls_count IS NULL
+              AND evidence_ref IS NOT NULL
+              AND evidence_ref != ''
+            """
+        )
+        candidates = cursor.fetchall()
+
+        with conn:
+            for row in candidates:
+                p = _resolve_evidence_path(row["evidence_ref"], workspace_root=root)
+                if p is None:
+                    continue
+                try:
+                    diag = extract_ndjson_cache_diagnostics(
+                        p,
+                        tool_calls_count=row["tool_calls_count"],
+                    )
+                except Exception:
+                    continue
+                if diag["llm_calls_count"] is None:
+                    continue
+                conn.execute(
+                    """
+                    UPDATE runs
+                    SET llm_calls_count = ?,
+                        peak_context_tokens = ?,
+                        avg_fresh_input_per_call = ?,
+                        cache_bust_count = ?,
+                        tools_per_llm_call = ?
+                    WHERE id = ? AND llm_calls_count IS NULL
+                    """,
+                    (
+                        diag["llm_calls_count"],
+                        diag["peak_context_tokens"],
+                        diag["avg_fresh_input_per_call"],
+                        diag["cache_bust_count"],
+                        diag["tools_per_llm_call"],
+                        row["id"],
+                    ),
+                )
+                updated += 1
+        return updated
+    finally:
+        if should_close:
+            conn.close()
+
+
 _ORPHAN_EVIDENCE_RE = re.compile(
-    r"^live_(?P<task_id>[A-Za-z0-9-]+?)(?:_(?P<model_slug>[a-z0-9][a-z0-9._-]+))?_(?P<arm>baseline|icm|icm_lite|icm_v2|icm-subagents|delegation)_run(?P<run_idx>\d+)_(?P<epoch>\d+)\.ndjson$"
+    r"^live_(?P<task_id>[A-Za-z0-9-]+?)(?:_(?P<model_slug>[a-z0-9][a-z0-9._-]+))?_(?P<arm>baseline|icm|icm_lite|icm_v2|icm_v3|icm_staged|icm-subagents|delegation)(?:_(?P<phase>phase[12]))?_run(?P<run_idx>\d+)_(?P<epoch>\d+)\.ndjson$"
 )
 
 
@@ -2144,7 +2244,7 @@ def import_orphan_evidence_runs(
                 continue
 
             m = _ORPHAN_EVIDENCE_RE.match(p.name)
-            if not m:
+            if not m or m.group("phase"):
                 continue
             task_id = m.group("task_id")
             arm = m.group("arm")
@@ -2158,6 +2258,10 @@ def import_orphan_evidence_runs(
 
             parsed = validate_and_parse_telemetry(lines)
             tool_m = parsed.get("tool_metrics") or extract_ndjson_tool_metrics(lines)
+            cache_diag = extract_ndjson_cache_diagnostics(
+                lines,
+                tool_calls_count=tool_m["tool_calls_count"],
+            )
             u = parsed["usage"]
 
             model = "gemini-3.8-flash-low"
@@ -2226,6 +2330,11 @@ def import_orphan_evidence_runs(
                 tool_errors_count=tool_m["tool_errors_count"],
                 max_consecutive_tool_streak=tool_m["max_consecutive_tool_streak"],
                 loop_detected=tool_m["loop_detected"],
+                llm_calls_count=cache_diag["llm_calls_count"],
+                peak_context_tokens=cache_diag["peak_context_tokens"],
+                avg_fresh_input_per_call=cache_diag["avg_fresh_input_per_call"],
+                cache_bust_count=cache_diag["cache_bust_count"],
+                tools_per_llm_call=cache_diag["tools_per_llm_call"],
                 conn=conn,
             )
             existing_basenames.add(p.name)
@@ -2389,6 +2498,13 @@ def import_run(
         tool_errors_count=run_dict.get("tool_errors_count"),
         max_consecutive_tool_streak=run_dict.get("max_consecutive_tool_streak"),
         loop_detected=run_dict.get("loop_detected"),
+        llm_calls_count=run_dict.get("llm_calls_count"),
+        peak_context_tokens=run_dict.get("peak_context_tokens"),
+        avg_fresh_input_per_call=run_dict.get("avg_fresh_input_per_call"),
+        cache_bust_count=run_dict.get("cache_bust_count"),
+        tools_per_llm_call=run_dict.get("tools_per_llm_call"),
+        contract_version=run_dict.get("contract_version"),
+        contract_hash=run_dict.get("contract_hash"),
         conn=conn,
         db_path=db_path,
     )
@@ -2396,7 +2512,7 @@ def import_run(
 
 
 def _compute_arm_efficiency_metrics(arm_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Compute pass-rate, cost/tokens per passing patch, and tool/loop metrics over arm rows."""
+    """Compute pass-rate, cost/tokens per passing patch, and tool/loop/cache metrics over arm rows."""
     verified_count = len([r for r in arm_rows if r.get("verification_status") == "passed"])
     pass_rate = (verified_count / len(arm_rows)) if arm_rows else None
     # Compute per-pass metrics over telemetry-bearing rows only, so runs with
@@ -2422,6 +2538,21 @@ def _compute_arm_efficiency_metrics(arm_rows: List[Dict[str, Any]]) -> Dict[str,
         int(r["tool_errors_count"]) for r in arm_rows if r.get("tool_errors_count") is not None
     )
     loop_runs_count = sum(1 for r in arm_rows if bool(r.get("loop_detected")))
+
+    llm_vals = [float(r["llm_calls_count"]) for r in arm_rows if r.get("llm_calls_count") is not None]
+    tpl_vals = [float(r["tools_per_llm_call"]) for r in arm_rows if r.get("tools_per_llm_call") is not None]
+    fresh_vals = [
+        float(r["avg_fresh_input_per_call"])
+        for r in arm_rows
+        if r.get("avg_fresh_input_per_call") is not None
+    ]
+    peak_vals = [
+        int(r["peak_context_tokens"])
+        for r in arm_rows
+        if r.get("peak_context_tokens") is not None
+    ]
+    bust_vals = [int(r["cache_bust_count"]) for r in arm_rows if r.get("cache_bust_count") is not None]
+
     return {
         "passed_count": verified_count,
         "pass_rate": pass_rate,
@@ -2430,6 +2561,11 @@ def _compute_arm_efficiency_metrics(arm_rows: List[Dict[str, Any]]) -> Dict[str,
         "total_tool_calls": total_tool_calls,
         "total_tool_errors": total_tool_errors,
         "loop_runs_count": loop_runs_count,
+        "mean_llm_calls": (sum(llm_vals) / len(llm_vals)) if llm_vals else None,
+        "mean_tools_per_llm_call": (sum(tpl_vals) / len(tpl_vals)) if tpl_vals else None,
+        "mean_avg_fresh_input_per_call": (sum(fresh_vals) / len(fresh_vals)) if fresh_vals else None,
+        "peak_context_tokens": max(peak_vals) if peak_vals else None,
+        "total_cache_busts": sum(bust_vals) if bust_vals else None,
     }
 
 
@@ -2647,6 +2783,11 @@ def _compute_task_summary_with_rows(
             "total_tool_calls": eff["total_tool_calls"],
             "total_tool_errors": eff["total_tool_errors"],
             "loop_runs_count": eff["loop_runs_count"],
+            "mean_llm_calls": eff["mean_llm_calls"],
+            "mean_tools_per_llm_call": eff["mean_tools_per_llm_call"],
+            "mean_avg_fresh_input_per_call": eff["mean_avg_fresh_input_per_call"],
+            "peak_context_tokens": eff["peak_context_tokens"],
+            "total_cache_busts": eff["total_cache_busts"],
             "failed_count": len([r for r in all_arm_rows if r.get("verification_status") in ("failed", "evaluator_error") or r.get("execution_status") == "failed"]),
             "excluded_count": len([r for r in all_arm_rows if not r.get("is_comparison_eligible")]),
             "cost_eligible_count": len([r for r in all_arm_rows if r.get("is_measurement_eligible") and r.get("cost_usd") is not None]),
@@ -2677,7 +2818,7 @@ def _compute_task_summary_with_rows(
 
     # Compare baseline vs governed arm
     gov_arm = None
-    for candidate in ("icm-subagents", "icm", "delegation", "icm_v2", "icm_lite"):
+    for candidate in ("icm-subagents", "icm", "delegation", "icm_v3", "icm_staged", "icm_v2", "icm_lite"):
         if candidate in summary["arms"] and summary["arms"][candidate]["n"] > 0:
             gov_arm = candidate
             break
@@ -3140,6 +3281,313 @@ def print_summary(
         conn.close()
 
 
+def _parse_exclusion_reasons(raw_reasons: Any) -> List[str]:
+    """Parse stored exclusion_reasons JSON string or list into a string list."""
+    if not raw_reasons:
+        return []
+    if isinstance(raw_reasons, list):
+        return [str(r) for r in raw_reasons]
+    if isinstance(raw_reasons, str):
+        try:
+            parsed = json.loads(raw_reasons)
+            if isinstance(parsed, list):
+                return [str(r) for r in parsed]
+        except Exception:
+            return [raw_reasons]
+    return [str(raw_reasons)]
+
+
+def compute_cache_diagnostics_report(
+    conn: Optional[sqlite3.Connection] = None,
+    db_path: Optional[Path] = None,
+    task_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Compute per-arm LLM turn, cache-health, pass-rate, and cost-per-pass diagnostics."""
+    should_close = False
+    if conn is None:
+        conn = get_connection(db_path)
+        should_close = True
+
+    try:
+        cursor = conn.cursor()
+        if task_id:
+            cursor.execute(
+                "SELECT * FROM runs WHERE task_id = ? ORDER BY arm, run_index, id",
+                (task_id,),
+            )
+        else:
+            cursor.execute("SELECT * FROM runs ORDER BY task_id, arm, run_index, id")
+        all_rows = [dict(r) for r in cursor.fetchall()]
+
+        rows = [
+            r
+            for r in all_rows
+            if r.get("source_kind") not in ("fixture", "imported")
+            and not bool(r.get("is_simulation", 0))
+        ]
+
+        arms: Dict[str, Dict[str, Any]] = {}
+        distinct_arms = sorted(
+            {str(r["arm"]).lower() for r in rows},
+            key=lambda x: (0 if x == "baseline" else 1, x),
+        )
+        for arm_name in distinct_arms:
+            arm_rows = [r for r in rows if str(r["arm"]).lower() == arm_name]
+            llm_vals = [
+                float(r["llm_calls_count"])
+                for r in arm_rows
+                if r.get("llm_calls_count") is not None
+            ]
+            tpl_vals = [
+                float(r["tools_per_llm_call"])
+                for r in arm_rows
+                if r.get("tools_per_llm_call") is not None
+            ]
+            bust_vals = [
+                int(r["cache_bust_count"])
+                for r in arm_rows
+                if r.get("cache_bust_count") is not None
+            ]
+            fresh_vals = [
+                float(r["avg_fresh_input_per_call"])
+                for r in arm_rows
+                if r.get("avg_fresh_input_per_call") is not None
+            ]
+            peak_vals = [
+                int(r["peak_context_tokens"])
+                for r in arm_rows
+                if r.get("peak_context_tokens") is not None
+            ]
+
+            inputs = [
+                float(r["input_tokens"])
+                for r in arm_rows
+                if r.get("input_tokens") is not None
+            ]
+            caches = [
+                float(r["cache_read_tokens"])
+                for r in arm_rows
+                if r.get("cache_read_tokens") is not None
+            ]
+            mean_input = (sum(inputs) / len(inputs)) if inputs else None
+            mean_cache = (sum(caches) / len(caches)) if caches else None
+            total_prompt = (mean_input or 0.0) + (mean_cache or 0.0)
+            cache_hit_ratio = (
+                (mean_cache / total_prompt)
+                if (total_prompt > 0 and mean_cache is not None)
+                else None
+            )
+
+            eff = _compute_arm_efficiency_metrics(arm_rows)
+            arms[arm_name] = {
+                "n": len(arm_rows),
+                "mean_llm_calls": (sum(llm_vals) / len(llm_vals)) if llm_vals else None,
+                "mean_tools_per_llm_call": (sum(tpl_vals) / len(tpl_vals)) if tpl_vals else None,
+                "cache_hit_ratio": cache_hit_ratio,
+                "total_cache_bust_count": sum(bust_vals) if bust_vals else None,
+                "mean_avg_fresh_input_per_call": (
+                    (sum(fresh_vals) / len(fresh_vals)) if fresh_vals else None
+                ),
+                "peak_context_tokens": max(peak_vals) if peak_vals else None,
+                "passed_count": eff["passed_count"],
+                "pass_rate": eff["pass_rate"],
+                "cost_per_verified_pass_usd": eff["cost_per_passing_patch_usd"],
+            }
+
+        return {
+            "task_id": task_id,
+            "total_rows": len(rows),
+            "arms": arms,
+        }
+    finally:
+        if should_close:
+            conn.close()
+
+
+def print_diagnose(
+    task_id: Optional[str] = None,
+    db_path: Optional[Path] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
+    """Pretty-print per-arm cache and turn diagnostics to terminal."""
+    report = compute_cache_diagnostics_report(conn=conn, db_path=db_path, task_id=task_id)
+    scope = f"Task {task_id}" if task_id else "ALL TASKS"
+    if not report["arms"]:
+        print(f"No qualifying runs found for diagnostics ({scope}).")
+        return
+
+    print("=" * 72)
+    print(f"  CACHE & EFFICIENCY DIAGNOSTICS ({scope})")
+    print("=" * 72)
+    for arm_name, a in report["arms"].items():
+        llm_str = f"{a['mean_llm_calls']:.2f}" if a["mean_llm_calls"] is not None else "N/A"
+        tpl_str = (
+            f"{a['mean_tools_per_llm_call']:.2f}"
+            if a["mean_tools_per_llm_call"] is not None
+            else "N/A"
+        )
+        hit_str = (
+            f"{a['cache_hit_ratio'] * 100:.2f}%"
+            if a["cache_hit_ratio"] is not None
+            else "N/A"
+        )
+        bust_str = (
+            str(a["total_cache_bust_count"])
+            if a["total_cache_bust_count"] is not None
+            else "N/A"
+        )
+        fresh_str = (
+            f"{a['mean_avg_fresh_input_per_call']:,.0f}"
+            if a["mean_avg_fresh_input_per_call"] is not None
+            else "N/A"
+        )
+        peak_str = (
+            f"{a['peak_context_tokens']:,}"
+            if a["peak_context_tokens"] is not None
+            else "N/A"
+        )
+        pass_str = (
+            f"{a['pass_rate'] * 100:.1f}% ({a['passed_count']}/{a['n']})"
+            if a["pass_rate"] is not None
+            else "N/A"
+        )
+        cpp_str = (
+            f"${a['cost_per_verified_pass_usd']:.5f}"
+            if a["cost_per_verified_pass_usd"] is not None
+            else "N/A"
+        )
+
+        print(f"\n[{arm_name.upper()} ARM] (n={a['n']})")
+        print(f"  Mean LLM Calls:          {llm_str}")
+        print(f"  Mean Tools / LLM Call:   {tpl_str}")
+        print(f"  Cache Hit Ratio:         {hit_str}")
+        print(f"  Total Cache Busts:       {bust_str}")
+        print(f"  Mean Fresh Input / Call: {fresh_str}")
+        print(f"  Peak Context Tokens:     {peak_str}")
+        print(f"  Pass Rate:               {pass_str}")
+        print(f"  Cost / Verified Pass:    {cpp_str}")
+    print("=" * 72)
+
+
+def reprice_runs(
+    conn: Optional[sqlite3.Connection] = None,
+    db_path: Optional[Path] = None,
+    apply: bool = False,
+) -> Dict[str, Any]:
+    """
+    Backfill cost_usd and cost_status='usage_estimate' for complete live runs
+    missing pricing whose model resolves via get_pricing() / base_model_id().
+    Never mutates fixture, simulated, or incomplete rows.
+    """
+    should_close = False
+    if conn is None:
+        conn = get_connection(db_path)
+        should_close = True
+
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT * FROM runs
+            WHERE source_kind = 'live'
+              AND is_simulation = 0
+              AND execution_status = 'completed'
+              AND input_tokens IS NOT NULL
+              AND output_tokens IS NOT NULL
+              AND (cost_status IS NULL OR cost_status != 'incomplete')
+              AND (cost_usd IS NULL OR cost_status IN ('unavailable', 'unknown'))
+            ORDER BY id ASC
+            """
+        )
+        candidates = [dict(r) for r in cursor.fetchall()]
+
+        updates: List[Dict[str, Any]] = []
+        skipped_unpriced = 0
+        updated_count = 0
+
+        for row in candidates:
+            reasons = _parse_exclusion_reasons(row.get("exclusion_reasons"))
+            if "partial_telemetry" in reasons:
+                continue
+
+            cost_info = calculate_cost_detailed(
+                input_tokens=row["input_tokens"],
+                cache_read_tokens=row.get("cache_read_tokens"),
+                output_tokens=row["output_tokens"],
+                model=row["model"],
+                thinking_tokens=row.get("thinking_tokens"),
+                conn=conn,
+                is_simulation=False,
+                is_partial=False,
+            )
+            if cost_info["cost_status"] != "usage_estimate" or cost_info["cost_usd"] is None:
+                skipped_unpriced += 1
+                continue
+
+            cleaned_reasons = [r for r in reasons if r != "model_rate_absent"]
+            reasons_json = json.dumps(cleaned_reasons) if cleaned_reasons else None
+
+            updates.append(
+                {
+                    "id": row["id"],
+                    "task_id": row["task_id"],
+                    "arm": row["arm"],
+                    "model": row["model"],
+                    "old_cost_status": row.get("cost_status"),
+                    "old_cost_usd": row.get("cost_usd"),
+                    "new_cost_status": "usage_estimate",
+                    "new_cost_usd": cost_info["cost_usd"],
+                    "reasons_json": reasons_json,
+                }
+            )
+
+        if apply and updates:
+            with conn:
+                for u in updates:
+                    conn.execute(
+                        """
+                        UPDATE runs
+                        SET cost_usd = ?,
+                            cost_status = 'usage_estimate',
+                            exclusion_reasons = ?
+                        WHERE id = ?
+                        """,
+                        (u["new_cost_usd"], u["reasons_json"], u["id"]),
+                    )
+                    updated_count += 1
+
+        return {
+            "apply": apply,
+            "candidates_count": len(updates),
+            "updated_count": updated_count,
+            "skipped_unpriced_count": skipped_unpriced,
+            "updates": updates,
+        }
+    finally:
+        if should_close:
+            conn.close()
+
+
+def print_reprice(
+    db_path: Optional[Path] = None,
+    apply: bool = False,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
+    """Execute reprice dry-run or apply and print summary to terminal."""
+    res = reprice_runs(conn=conn, db_path=db_path, apply=apply)
+    mode = "APPLY" if apply else "DRY-RUN"
+    print(f"[{mode}] Eligible live complete runs to reprice: {res['candidates_count']} (unpriced skipped: {res['skipped_unpriced_count']})")
+    for u in res["updates"]:
+        print(
+            f"  run_id={u['id']} task={u['task_id']} arm={u['arm']} model={u['model']} "
+            f"{u['old_cost_status']} ({u['old_cost_usd']}) -> {u['new_cost_status']} (${u['new_cost_usd']:.6f})"
+        )
+    if apply:
+        print(f"✓ Updated {res['updated_count']} run(s).")
+    else:
+        print("Dry-run only; re-run with --apply to persist changes.")
+
+
 def main():
     import argparse
 
@@ -3175,6 +3623,18 @@ def main():
     casc_p = subparsers.add_parser("cascade", help="Print multi-model spend cascade demonstrating how savings scale")
     casc_p.add_argument("--db", default=None, help="Custom path to SQLite database")
 
+    # diagnose
+    diag_p = subparsers.add_parser("diagnose", help="Print per-arm LLM turn and cache-health diagnostics")
+    diag_p.add_argument("--db", default=None, help="Custom path to SQLite database")
+    diag_p.add_argument("--task", default=None, help="Optional task ID filter")
+
+    # reprice
+    rep_p = subparsers.add_parser("reprice", help="Backfill cost_usd and cost_status for complete live runs")
+    rep_p.add_argument("--db", default=None, help="Custom path to SQLite database")
+    rep_mode = rep_p.add_mutually_exclusive_group()
+    rep_mode.add_argument("--dry-run", action="store_true", help="Preview repricing without modifying DB (default)")
+    rep_mode.add_argument("--apply", action="store_true", help="Persist repriced cost_usd and cost_status to DB")
+
     args = parser.parse_args()
     custom_db = Path(args.db) if hasattr(args, "db") and args.db else None
 
@@ -3200,6 +3660,10 @@ def main():
         print_summary(None, model_override=args.model, db_path=custom_db)
     elif args.command == "summary":
         print_summary(args.task_id, model_override=args.model, db_path=custom_db)
+    elif args.command == "diagnose":
+        print_diagnose(task_id=args.task, db_path=custom_db)
+    elif args.command == "reprice":
+        print_reprice(db_path=custom_db, apply=bool(args.apply))
     else:
         if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
             print_summary(sys.argv[1], db_path=custom_db)

@@ -318,3 +318,157 @@ def test_run_benchmark_live_with_mocked_agy_cli_and_unpriced_model(tmp_path: Pat
     assert events[-1]["status"] == "rolled_back"
     assert len(events) == 1 + 61 + 3
     conn.close()
+
+
+def test_run_benchmark_staged_failed_phase2_rolls_back_and_persists_context_reset(tmp_path: Path, monkeypatch):
+    """
+    Verify icm_staged Phase 1 -> Phase 2 execution against BENCH-002 where Phase 2
+    leaves broken edits and exits non-zero (or fails evaluator): workspace rolls back
+    bit-for-bit to pre_hash, context_reset is persisted with phase1/phase2 context bounds,
+    and disposable workspaces are cleaned up.
+    """
+    db_file = tmp_path / "staged_rollback.db"
+    evidence_dir = tmp_path / "evidence"
+    ws_root = tmp_path / "workspaces"
+    monkeypatch.setattr(runner, "DEFAULT_EVIDENCE_DIR", evidence_dir)
+
+    p1_ndjson = (
+        "\n".join(
+            [
+                json.dumps({
+                    "event": "step_update",
+                    "step_update": {
+                        "step_index": 1,
+                        "state": "DONE",
+                        "step_type": "agent_response",
+                        "usage": {"input_tokens": 3000, "output_tokens": 60, "cache_read_tokens": 0},
+                    },
+                }),
+                json.dumps({
+                    "event": "step_update",
+                    "step_update": {
+                        "step_index": 2,
+                        "state": "DONE",
+                        "step_type": "tool",
+                        "tool_name": "read_file",
+                        "tool_info": {"parameters": {"TargetFile": "api_server.py"}},
+                    },
+                }),
+                json.dumps({
+                    "event": "step_update",
+                    "step_update": {
+                        "step_index": 3,
+                        "state": "DONE",
+                        "step_type": "agent_response",
+                        "usage": {"input_tokens": 1000, "output_tokens": 80, "cache_read_tokens": 3200},
+                    },
+                }),
+                json.dumps({
+                    "event": "result",
+                    "result": {
+                        "status": "SUCCESS",
+                        "response": "### Target Files\n- api_server.py\n- api_client.py\n### Verify Command\npytest -q --tb=short",
+                        "duration_seconds": 2.0,
+                        "num_turns": 2,
+                        "usage": {"input_tokens": 4000, "output_tokens": 140, "cache_read_tokens": 3200, "total_tokens": 7340},
+                    },
+                }),
+            ]
+        )
+        + "\n"
+    ).encode("utf-8")
+
+    p2_ndjson = (
+        "\n".join(
+            [
+                json.dumps({
+                    "event": "step_update",
+                    "step_update": {
+                        "step_index": 1,
+                        "state": "DONE",
+                        "step_type": "agent_response",
+                        "usage": {"input_tokens": 1800, "output_tokens": 40, "cache_read_tokens": 0},
+                    },
+                }),
+                json.dumps({
+                    "event": "step_update",
+                    "step_update": {
+                        "step_index": 2,
+                        "state": "DONE",
+                        "step_type": "tool",
+                        "tool_name": "write_to_file",
+                        "tool_info": {"parameters": {"TargetFile": "rogue_p2.py"}},
+                    },
+                }),
+                json.dumps({
+                    "event": "result",
+                    "result": {
+                        "status": "ERROR",
+                        "response": "Phase 2 execution failed",
+                        "duration_seconds": 1.5,
+                        "num_turns": 1,
+                        "usage": {"input_tokens": 1800, "output_tokens": 40, "cache_read_tokens": 0, "total_tokens": 1840},
+                    },
+                }),
+            ]
+        )
+        + "\n"
+    ).encode("utf-8")
+
+    captured = []
+    orig_run = subprocess.run
+
+    def fake_subprocess_run(cmd, **kwargs):
+        if cmd and cmd[0] == "agy":
+            captured.append({"cmd": cmd, "cwd": Path(kwargs["cwd"])})
+            if len(captured) == 1:
+                return subprocess.CompletedProcess(cmd, returncode=0, stdout=p1_ndjson, stderr=b"")
+            cwd = Path(kwargs["cwd"])
+            (cwd / "rogue_p2.py").write_text("# stray phase 2 file\n", encoding="utf-8")
+            (cwd / "api_server.py").write_text("broken = True\n", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, returncode=1, stdout=p2_ndjson, stderr=b"phase2 error")
+        return orig_run(cmd, **kwargs)
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_subprocess_run)
+
+    res = runner.run_benchmark_live(
+        task_id="BENCH-002",
+        arm="baseline",
+        run_index=1,
+        model="unpriced-model-x",
+        cli_cmd="agy",
+        timeout_seconds=180,
+        db_path=db_file,
+        workspace_root=ws_root,
+        mode="icm-staged",
+    )
+
+    assert len(captured) == 2
+    assert res["arm"] == "icm_staged"
+    assert res["execution_status"] == "failed"
+    assert res["verification_status"] == "not_run"
+    assert res["rolled_back"] is True
+    assert res["restored_hash"] == res["pre_hash"]
+    assert res["post_hash"] != res["pre_hash"]
+    assert res["tokens_shed"] == 4200 - 1800
+    assert list(ws_root.iterdir()) == []
+
+    with ledger.get_connection(db_file) as conn:
+        events = ledger.get_run_events(res["run_id"], conn=conn)
+        assert [(e["phase"], e["tool_name"], e["status"]) for e in events] == [
+            ("start", None, "started"),
+            ("tool", "read_file", "DONE"),
+            ("context_reset", "context_reset", "DONE"),
+            ("tool", "write_to_file", "DONE"),
+            ("scope", None, "scope_mismatch"),
+            ("rollback", None, "rolled_back"),
+        ]
+        reset_ev = events[2]
+        assert reset_ev["diff_hash"] == res["phase1_hash"]
+        assert json.loads(reset_ev["rollback_ref"]) == {
+            "phase1_peak_context": 4200,
+            "phase2_initial_context": 1800,
+            "tokens_shed": 2400,
+        }
+        assert events[-1]["diff_hash"] == res["pre_hash"]
+        assert events[-1]["rollback_ref"] == res["pre_hash"]

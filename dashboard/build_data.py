@@ -25,7 +25,14 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import ledger
 import campaign
-from complexity_router import ICM_LITE, ICM_V2
+from complexity_router import (
+    ARM_TO_CONTRACT_ID,
+    ICM_LITE,
+    ICM_STAGED,
+    ICM_V2,
+    ICM_V3,
+    load_contract_registry,
+)
 
 # Ensure UTF-8 output encoding
 if hasattr(sys.stdout, "reconfigure"):
@@ -35,7 +42,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 OUTPUT_PATH = DASHBOARD_DIR / "public" / "data.json"
 OPS_DB_PATH = WORKSPACE_ROOT / "data" / "ops_exp005.db"
-GOVERNED_ARMS = ("icm-subagents", "icm", "delegation", "governed", ICM_V2, ICM_LITE)
+GOVERNED_ARMS = ("icm-subagents", "icm", "delegation", "governed", ICM_V3, ICM_STAGED, ICM_V2, ICM_LITE)
 
 
 def _governed_key(arms: Dict[str, Any], preferred: Optional[str] = None) -> Optional[str]:
@@ -684,6 +691,242 @@ def _load_pricing_display_config() -> Tuple[List[str], Set[str], Set[str]]:
     return ordered, hidden, show_if_rec
 
 
+_LINEAGE_VERSION_ORDER = {
+    "baseline": 0,
+    "icm_v1": 1,
+    ICM_V2: 2,
+    ICM_V3: 3,
+    ICM_STAGED: 4,
+    ICM_LITE: 5,
+}
+_CONTRACT_ORDER = {
+    "icm_v1": 0,
+    ICM_LITE: 1,
+    ICM_V2: 2,
+    ICM_V3: 3,
+    ICM_STAGED: 4,
+}
+
+
+def _resolve_lineage_version(run: Dict[str, Any]) -> str:
+    """Resolve canonical lineage version identifier for a run."""
+    cv = run.get("contract_version")
+    if isinstance(cv, str) and cv.strip():
+        return cv.strip()
+    arm_l = str(run.get("arm") or "").strip().lower()
+    return ARM_TO_CONTRACT_ID.get(arm_l, arm_l)
+
+
+def _is_priced_run(run: Dict[str, Any]) -> bool:
+    """Return True iff the run carries complete USD cost telemetry."""
+    return (
+        run.get("cost_usd") is not None
+        and run.get("_is_cost_complete", True)
+        and str(run.get("cost_status") or "").lower() not in ("unavailable", "incomplete", "unknown")
+    )
+
+
+def _per_task_comparison_means(runs: List[Dict[str, Any]]) -> Dict[str, float]:
+    """Compute per-task mean USD cost over comparison-eligible priced runs."""
+    by_task: Dict[str, List[float]] = {}
+    for r in runs:
+        if r.get("is_comparison_eligible") and _is_priced_run(r):
+            tid = r.get("task_id")
+            if tid:
+                by_task.setdefault(str(tid), []).append(float(r["cost_usd"]))
+    return {tid: sum(vals) / len(vals) for tid, vals in by_task.items() if vals}
+
+
+def _matched_cohort_cost_delta(
+    group_runs: List[Dict[str, Any]],
+    ref_runs: List[Dict[str, Any]],
+) -> Tuple[Optional[float], Optional[float]]:
+    """Compute (cost_delta_pct, savings_pct) over matched priced passing tasks on the same model."""
+    g_means = _per_task_comparison_means(group_runs)
+    r_means = _per_task_comparison_means(ref_runs)
+    common_tasks = sorted(set(g_means) & set(r_means))
+    if not common_tasks:
+        return None, None
+    g_matched_mean = sum(g_means[tid] for tid in common_tasks) / len(common_tasks)
+    r_matched_mean = sum(r_means[tid] for tid in common_tasks) / len(common_tasks)
+    if r_matched_mean <= 0.0:
+        return None, None
+    cost_delta_pct = round((g_matched_mean - r_matched_mean) / r_matched_mean * 100.0, 2)
+    savings_pct = round((r_matched_mean - g_matched_mean) / r_matched_mean * 100.0, 2)
+    return cost_delta_pct, savings_pct
+
+
+def _compute_group_cache_hit_ratio(
+    runs: List[Dict[str, Any]],
+    cache_mode_by_model: Dict[str, str],
+) -> Optional[float]:
+    """Compute prompt cache hit ratio respecting separate vs subset token accounting."""
+    total_cache_read = 0
+    total_prompt = 0
+    valid_count = 0
+    for r in runs:
+        inp = r.get("input_tokens")
+        cache_read = r.get("cache_read_tokens")
+        if inp is None or cache_read is None:
+            continue
+        inp_i = int(inp)
+        cache_i = int(cache_read)
+        model = str(r.get("model") or "")
+        mode = cache_mode_by_model.get(model)
+        if mode is None:
+            mode = "subset" if any(k in model.lower() for k in ("claude", "anthropic")) else "separate"
+        if mode == "subset":
+            fresh_in = max(0, inp_i - cache_i)
+            prompt_tokens = fresh_in + cache_i
+        else:
+            prompt_tokens = inp_i + cache_i
+        total_cache_read += cache_i
+        total_prompt += prompt_tokens
+        valid_count += 1
+    if valid_count == 0 or total_prompt <= 0:
+        return None
+    return total_cache_read / total_prompt
+
+
+def build_iteration_lineage(
+    runs: List[Dict[str, Any]],
+    pricing_rows: List[Dict[str, Any]],
+    registry: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Build multi-version iteration lineage metrics grouped strictly by (model, version)."""
+    if registry is None:
+        try:
+            registry = load_contract_registry()
+        except Exception:
+            registry = {}
+
+    contracts_list = [
+        {"id": cid, **meta}
+        for cid, meta in sorted(
+            registry.items(),
+            key=lambda kv: (_CONTRACT_ORDER.get(kv[0], 99), kv[0]),
+        )
+    ]
+
+    cache_mode_by_model = {
+        str(p["model"]): str(p.get("cache_accounting") or "separate").lower()
+        for p in pricing_rows
+        if p.get("model")
+    }
+
+    groups: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    for r in runs:
+        if (
+            str(r.get("source_kind") or "").lower() != "live"
+            or r.get("is_simulation")
+            or not r.get("_provenance_valid")
+            or str(r.get("evidence_status") or "").lower() != "verified"
+        ):
+            continue
+        model = str(r.get("model") or "").strip()
+        if not model:
+            continue
+        version = _resolve_lineage_version(r)
+        groups.setdefault((model, version), []).append(r)
+
+    baseline_tasks_by_model: Dict[str, Set[str]] = {}
+    for (model, version), g_runs in groups.items():
+        if version == "baseline":
+            baseline_tasks_by_model[model] = {
+                str(r["task_id"]) for r in g_runs if r.get("task_id")
+            }
+
+    entries: List[Dict[str, Any]] = []
+    sorted_keys = sorted(
+        groups.keys(),
+        key=lambda mv: (mv[0], _LINEAGE_VERSION_ORDER.get(mv[1], 99), mv[1]),
+    )
+    for model, version in sorted_keys:
+        g_runs = groups[(model, version)]
+        meta = registry.get(version, {}) if version != "baseline" else {}
+        parent_version = meta.get("parent_version")
+        task_ids = sorted({str(r["task_id"]) for r in g_runs if r.get("task_id")})
+        base_tasks = baseline_tasks_by_model.get(model, set())
+        matched_baseline_task_ids = (
+            list(task_ids) if version == "baseline" else sorted(set(task_ids) & base_tasks)
+        )
+
+        n_runs = len(g_runs)
+        passed_count = sum(
+            1 for r in g_runs if str(r.get("verification_status") or "").lower() == "passed"
+        )
+        pass_rate = (passed_count / n_runs) if n_runs > 0 else None
+
+        priced_runs = [r for r in g_runs if _is_priced_run(r)]
+        priced_n_runs = len(priced_runs)
+        mean_cost_usd = (
+            sum(float(r["cost_usd"]) for r in priced_runs) / priced_n_runs
+            if priced_n_runs > 0
+            else None
+        )
+        priced_passed_count = sum(
+            1 for r in priced_runs if str(r.get("verification_status") or "").lower() == "passed"
+        )
+        cost_per_passing_patch_usd = (
+            sum(float(r["cost_usd"]) for r in priced_runs) / priced_passed_count
+            if priced_passed_count > 0
+            else None
+        )
+
+        llm_vals = [float(r["llm_calls_count"]) for r in g_runs if r.get("llm_calls_count") is not None]
+        tpl_vals = [float(r["tools_per_llm_call"]) for r in g_runs if r.get("tools_per_llm_call") is not None]
+        bust_vals = [int(r["cache_bust_count"]) for r in g_runs if r.get("cache_bust_count") is not None]
+
+        if version == "baseline":
+            cost_delta_vs_baseline_pct, savings_vs_baseline_pct = None, None
+        else:
+            baseline_runs = groups.get((model, "baseline"), [])
+            cost_delta_vs_baseline_pct, savings_vs_baseline_pct = _matched_cohort_cost_delta(
+                g_runs, baseline_runs
+            )
+
+        if parent_version and (model, parent_version) in groups:
+            cost_delta_vs_prev_version_pct, _ = _matched_cohort_cost_delta(
+                g_runs, groups[(model, parent_version)]
+            )
+        else:
+            cost_delta_vs_prev_version_pct = None
+
+        arm_names = [str(r.get("arm") or "").lower() for r in g_runs if r.get("arm")]
+        arm_name = arm_names[0] if arm_names else version
+
+        entries.append({
+            "version": version,
+            "arm": arm_name,
+            "model": model,
+            "hypothesis": meta.get("hypothesis"),
+            "changes_from_prev": list(meta.get("changes_from_prev") or []),
+            "parent_version": parent_version,
+            "execution_strategy": meta.get("execution_strategy"),
+            "task_ids": task_ids,
+            "matched_baseline_task_ids": matched_baseline_task_ids,
+            "n_runs": n_runs,
+            "passed_count": passed_count,
+            "pass_rate": pass_rate,
+            "priced_n_runs": priced_n_runs,
+            "mean_cost_usd": mean_cost_usd,
+            "cost_per_passing_patch_usd": cost_per_passing_patch_usd,
+            "mean_llm_calls": (sum(llm_vals) / len(llm_vals)) if llm_vals else None,
+            "mean_cache_hit_ratio": _compute_group_cache_hit_ratio(g_runs, cache_mode_by_model),
+            "mean_tools_per_call": (sum(tpl_vals) / len(tpl_vals)) if tpl_vals else None,
+            "total_cache_busts": sum(bust_vals) if bust_vals else None,
+            "cost_delta_vs_baseline_pct": cost_delta_vs_baseline_pct,
+            "savings_vs_baseline_pct": savings_vs_baseline_pct,
+            "cost_delta_vs_prev_version_pct": cost_delta_vs_prev_version_pct,
+        })
+
+    return {
+        "has_data": bool(entries),
+        "versions": entries,
+        "contracts": contracts_list,
+    }
+
+
 def build_data_payload(
     db_path: Optional[Path] = None,
     capture_policy: str = "approved",
@@ -754,6 +997,8 @@ def build_data_payload(
             r["is_comparison_eligible"] = elig["is_comparison_eligible"]
             r["reporting_category"] = elig["category"]
             r["exclusion_reasons"] = elig["exclusion_reasons"]
+            r["_provenance_valid"] = elig["provenance_valid"]
+            r["_is_cost_complete"] = elig["is_cost_complete"]
 
             public_r = ledger.to_public_run(r)
             processed_runs.append(public_r)
@@ -881,6 +1126,8 @@ def build_data_payload(
         except Exception:
             quality_block = None
 
+        iteration_lineage = build_iteration_lineage(raw_runs, pricing_rows)
+
         payload = {
             "schema_version": "1.0",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -899,6 +1146,7 @@ def build_data_payload(
             "operational": ops_block,
             "quality_rubric": quality_block,
             "campaign": campaign_rep,
+            "iteration_lineage": iteration_lineage,
         }
         return sanitize_export_payload(payload)
     finally:
@@ -958,6 +1206,7 @@ def main():
                 "pricing": [],
                 "cascade": [],
                 "operational": {"has_data": False, "runs": [], "tasks": []},
+                "iteration_lineage": {"has_data": False, "versions": [], "contracts": []},
             }
             with open(out_path, "w", encoding="utf-8") as f:
                 json.dump(placeholder, f, indent=2)

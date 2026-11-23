@@ -595,3 +595,263 @@ def test_pricing_invalid_model_raises_value_error(tmp_path: Path, bad_model):
 def test_base_model_id_edge_cases(model, expected):
     assert ledger.base_model_id(model) == expected
 
+
+def test_cli_diagnose_per_arm_metrics_and_zero_pass_rep06(tmp_path: Path):
+    """
+    Verify `ledger.py diagnose` CLI reports per-arm mean LLM calls, mean tools_per_llm_call,
+    cache hit ratio, total cache_bust_count, mean avg_fresh_input_per_call, peak context,
+    pass rate, and prints N/A (never $0.00) when verified passes == 0 (REP-06).
+    """
+    import subprocess
+    import sys
+
+    db_file = tmp_path / "diagnose.db"
+    conn = ledger.get_connection(db_file)
+    ledger.seed_pricing(conn=conn)
+
+    # Baseline: 1 run, passed, 4 LLM calls, 1 cache bust, 2.0 tools/call
+    ledger.record_run(
+        task_id="DIAG-01",
+        arm="baseline",
+        model="gemini-4-argon-low",
+        run_index=1,
+        timestamp="2026-11-22T00:00:00Z",
+        input_tokens=200_000,
+        cache_read_tokens=800_000,
+        output_tokens=10_000,
+        source_kind="live",
+        evidence_status="verified",
+        verification_status="passed",
+        llm_calls_count=4,
+        peak_context_tokens=50_000,
+        avg_fresh_input_per_call=3000.0,
+        cache_bust_count=1,
+        tools_per_llm_call=2.0,
+        conn=conn,
+    )
+    # ICM on DIAG-01: 1 run, failed (0 passes -> REP-06 N/A for cost/verified pass)
+    ledger.record_run(
+        task_id="DIAG-01",
+        arm="icm",
+        model="gemini-4-argon-low",
+        run_index=1,
+        timestamp="2026-11-22T00:01:00Z",
+        input_tokens=100_000,
+        cache_read_tokens=400_000,
+        output_tokens=5_000,
+        source_kind="live",
+        evidence_status="verified",
+        verification_status="failed",
+        llm_calls_count=2,
+        peak_context_tokens=30_000,
+        avg_fresh_input_per_call=1000.0,
+        cache_bust_count=0,
+        tools_per_llm_call=1.5,
+        conn=conn,
+    )
+    # Fixture run on another task must be ignored by --task DIAG-01 (and overall)
+    ledger.record_run(
+        task_id="DIAG-01",
+        arm="baseline",
+        model="gemini-4-argon-low",
+        run_index=2,
+        timestamp="2026-11-22T00:02:00Z",
+        input_tokens=999_999,
+        cache_read_tokens=0,
+        output_tokens=99_999,
+        source_kind="fixture",
+        evidence_status="unverified",
+        verification_status="passed",
+        llm_calls_count=99,
+        cache_bust_count=99,
+        conn=conn,
+    )
+    conn.close()
+
+    ledger_script = Path(__file__).resolve().parents[2] / "scripts" / "ledger.py"
+    proc = subprocess.run(
+        [sys.executable, str(ledger_script), "diagnose", "--db", str(db_file), "--task", "DIAG-01"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    out = proc.stdout
+    assert "[BASELINE ARM] (n=1)" in out
+    assert "Mean LLM Calls:          4.00" in out
+    assert "Mean Tools / LLM Call:   2.00" in out
+    assert "Cache Hit Ratio:         80.00%" in out
+    assert "Total Cache Busts:       1" in out
+    assert "Mean Fresh Input / Call: 3,000" in out
+    assert "Peak Context Tokens:     50,000" in out
+    assert "Pass Rate:               100.0% (1/1)" in out
+    assert "Cost / Verified Pass:    $0.58000" in out
+
+    assert "[ICM ARM] (n=1)" in out
+    assert "Pass Rate:               0.0% (0/1)" in out
+    assert "Cost / Verified Pass:    N/A" in out
+    assert "$0.00" not in out
+
+
+def test_cli_reprice_dry_run_vs_apply_and_skip_guards(tmp_path: Path):
+    """
+    Verify `ledger.py reprice` defaults to --dry-run (no DB mutation), resolves
+    effort-suffixed models via base_model_id() on --apply, and NEVER mutates
+    fixture, simulated, incomplete, or unpriced rows.
+    """
+    import subprocess
+    import sys
+
+    db_file = tmp_path / "reprice.db"
+    conn = ledger.get_connection(db_file)
+    ledger.seed_pricing(conn=conn)
+
+    # 1. Live complete run with effort-suffixed model missing cost (simulated legacy unpriced state)
+    rid_eligible = ledger.record_run(
+        task_id="REP-TASK",
+        arm="baseline",
+        model="gemini-4-argon-low",
+        run_index=1,
+        timestamp="2026-11-22T00:00:00Z",
+        input_tokens=500_000,
+        cache_read_tokens=100_000,
+        output_tokens=10_000,
+        source_kind="live",
+        evidence_status="verified",
+        cost_status="unavailable",
+        cost_usd=None,
+        exclusion_reasons=["model_rate_absent"],
+        conn=conn,
+    )
+    with conn:
+        conn.execute("UPDATE runs SET cost_usd = NULL, cost_status = 'unavailable' WHERE id = ?", (rid_eligible,))
+
+    # 2. Live complete run with genuinely unknown model (must remain unavailable)
+    rid_unknown = ledger.record_run(
+        task_id="REP-TASK",
+        arm="icm",
+        model="totally-unknown-model-low",
+        run_index=1,
+        timestamp="2026-11-22T00:01:00Z",
+        input_tokens=500_000,
+        cache_read_tokens=100_000,
+        output_tokens=10_000,
+        source_kind="live",
+        evidence_status="verified",
+        conn=conn,
+    )
+
+    # 3. Fixture run missing cost (must NEVER be mutated)
+    rid_fixture = ledger.record_run(
+        task_id="REP-TASK",
+        arm="baseline",
+        model="gemini-4-argon-low",
+        run_index=2,
+        timestamp="2026-11-22T00:02:00Z",
+        input_tokens=500_000,
+        cache_read_tokens=100_000,
+        output_tokens=10_000,
+        source_kind="fixture",
+        evidence_status="unverified",
+        conn=conn,
+    )
+    with conn:
+        conn.execute("UPDATE runs SET cost_usd = NULL, cost_status = 'unavailable' WHERE id = ?", (rid_fixture,))
+
+    # 4. Simulated run missing cost (must NEVER be mutated)
+    rid_sim = ledger.record_run(
+        task_id="REP-TASK",
+        arm="baseline",
+        model="gemini-4-argon-low",
+        run_index=3,
+        timestamp="2026-11-22T00:03:00Z",
+        input_tokens=500_000,
+        cache_read_tokens=100_000,
+        output_tokens=10_000,
+        source_kind="live",
+        evidence_status="verified",
+        is_simulation=True,
+        conn=conn,
+    )
+    with conn:
+        conn.execute("UPDATE runs SET cost_usd = NULL, cost_status = 'simulation' WHERE id = ?", (rid_sim,))
+
+    # 5. Incomplete live run (cost_status='incomplete' and partial_telemetry) (must NEVER be mutated)
+    rid_incomplete = ledger.record_run(
+        task_id="REP-TASK",
+        arm="icm",
+        model="gemini-4-argon-low",
+        run_index=2,
+        timestamp="2026-11-22T00:04:00Z",
+        input_tokens=500_000,
+        cache_read_tokens=100_000,
+        output_tokens=10_000,
+        source_kind="live",
+        evidence_status="verified",
+        cost_status="incomplete",
+        exclusion_reasons=["partial_telemetry"],
+        conn=conn,
+    )
+    with conn:
+        conn.execute("UPDATE runs SET cost_usd = NULL, cost_status = 'incomplete' WHERE id = ?", (rid_incomplete,))
+
+    conn.close()
+
+    ledger_script = Path(__file__).resolve().parents[2] / "scripts" / "ledger.py"
+
+    # Default is --dry-run
+    dry_proc = subprocess.run(
+        [sys.executable, str(ledger_script), "reprice", "--db", str(db_file)],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "[DRY-RUN]" in dry_proc.stdout
+    assert "Eligible live complete runs to reprice: 1" in dry_proc.stdout
+
+    conn = ledger.get_connection(db_file)
+    r1_before = dict(conn.execute("SELECT cost_status, cost_usd FROM runs WHERE id = ?", (rid_eligible,)).fetchone())
+    assert r1_before["cost_status"] == "unavailable"
+    assert r1_before["cost_usd"] is None
+    conn.close()
+
+    # Now --apply
+    apply_proc = subprocess.run(
+        [sys.executable, str(ledger_script), "reprice", "--db", str(db_file), "--apply"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "[APPLY]" in apply_proc.stdout
+    assert "Updated 1 run(s)." in apply_proc.stdout
+
+    conn = ledger.get_connection(db_file)
+    r1_after = dict(conn.execute("SELECT cost_status, cost_usd, exclusion_reasons FROM runs WHERE id = ?", (rid_eligible,)).fetchone())
+    assert r1_after["cost_status"] == "usage_estimate"
+    assert r1_after["cost_usd"] == pytest.approx(1.110000)
+    assert r1_after["exclusion_reasons"] is None
+
+    # All non-eligible rows remain untouched
+    for rid, expected_status in (
+        (rid_unknown, "unavailable"),
+        (rid_fixture, "unavailable"),
+        (rid_sim, "simulation"),
+        (rid_incomplete, "incomplete"),
+    ):
+        r_other = dict(conn.execute("SELECT cost_status, cost_usd FROM runs WHERE id = ?", (rid,)).fetchone())
+        assert r_other["cost_status"] == expected_status
+        assert r_other["cost_usd"] is None
+    conn.close()
+
+    # Idempotent re-run
+    reapply_proc = subprocess.run(
+        [sys.executable, str(ledger_script), "reprice", "--db", str(db_file), "--apply"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "Eligible live complete runs to reprice: 0" in reapply_proc.stdout
+

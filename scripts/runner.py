@@ -53,7 +53,22 @@ if str(SCRIPTS_DIR) not in sys.path:
 import stat
 import ledger
 import pricing
-from complexity_router import ICM_V2, MODES, RoutingDecision, build_mode_prompt, classify_mode, count_ast_symbols, extract_ast_symbol_spans, resolve_mode
+from complexity_router import (
+    ICM_LITE,
+    ICM_STAGED,
+    ICM_V2,
+    ICM_V3,
+    MODES,
+    RoutingDecision,
+    build_mode_prompt,
+    build_staged_exec_prompt,
+    build_staged_prompts,
+    classify_mode,
+    count_ast_symbols,
+    extract_ast_symbol_spans,
+    resolve_contract_metadata,
+    resolve_mode,
+)
 
 DEVIN_API_BASE_URL = "https://api.devin.ai"
 
@@ -358,6 +373,7 @@ def validate_manifest_configuration(
                 or "ICM" in arm_cfg.prompt
                 or "01_intake" in arm_cfg.prompt
                 or "Loop-Breaker" in arm_cfg.prompt
+                or "Batch-First" in arm_cfg.prompt
             ),
         }
 
@@ -729,6 +745,7 @@ def _init_workspace_git(ws_dir: Path) -> None:
             cmd,
             cwd=str(ws_dir),
             env=git_env,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -1437,8 +1454,10 @@ def _persist_run_lifecycle_events(
     restored_hash: Optional[str],
     start_ts: Optional[str] = None,
     scope: Optional[Dict[str, Any]] = None,
+    context_reset: Optional[Dict[str, Any]] = None,
+    phase1_tool_count: Optional[int] = None,
 ) -> None:
-    """Persist start, tool transitions, verify, scope telemetry, and rollback events to SQLite."""
+    """Persist start, tool transitions, context_reset, verify, scope telemetry, and rollback events to SQLite."""
     seq = 1
     ledger.record_run_event(
         run_id=run_id,
@@ -1449,7 +1468,36 @@ def _persist_run_lifecycle_events(
         timestamp=start_ts,
         conn=conn,
     )
-    for ev in tool_events:
+    split_idx = (
+        len(tool_events)
+        if context_reset is None or phase1_tool_count is None
+        else max(0, min(int(phase1_tool_count), len(tool_events)))
+    )
+    for ev in tool_events[:split_idx]:
+        seq += 1
+        ledger.record_run_event(
+            run_id=run_id,
+            seq=seq,
+            phase=str(ev.get("phase") or "tool"),
+            status=str(ev.get("status") or "DONE"),
+            tool_name=ev.get("tool_name"),
+            target_path=ev.get("target_path"),
+            conn=conn,
+        )
+    if context_reset is not None:
+        seq += 1
+        ledger.record_run_event(
+            run_id=run_id,
+            seq=seq,
+            phase="context_reset",
+            status=str(context_reset.get("status") or "DONE"),
+            tool_name=str(context_reset.get("tool_name") or "context_reset"),
+            target_path=context_reset.get("target_path"),
+            diff_hash=context_reset.get("diff_hash"),
+            rollback_ref=context_reset.get("rollback_ref"),
+            conn=conn,
+        )
+    for ev in tool_events[split_idx:]:
         seq += 1
         ledger.record_run_event(
             run_id=run_id,
@@ -1915,11 +1963,12 @@ print("ALL TESTS PASSED")
 # ---------------------------------------------------------------------------
 
 def _build_live_prompt(instructions_text: str, arm: str, workspace: Optional[Path] = None) -> str:
-    """Build baseline, ICM v2, or 4-stage ICM contract prompt with exact INSTRUCTIONS.md appended."""
-    if arm.lower() == "baseline":
+    """Build baseline, ICM v2/v3/lite, or 4-stage ICM contract prompt with exact INSTRUCTIONS.md appended."""
+    arm_lower = arm.lower()
+    if arm_lower == "baseline":
         return instructions_text
-    if arm.lower() == ICM_V2:
-        return build_mode_prompt(instructions_text, ICM_V2, workspace=workspace)
+    if arm_lower in (ICM_V2, ICM_V3, ICM_LITE):
+        return build_mode_prompt(instructions_text, arm_lower, workspace=workspace)
     return (
         "Execute this task strictly following the 4-stage ICM contract:\n"
         "1. INTAKE & SCOPE: Read only the target files named in the instructions; stay strictly within scope and do not alter unrelated or prohibited files.\n"
@@ -1964,6 +2013,537 @@ def _extract_partial_step_usage(lines: List[str]) -> Optional[Dict[str, Optional
         "thinking_tokens": think,
         "cache_read_tokens": cache,
         "total_tokens": inp + out + cache,
+    }
+
+
+MAX_PHASE1_PLAN_CHARS = 12000
+
+_QUOTA_SIGNALS = ("quota", "resource_exhausted", "rate limit", "rate_limit", "429", "exhausted", "capacity")
+
+
+def _resolve_cli_binary(cli_cmd: str) -> str:
+    """Resolve the CLI executable path, checking default Windows agy install location."""
+    if not shutil.which(cli_cmd) and cli_cmd == "agy":
+        default_agy = os.path.expandvars(r"%LOCALAPPDATA%\agy\bin\agy.exe")
+        if os.path.exists(default_agy):
+            return default_agy
+    return cli_cmd
+
+
+def _resolve_evidence_ref(evidence_file: Path) -> str:
+    """Return a workspace-relative POSIX path when inside WORKSPACE_ROOT, else str(path)."""
+    try:
+        return evidence_file.resolve().relative_to(WORKSPACE_ROOT.resolve()).as_posix()
+    except ValueError:
+        return str(evidence_file)
+
+
+def _append_unique(items: List[str], additions: List[str]) -> None:
+    for item in additions:
+        if item not in items:
+            items.append(item)
+
+
+def _sum_optional(a: Optional[int], b: Optional[int]) -> Optional[int]:
+    """Sum two optional integer metrics, returning None if either is None."""
+    if a is None or b is None:
+        return None
+    return int(a) + int(b)
+
+
+def _extract_content_text(value: Any) -> str:
+    """Normalize string or content-block list into plain text."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        chunks = []
+        for block in value:
+            if isinstance(block, str):
+                chunks.append(block)
+            elif isinstance(block, dict) and isinstance(block.get("text"), str):
+                chunks.append(block["text"])
+        return "".join(chunks)
+    return ""
+
+
+def _extract_phase1_plan_text(
+    lines: List[str],
+    max_chars: int = MAX_PHASE1_PLAN_CHARS,
+) -> Tuple[str, bool]:
+    """Extract compact plan text from Phase 1 NDJSON and cap at ``max_chars``."""
+    result_response: Optional[str] = None
+    text_deltas: List[str] = []
+    direct_contents: List[str] = []
+    dedup_steps: Dict[Any, Dict[str, Any]] = {}
+
+    for raw in lines:
+        s = raw.strip()
+        if not s:
+            continue
+        try:
+            ev = json.loads(s)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(ev, dict):
+            continue
+
+        ev_type = str(ev.get("event") or ev.get("type") or "").lower()
+        if ev_type == "result" or "result" in ev:
+            res_obj = ev.get("result") if isinstance(ev.get("result"), dict) else ev
+            resp = res_obj.get("response")
+            if isinstance(resp, str) and resp.strip():
+                result_response = resp
+
+        if ev_type == "step_update":
+            su = ev.get("step_update") if isinstance(ev.get("step_update"), dict) else ev
+            if su.get("step_type") == "agent_response":
+                delta = su.get("text_delta")
+                if isinstance(delta, str) and delta:
+                    text_deltas.append(delta)
+                idx = su.get("step_index")
+                if idx is not None:
+                    dedup_steps[idx] = su
+                else:
+                    c = _extract_content_text(su.get("content") if "content" in su else su.get("response"))
+                    if c:
+                        direct_contents.append(c)
+        elif ev_type == "agent_response" or ev.get("step_type") == "agent_response":
+            delta = ev.get("text_delta")
+            if isinstance(delta, str) and delta:
+                text_deltas.append(delta)
+            else:
+                c = _extract_content_text(ev.get("content") if "content" in ev else ev.get("response"))
+                if c:
+                    direct_contents.append(c)
+
+    if result_response is not None:
+        plan_text = result_response
+    elif text_deltas:
+        plan_text = "".join(text_deltas)
+    else:
+        step_texts = [
+            _extract_content_text(su.get("content") if "content" in su else su.get("response"))
+            for _, su in sorted(dedup_steps.items(), key=lambda kv: str(kv[0]))
+        ]
+        step_texts = [t for t in step_texts if t]
+        plan_text = "".join(step_texts) if step_texts else "".join(direct_contents)
+
+    plan_text = plan_text.strip()
+    if len(plan_text) > max_chars:
+        return plan_text[:max_chars], True
+    return plan_text, False
+
+
+def _extract_phase_context_metrics(lines: List[str]) -> Tuple[Optional[int], List[int]]:
+    """Return ``(initial_context_tokens, turn2_plus_fresh_inputs)`` from agent_response steps."""
+    raw_lines = ledger._iter_ndjson_lines(lines)
+    ordered_steps = ledger._deduplicate_step_updates(raw_lines)
+    calls = [
+        step["usage"]
+        for step in ordered_steps
+        if step.get("step_type") == "agent_response" and isinstance(step.get("usage"), dict)
+    ]
+    context_totals: List[int] = []
+    for u in calls:
+        inp = u.get("input_tokens")
+        cr = u.get("cache_read_tokens")
+        if ledger._is_numeric_nonbool(inp) or ledger._is_numeric_nonbool(cr):
+            context_totals.append(
+                (int(inp) if ledger._is_numeric_nonbool(inp) else 0)
+                + (int(cr) if ledger._is_numeric_nonbool(cr) else 0)
+            )
+    initial_context = context_totals[0] if context_totals else None
+
+    valid_input_calls = [u for u in calls if ledger._is_numeric_nonbool(u.get("input_tokens"))]
+    if len(valid_input_calls) >= 2:
+        turn2_inputs = [
+            int(u["input_tokens"])
+            for u in calls[1:]
+            if ledger._is_numeric_nonbool(u.get("input_tokens"))
+        ]
+    else:
+        turn2_inputs = []
+    return initial_context, turn2_inputs
+
+
+def _invoke_cli_phase(
+    cmd_bin: str,
+    prompt: str,
+    workspace_path: Path,
+    model: str,
+    timeout_seconds: int,
+    evidence_file: Path,
+    devin_session_id: Optional[str] = None,
+    devin_org_id: Optional[str] = None,
+    devin_api_key: Optional[str] = None,
+    acus_consumed: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Invoke a single CLI session, persist raw NDJSON, and extract parsed telemetry."""
+    cmd = [
+        cmd_bin,
+        "-p",
+        prompt,
+        "--output-format",
+        "stream-json",
+        "--model",
+        model,
+        "--dangerously-skip-permissions",
+        "--print-timeout",
+        f"{int(timeout_seconds)}s",
+    ]
+    phase_start = time.time()
+    phase_exclusions: List[str] = []
+    raw_stderr = b""
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(workspace_path),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=float(timeout_seconds) + 30.0,
+            check=False,
+        )
+        raw_stdout = proc.stdout or b""
+        raw_stderr = proc.stderr or b""
+        execution_status = "completed" if proc.returncode == 0 else "failed"
+        if execution_status == "failed":
+            phase_exclusions.append("execution_failed")
+    except subprocess.TimeoutExpired as exc:
+        raw_stdout = exc.stdout or b""
+        raw_stderr = exc.stderr or b""
+        if isinstance(raw_stdout, str):
+            raw_stdout = raw_stdout.encode("utf-8", errors="replace")
+        if isinstance(raw_stderr, str):
+            raw_stderr = raw_stderr.encode("utf-8", errors="replace")
+        execution_status = "timed_out"
+        phase_exclusions.extend(["timeout", "partial_telemetry"])
+
+    wall_duration = time.time() - phase_start
+    if isinstance(raw_stdout, str):
+        raw_stdout = raw_stdout.encode("utf-8", errors="replace")
+    if isinstance(raw_stderr, str):
+        raw_stderr = raw_stderr.encode("utf-8", errors="replace")
+    clean_bytes = raw_stdout.replace(b"\r\n", b"\n")
+    stderr_text = raw_stderr.decode("utf-8", errors="replace")
+    combined_err = (stderr_text + "\n" + clean_bytes.decode("utf-8", errors="replace")).lower()
+    quota_exhausted = bool(
+        execution_status == "failed" and any(sig in combined_err for sig in _QUOTA_SIGNALS)
+    )
+    if quota_exhausted and "quota_exhausted" not in phase_exclusions:
+        phase_exclusions.append("quota_exhausted")
+
+    evidence_file.write_bytes(clean_bytes)
+    evidence_hash = hashlib.sha256(clean_bytes).hexdigest()
+    evidence_ref = _resolve_evidence_ref(evidence_file)
+
+    stdout_lines = clean_bytes.decode("utf-8", errors="replace").splitlines()
+    cost_status: Optional[str] = None
+    try:
+        parsed = ledger.validate_and_parse_telemetry(stdout_lines)
+    except ledger.TelemetryValidationError:
+        valid_lines = []
+        for raw in stdout_lines:
+            s = raw.strip()
+            if not s:
+                continue
+            try:
+                obj = json.loads(s)
+                if isinstance(obj, dict):
+                    valid_lines.append(s)
+            except json.JSONDecodeError:
+                continue
+        parsed = ledger.validate_and_parse_telemetry(valid_lines)
+        if "partial_telemetry" not in phase_exclusions:
+            phase_exclusions.append("partial_telemetry")
+        cost_status = "incomplete"
+
+    usage = dict(parsed["usage"])
+    if not parsed["has_usage"] and execution_status in ("timed_out", "failed"):
+        partial_u = _extract_partial_step_usage(stdout_lines)
+        if partial_u is not None:
+            usage = partial_u
+            cost_status = "incomplete"
+            if "partial_telemetry" not in phase_exclusions:
+                phase_exclusions.append("partial_telemetry")
+
+    tool_metrics = ledger.extract_ndjson_tool_metrics(stdout_lines)
+    cache_diagnostics = ledger.extract_ndjson_cache_diagnostics(
+        stdout_lines,
+        tool_calls_count=tool_metrics["tool_calls_count"],
+    )
+    initial_context_tokens, turn2_fresh_inputs = _extract_phase_context_metrics(stdout_lines)
+    duration_seconds = parsed["duration_seconds"] if parsed["duration_seconds"] > 0 else wall_duration
+    num_turns = parsed["num_turns"]
+
+    resolved_acus = pricing.validate_acus_consumed(acus_consumed)
+    if resolved_acus is None:
+        resolved_acus = parsed.get("acus_consumed")
+    if resolved_acus is None:
+        resolved_devin_id = (
+            devin_session_id
+            or parsed.get("devin_session_id")
+            or os.environ.get("DEVIN_SESSION_ID")
+        )
+        resolved_org = devin_org_id or os.environ.get("DEVIN_ORG_ID")
+        resolved_key = devin_api_key or os.environ.get("DEVIN_API_KEY")
+        if resolved_devin_id and resolved_org and resolved_key:
+            try:
+                resolved_acus = fetch_devin_session_acus(
+                    devin_id=resolved_devin_id,
+                    org_id=resolved_org,
+                    api_key=resolved_key,
+                )
+            except (urllib.error.URLError, ValueError, json.JSONDecodeError, OSError) as exc:
+                warnings.warn(
+                    f"Failed to fetch Devin session ACU telemetry for {resolved_devin_id}: {exc}"
+                )
+
+    return {
+        "execution_status": execution_status,
+        "exclusion_reasons": phase_exclusions,
+        "quota_exhausted": quota_exhausted,
+        "stderr_text": stderr_text,
+        "evidence_ref": evidence_ref,
+        "evidence_hash": evidence_hash,
+        "stdout_lines": stdout_lines,
+        "cost_status": cost_status,
+        "usage": usage,
+        "tool_metrics": tool_metrics,
+        "cache_diagnostics": cache_diagnostics,
+        "initial_context_tokens": initial_context_tokens,
+        "turn2_fresh_inputs": turn2_fresh_inputs,
+        "duration_seconds": duration_seconds,
+        "num_turns": num_turns,
+        "acus_consumed": resolved_acus,
+    }
+
+
+def _combine_staged_telemetry(p1: Dict[str, Any], p2: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate Phase 1 and Phase 2 telemetry without double-counting or faking missing fields."""
+    if p2 is None:
+        p1_peak = p1["cache_diagnostics"]["peak_context_tokens"]
+        return {
+            "execution_status": p1["execution_status"],
+            "quota_exhausted": p1["quota_exhausted"],
+            "stderr_excerpt": p1["stderr_text"][:400],
+            "cost_status": p1["cost_status"],
+            "usage": dict(p1["usage"]),
+            "tool_metrics": dict(p1["tool_metrics"]),
+            "cache_diagnostics": dict(p1["cache_diagnostics"]),
+            "duration_seconds": p1["duration_seconds"],
+            "num_turns": p1["num_turns"],
+            "acus_consumed": p1["acus_consumed"],
+            "phase1_peak_context": p1_peak,
+            "phase2_initial_context": None,
+            "tokens_shed": None,
+            "phase1_tool_count": len(p1["tool_metrics"]["events"]),
+        }
+
+    u1, u2 = p1["usage"], p2["usage"]
+    combined_usage = {
+        "input_tokens": _sum_optional(u1.get("input_tokens"), u2.get("input_tokens")),
+        "output_tokens": _sum_optional(u1.get("output_tokens"), u2.get("output_tokens")),
+        "thinking_tokens": _sum_optional(u1.get("thinking_tokens"), u2.get("thinking_tokens")),
+        "cache_read_tokens": _sum_optional(u1.get("cache_read_tokens"), u2.get("cache_read_tokens")),
+        "total_tokens": _sum_optional(u1.get("total_tokens"), u2.get("total_tokens")),
+    }
+
+    tm1, tm2 = p1["tool_metrics"], p2["tool_metrics"]
+    tool_calls_count = _sum_optional(tm1.get("tool_calls_count"), tm2.get("tool_calls_count"))
+    tool_errors_count = _sum_optional(tm1.get("tool_errors_count"), tm2.get("tool_errors_count"))
+    max_streak = max(tm1["max_consecutive_tool_streak"], tm2["max_consecutive_tool_streak"])
+    loop_detected = bool(
+        max_streak >= 6
+        or (tool_errors_count is not None and tool_errors_count >= 3)
+        or tm1["loop_detected"]
+        or tm2["loop_detected"]
+    )
+    p1_events = list(tm1["events"])
+    p2_events = list(tm2["events"])
+    combined_tool_metrics = {
+        "tool_calls_count": tool_calls_count,
+        "tool_errors_count": tool_errors_count,
+        "max_consecutive_tool_streak": max_streak,
+        "loop_detected": loop_detected,
+        "events": p1_events + p2_events,
+    }
+
+    cd1, cd2 = p1["cache_diagnostics"], p2["cache_diagnostics"]
+    llm_calls_count = _sum_optional(cd1.get("llm_calls_count"), cd2.get("llm_calls_count"))
+    cache_bust_count = _sum_optional(cd1.get("cache_bust_count"), cd2.get("cache_bust_count"))
+    p1_peak = cd1.get("peak_context_tokens")
+    p2_peak = cd2.get("peak_context_tokens")
+    peak_context_tokens = max(p1_peak, p2_peak) if (p1_peak is not None and p2_peak is not None) else None
+    p2_initial = p2.get("initial_context_tokens")
+    tokens_shed = (
+        max(0, p1_peak - p2_initial)
+        if (p1_peak is not None and p2_initial is not None)
+        else None
+    )
+
+    if (
+        llm_calls_count is not None
+        and llm_calls_count > 0
+        and tool_calls_count is not None
+    ):
+        tools_per_llm_call: Optional[float] = tool_calls_count / llm_calls_count
+    else:
+        tools_per_llm_call = None
+
+    if cd1.get("llm_calls_count") is not None and cd2.get("llm_calls_count") is not None:
+        pooled_fresh = p1["turn2_fresh_inputs"] + p2["turn2_fresh_inputs"]
+        avg_fresh: Optional[float] = (sum(pooled_fresh) / len(pooled_fresh)) if pooled_fresh else None
+    else:
+        avg_fresh = None
+
+    combined_cache_diag = {
+        "llm_calls_count": llm_calls_count,
+        "peak_context_tokens": peak_context_tokens,
+        "avg_fresh_input_per_call": avg_fresh,
+        "cache_bust_count": cache_bust_count,
+        "tools_per_llm_call": tools_per_llm_call,
+    }
+
+    cost_status = "incomplete" if "incomplete" in (p1["cost_status"], p2["cost_status"]) else None
+    acus1, acus2 = p1.get("acus_consumed"), p2.get("acus_consumed")
+    combined_acus = (acus1 + acus2) if (acus1 is not None and acus2 is not None) else None
+    combined_stderr = (p2["stderr_text"] or p1["stderr_text"])[:400]
+
+    return {
+        "execution_status": p2["execution_status"],
+        "quota_exhausted": bool(p1["quota_exhausted"] or p2["quota_exhausted"]),
+        "stderr_excerpt": combined_stderr,
+        "cost_status": cost_status,
+        "usage": combined_usage,
+        "tool_metrics": combined_tool_metrics,
+        "cache_diagnostics": combined_cache_diag,
+        "duration_seconds": p1["duration_seconds"] + p2["duration_seconds"],
+        "num_turns": (p1["num_turns"] or 0) + (p2["num_turns"] or 0),
+        "acus_consumed": combined_acus,
+        "phase1_peak_context": p1_peak,
+        "phase2_initial_context": p2_initial,
+        "tokens_shed": tokens_shed,
+        "phase1_tool_count": len(p1_events),
+    }
+
+
+def _run_staged_two_phase(
+    *,
+    task_id: str,
+    arm: str,
+    run_index: int,
+    model: str,
+    cmd_bin: str,
+    timeout_seconds: int,
+    workspace: DisposableWorkspace,
+    snapshot_dir: Path,
+    pre_hash: str,
+    instructions_text: str,
+    evidence_dir: Path,
+    safe_model: str,
+    start_epoch: float,
+    devin_session_id: Optional[str] = None,
+    devin_org_id: Optional[str] = None,
+    devin_api_key: Optional[str] = None,
+    acus_consumed: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Run two-session icm_staged (Phase 1 read-only plan -> fresh-context Phase 2 exec)."""
+    ts = int(start_epoch)
+    exclusion_reasons: List[str] = []
+
+    phase1_prompt, _ = build_staged_prompts(instructions_text, workspace=snapshot_dir)
+    phase1_file = evidence_dir / f"live_{task_id}_{safe_model}_{arm}_phase1_run{run_index}_{ts}.ndjson"
+    p1 = _invoke_cli_phase(
+        cmd_bin=cmd_bin,
+        prompt=phase1_prompt,
+        workspace_path=workspace.path,
+        model=model,
+        timeout_seconds=timeout_seconds,
+        evidence_file=phase1_file,
+        devin_session_id=devin_session_id,
+        devin_org_id=devin_org_id,
+        devin_api_key=devin_api_key,
+        acus_consumed=acus_consumed,
+    )
+    _append_unique(exclusion_reasons, p1["exclusion_reasons"])
+
+    if workspace.snapshot_tree_hash() != pre_hash:
+        _append_unique(exclusion_reasons, ["phase1_mutation_violation"])
+        workspace.rollback_to_backup()
+
+    plan_text, plan_truncated = _extract_phase1_plan_text(p1["stdout_lines"])
+    if plan_truncated:
+        _append_unique(exclusion_reasons, ["phase1_plan_truncated"])
+
+    p2: Optional[Dict[str, Any]] = None
+    if p1["execution_status"] == "completed":
+        phase2_prompt = build_staged_exec_prompt(
+            instructions=instructions_text,
+            plan_text=plan_text,
+            workspace=snapshot_dir,
+        )
+        phase2_file = evidence_dir / f"live_{task_id}_{safe_model}_{arm}_phase2_run{run_index}_{ts}.ndjson"
+        p2 = _invoke_cli_phase(
+            cmd_bin=cmd_bin,
+            prompt=phase2_prompt,
+            workspace_path=workspace.path,
+            model=model,
+            timeout_seconds=timeout_seconds,
+            evidence_file=phase2_file,
+            devin_session_id=devin_session_id,
+            devin_org_id=devin_org_id,
+            devin_api_key=devin_api_key,
+            acus_consumed=acus_consumed,
+        )
+        _append_unique(exclusion_reasons, p2["exclusion_reasons"])
+
+    agg = _combine_staged_telemetry(p1, p2)
+    if acus_consumed is not None:
+        agg["acus_consumed"] = pricing.validate_acus_consumed(acus_consumed)
+
+    manifest_payload = {
+        "event": "staged_summary",
+        "phase1_ref": p1["evidence_ref"],
+        "phase1_hash": p1["evidence_hash"],
+        "phase2_ref": p2["evidence_ref"] if p2 is not None else None,
+        "phase2_hash": p2["evidence_hash"] if p2 is not None else None,
+        "phase1_peak_context": agg["phase1_peak_context"],
+        "phase2_initial_context": agg["phase2_initial_context"],
+        "tokens_shed": agg["tokens_shed"],
+    }
+    manifest_bytes = (json.dumps(manifest_payload, sort_keys=True) + "\n").encode("utf-8")
+    manifest_file = evidence_dir / f"live_{task_id}_{safe_model}_{arm}_run{run_index}_{ts}.ndjson"
+    manifest_file.write_bytes(manifest_bytes)
+    evidence_hash = hashlib.sha256(manifest_bytes).hexdigest()
+    evidence_ref = _resolve_evidence_ref(manifest_file)
+
+    context_reset_event: Optional[Dict[str, Any]] = None
+    if p2 is not None:
+        context_reset_event = {
+            "phase": "context_reset",
+            "tool_name": "context_reset",
+            "status": "DONE",
+            "diff_hash": p1["evidence_hash"],
+            "rollback_ref": json.dumps(
+                {
+                    "phase1_peak_context": agg["phase1_peak_context"],
+                    "phase2_initial_context": agg["phase2_initial_context"],
+                    "tokens_shed": agg["tokens_shed"],
+                }
+            ),
+        }
+
+    return {
+        **agg,
+        "exclusion_reasons": exclusion_reasons,
+        "evidence_ref": evidence_ref,
+        "evidence_hash": evidence_hash,
+        "phase1_ref": p1["evidence_ref"],
+        "phase1_hash": p1["evidence_hash"],
+        "phase2_ref": p2["evidence_ref"] if p2 is not None else None,
+        "phase2_hash": p2["evidence_hash"] if p2 is not None else None,
+        "context_reset_event": context_reset_event,
     }
 
 
@@ -2014,6 +2594,11 @@ def run_benchmark_live(
             f"single_file={routing_decision.single_file}, target={routing_decision.target})."
         )
     _validate_identifier(arm, "arm")
+    if routing_decision is not None:
+        contract_version = routing_decision.contract_version
+        contract_hash = routing_decision.contract_hash
+    else:
+        contract_version, contract_hash = resolve_contract_metadata(arm)
 
     evaluator_dir = task_dir / "evaluator"
     if not snapshot_dir.is_dir():
@@ -2025,10 +2610,6 @@ def run_benchmark_live(
     if not instructions_path.is_file():
         raise FileNotFoundError(f"INSTRUCTIONS.md not found in {snapshot_dir}")
     instructions_text = instructions_path.read_text(encoding="utf-8")
-    if mode is None:
-        prompt = _build_live_prompt(instructions_text, arm, workspace=snapshot_dir)
-    else:
-        prompt = build_mode_prompt(instructions_text, arm, workspace=snapshot_dir)
 
     evaluator = ProtectedEvaluator(evaluator_dir)
     run_uid = f"live_{task_id}_{os.getpid()}_{int(time.time() * 1000)}"
@@ -2045,140 +2626,81 @@ def run_benchmark_live(
         workspace.capture_backup()
         pre_hash = workspace.snapshot_tree_hash()
 
-        cmd_bin = cli_cmd
-        if not shutil.which(cli_cmd) and cli_cmd == "agy":
-            default_agy = os.path.expandvars(r"%LOCALAPPDATA%\agy\bin\agy.exe")
-            if os.path.exists(default_agy):
-                cmd_bin = default_agy
-
-        cmd = [
-            cmd_bin,
-            "-p",
-            prompt,
-            "--output-format",
-            "stream-json",
-            "--model",
-            model,
-            "--dangerously-skip-permissions",
-            "--print-timeout",
-            f"{int(timeout_seconds)}s",
-        ]
-
-        start_epoch = time.time()
-        start_ts = datetime.now(timezone.utc).isoformat()
-        exclusion_reasons: List[str] = []
-
-        raw_stderr = b""
-        try:
-            proc = subprocess.run(
-                cmd,
-                cwd=str(workspace.path),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=float(timeout_seconds) + 30.0,
-                check=False,
-            )
-            raw_stdout = proc.stdout or b""
-            raw_stderr = proc.stderr or b""
-            execution_status = "completed" if proc.returncode == 0 else "failed"
-            if execution_status == "failed":
-                exclusion_reasons.append("execution_failed")
-        except subprocess.TimeoutExpired as exc:
-            raw_stdout = exc.stdout or b""
-            raw_stderr = exc.stderr or b""
-            if isinstance(raw_stdout, str):
-                raw_stdout = raw_stdout.encode("utf-8", errors="replace")
-            if isinstance(raw_stderr, str):
-                raw_stderr = raw_stderr.encode("utf-8", errors="replace")
-            execution_status = "timed_out"
-            exclusion_reasons.extend(["timeout", "partial_telemetry"])
-
-        wall_duration = time.time() - start_epoch
-        if isinstance(raw_stdout, str):
-            raw_stdout = raw_stdout.encode("utf-8", errors="replace")
-        if isinstance(raw_stderr, str):
-            raw_stderr = raw_stderr.encode("utf-8", errors="replace")
-        clean_bytes = raw_stdout.replace(b"\r\n", b"\n")
-        stderr_text = raw_stderr.decode("utf-8", errors="replace")
-        combined_err = (stderr_text + "\n" + clean_bytes.decode("utf-8", errors="replace")).lower()
-        quota_exhausted = bool(
-            execution_status == "failed"
-            and any(
-                sig in combined_err
-                for sig in ("quota", "resource_exhausted", "rate limit", "rate_limit", "429", "exhausted", "capacity")
-            )
-        )
-        if quota_exhausted and "quota_exhausted" not in exclusion_reasons:
-            exclusion_reasons.append("quota_exhausted")
-
+        cmd_bin = _resolve_cli_binary(cli_cmd)
         evidence_dir = DEFAULT_EVIDENCE_DIR
         evidence_dir.mkdir(parents=True, exist_ok=True)
         safe_model = re.sub(r"[^A-Za-z0-9._-]+", "-", model)
-        evidence_file = evidence_dir / f"live_{task_id}_{safe_model}_{arm}_run{run_index}_{int(start_epoch)}.ndjson"
-        evidence_file.write_bytes(clean_bytes)
-        evidence_hash = hashlib.sha256(clean_bytes).hexdigest()
-        try:
-            evidence_ref = evidence_file.resolve().relative_to(WORKSPACE_ROOT.resolve()).as_posix()
-        except ValueError:
-            evidence_ref = str(evidence_file)
+        start_epoch = time.time()
+        start_ts = datetime.now(timezone.utc).isoformat()
 
-        stdout_lines = clean_bytes.decode("utf-8", errors="replace").splitlines()
-        cost_status: Optional[str] = None
-        try:
-            parsed = ledger.validate_and_parse_telemetry(stdout_lines)
-        except ledger.TelemetryValidationError:
-            valid_lines = []
-            for raw in stdout_lines:
-                s = raw.strip()
-                if not s:
-                    continue
-                try:
-                    obj = json.loads(s)
-                    if isinstance(obj, dict):
-                        valid_lines.append(s)
-                except json.JSONDecodeError:
-                    continue
-            parsed = ledger.validate_and_parse_telemetry(valid_lines)
-            if "partial_telemetry" not in exclusion_reasons:
-                exclusion_reasons.append("partial_telemetry")
-            cost_status = "incomplete"
+        context_reset_event: Optional[Dict[str, Any]] = None
+        phase1_tool_count: Optional[int] = None
+        staged_meta: Dict[str, Any] = {}
 
-        usage = dict(parsed["usage"])
-        if not parsed["has_usage"] and execution_status in ("timed_out", "failed"):
-            partial_u = _extract_partial_step_usage(stdout_lines)
-            if partial_u is not None:
-                usage = partial_u
-                cost_status = "incomplete"
-                if "partial_telemetry" not in exclusion_reasons:
-                    exclusion_reasons.append("partial_telemetry")
-
-        tool_metrics = ledger.extract_ndjson_tool_metrics(stdout_lines)
-        duration_seconds = parsed["duration_seconds"] if parsed["duration_seconds"] > 0 else wall_duration
-        num_turns = parsed["num_turns"]
-
-        resolved_acus = pricing.validate_acus_consumed(acus_consumed)
-        if resolved_acus is None:
-            resolved_acus = parsed.get("acus_consumed")
-        if resolved_acus is None:
-            resolved_devin_id = (
-                devin_session_id
-                or parsed.get("devin_session_id")
-                or os.environ.get("DEVIN_SESSION_ID")
+        if arm == ICM_STAGED:
+            exec_bundle = _run_staged_two_phase(
+                task_id=task_id,
+                arm=arm,
+                run_index=run_index,
+                model=model,
+                cmd_bin=cmd_bin,
+                timeout_seconds=timeout_seconds,
+                workspace=workspace,
+                snapshot_dir=snapshot_dir,
+                pre_hash=pre_hash,
+                instructions_text=instructions_text,
+                evidence_dir=evidence_dir,
+                safe_model=safe_model,
+                start_epoch=start_epoch,
+                devin_session_id=devin_session_id,
+                devin_org_id=devin_org_id,
+                devin_api_key=devin_api_key,
+                acus_consumed=acus_consumed,
             )
-            resolved_org = devin_org_id or os.environ.get("DEVIN_ORG_ID")
-            resolved_key = devin_api_key or os.environ.get("DEVIN_API_KEY")
-            if resolved_devin_id and resolved_org and resolved_key:
-                try:
-                    resolved_acus = fetch_devin_session_acus(
-                        devin_id=resolved_devin_id,
-                        org_id=resolved_org,
-                        api_key=resolved_key,
-                    )
-                except (urllib.error.URLError, ValueError, json.JSONDecodeError, OSError) as exc:
-                    warnings.warn(
-                        f"Failed to fetch Devin session ACU telemetry for {resolved_devin_id}: {exc}"
-                    )
+            context_reset_event = exec_bundle["context_reset_event"]
+            phase1_tool_count = exec_bundle["phase1_tool_count"]
+            staged_meta = {
+                "phase1_ref": exec_bundle["phase1_ref"],
+                "phase1_hash": exec_bundle["phase1_hash"],
+                "phase2_ref": exec_bundle["phase2_ref"],
+                "phase2_hash": exec_bundle["phase2_hash"],
+                "phase1_peak_context": exec_bundle["phase1_peak_context"],
+                "phase2_initial_context": exec_bundle["phase2_initial_context"],
+                "tokens_shed": exec_bundle["tokens_shed"],
+            }
+            stderr_excerpt = exec_bundle["stderr_excerpt"]
+        else:
+            if mode is None:
+                prompt = _build_live_prompt(instructions_text, arm, workspace=snapshot_dir)
+            else:
+                prompt = build_mode_prompt(instructions_text, arm, workspace=snapshot_dir)
+            evidence_file = evidence_dir / f"live_{task_id}_{safe_model}_{arm}_run{run_index}_{int(start_epoch)}.ndjson"
+            exec_bundle = _invoke_cli_phase(
+                cmd_bin=cmd_bin,
+                prompt=prompt,
+                workspace_path=workspace.path,
+                model=model,
+                timeout_seconds=timeout_seconds,
+                evidence_file=evidence_file,
+                devin_session_id=devin_session_id,
+                devin_org_id=devin_org_id,
+                devin_api_key=devin_api_key,
+                acus_consumed=acus_consumed,
+            )
+            stderr_excerpt = exec_bundle["stderr_text"][:400]
+
+        execution_status = exec_bundle["execution_status"]
+        exclusion_reasons: List[str] = list(exec_bundle["exclusion_reasons"])
+        quota_exhausted = exec_bundle["quota_exhausted"]
+        evidence_ref = exec_bundle["evidence_ref"]
+        evidence_hash = exec_bundle["evidence_hash"]
+        cost_status = exec_bundle["cost_status"]
+        usage = exec_bundle["usage"]
+        tool_metrics = exec_bundle["tool_metrics"]
+        cache_diagnostics = exec_bundle["cache_diagnostics"]
+        duration_seconds = exec_bundle["duration_seconds"]
+        num_turns = exec_bundle["num_turns"]
+        resolved_acus = exec_bundle["acus_consumed"]
 
         post_hash = workspace.snapshot_tree_hash()
 
@@ -2249,6 +2771,13 @@ def run_benchmark_live(
                 tool_errors_count=tool_metrics["tool_errors_count"],
                 max_consecutive_tool_streak=tool_metrics["max_consecutive_tool_streak"],
                 loop_detected=tool_metrics["loop_detected"],
+                llm_calls_count=cache_diagnostics["llm_calls_count"],
+                peak_context_tokens=cache_diagnostics["peak_context_tokens"],
+                avg_fresh_input_per_call=cache_diagnostics["avg_fresh_input_per_call"],
+                cache_bust_count=cache_diagnostics["cache_bust_count"],
+                tools_per_llm_call=cache_diagnostics["tools_per_llm_call"],
+                contract_version=contract_version,
+                contract_hash=contract_hash,
                 conn=conn,
             )
 
@@ -2263,6 +2792,8 @@ def run_benchmark_live(
                 restored_hash=restored_hash,
                 start_ts=start_ts,
                 scope=scope,
+                context_reset=context_reset_event,
+                phase1_tool_count=phase1_tool_count,
             )
 
             row = dict(
@@ -2288,6 +2819,9 @@ def run_benchmark_live(
             "acus_consumed": row["acus_consumed"],
             "usage": usage,
             "tool_metrics": tool_metrics,
+            "cache_diagnostics": cache_diagnostics,
+            "contract_version": contract_version,
+            "contract_hash": contract_hash,
             "evidence_ref": evidence_ref,
             "evidence_hash": evidence_hash,
             "pre_hash": pre_hash,
@@ -2295,11 +2829,44 @@ def run_benchmark_live(
             "restored_hash": restored_hash,
             "rolled_back": rolled_back,
             "quota_exhausted": quota_exhausted,
-            "stderr_excerpt": stderr_text[:400],
+            "stderr_excerpt": stderr_excerpt,
+            "exclusion_reasons": exclusion_reasons,
             "scope": scope,
+            **staged_meta,
         }
     finally:
         workspace.cleanup()
+
+
+def run_benchmark_staged(
+    task_id: str,
+    run_index: int = 1,
+    model: str = "gemini-4-hydrogen-low",
+    cli_cmd: str = "agy",
+    timeout_seconds: int = 180,
+    db_path: Optional[Path] = None,
+    workspace_root: Optional[Path] = None,
+    devin_session_id: Optional[str] = None,
+    devin_org_id: Optional[str] = None,
+    devin_api_key: Optional[str] = None,
+    acus_consumed: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Execute a live benchmark task using the two-session ``icm_staged`` contract."""
+    return run_benchmark_live(
+        task_id=task_id,
+        arm=ICM_STAGED,
+        run_index=run_index,
+        model=model,
+        cli_cmd=cli_cmd,
+        timeout_seconds=timeout_seconds,
+        db_path=db_path,
+        workspace_root=workspace_root,
+        mode=None,
+        devin_session_id=devin_session_id,
+        devin_org_id=devin_org_id,
+        devin_api_key=devin_api_key,
+        acus_consumed=acus_consumed,
+    )
 
 
 # ---------------------------------------------------------------------------
