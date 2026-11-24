@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ArrowUpRight, FlaskConical, Sigma } from "lucide-react";
+import { ArrowUpRight, ChevronDown, FlaskConical, Search, Sigma } from "lucide-react";
 import { DashboardPayload, RunRecord, TaskSummaryItem } from "../../types";
 import {
   armNames,
@@ -72,6 +72,8 @@ function EffectBadges({ stats }: { stats: PairedStats }) {
 
 export default function Analytics({ data }: { data: DashboardPayload }) {
   const [scope, setScope] = useState<CostScope>("all");
+  const [suiteQuery, setSuiteQuery] = useState("");
+  const [showAllEffects, setShowAllEffects] = useState(false);
   const runs = data.runs || [];
   const scoped = useMemo(() => scopeRuns(runs, scope), [runs, scope]);
   const pricedCount = useMemo(
@@ -146,6 +148,18 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
   const significantCount = effectRows.filter(
     (r) => r.stats.fdrSignificant === true,
   ).length;
+  const filteredEffects = useMemo(() => {
+    const q = suiteQuery.trim().toLowerCase();
+    if (!q) return effectRows;
+    return effectRows.filter(({ task, arm, rowModel }) =>
+      `${task.task_id} ${experimentNames[task.task_id] || ""} ${arm} ${formatArm(arm)} ${rowModel}`
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [effectRows, suiteQuery]);
+  const visibleEffects = showAllEffects
+    ? filteredEffects
+    : filteredEffects.slice(0, 10);
 
   return (
     <>
@@ -163,6 +177,48 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
           {runs.length} runs · {pricedCount} priced
         </span>
       </div>
+      <details className="panel guide-disclosure">
+        <summary>
+          <span>
+            <strong>Plain-English guide to these metrics</strong> (priced vs.
+            unpriced, effect size, FDR, and ACUs)
+          </span>
+          <ChevronDown size={16} />
+        </summary>
+        <div className="guide-glossary">
+          <div>
+            <strong>Priced vs. Unpriced</strong>
+            <p>
+              Priced runs have real provider token counts mapped to an audited
+              USD rate card. Unpriced cohorts (Devin, SWE-2) track pass rate,
+              tool calls, or tokens separately so estimates never mix.
+            </p>
+          </div>
+          <div>
+            <strong>Paired Effect Size (d<sub>z</sub>)</strong>
+            <p>
+              Measures how consistent a difference is across matched runs of
+              the same task and repetition, rather than a lucky single run.
+              Suites with fewer than {MIN_PAIRS_FOR_EFFECT} pairs are marked
+              preliminary.
+            </p>
+          </div>
+          <div>
+            <strong>Benjamini-Hochberg FDR (q-value)</strong>
+            <p>
+              Adjusts p-values when testing dozens of tasks at once, reducing
+              the chance that random noise looks statistically significant.
+            </p>
+          </div>
+          <div>
+            <strong>ACUs (Agent Compute Units)</strong>
+            <p>
+              Devin&apos;s platform compute counter. Shown as metadata only and
+              never converted into fake API dollars.
+            </p>
+          </div>
+        </div>
+      </details>
       <div className="toolbar">
         <label className="select-field">
           Cost coverage
@@ -236,6 +292,28 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
               : " · 0 dropped pairs"}
           </span>
         </div>
+        <div className="analytics-table-controls">
+          <label className="search-field">
+            <Search size={16} />
+            <span className="sr-only">Filter suites</span>
+            <input
+              value={suiteQuery}
+              onChange={(event) => setSuiteQuery(event.target.value)}
+              placeholder="Filter by task, model, or arm…"
+            />
+          </label>
+          {filteredEffects.length > 10 && (
+            <button
+              type="button"
+              className="button button-outline"
+              onClick={() => setShowAllEffects((cur) => !cur)}
+            >
+              {showAllEffects
+                ? "Show top 10"
+                : `Show all ${filteredEffects.length} comparisons`}
+            </button>
+          )}
+        </div>
         <div
           className="table-scroll"
           role="region"
@@ -255,7 +333,7 @@ export default function Analytics({ data }: { data: DashboardPayload }) {
               </tr>
             </thead>
             <tbody>
-              {effectRows.map(({ task, arm, metricLabel: label, stats, pairMatch, cardKey, rowModel }) => (
+              {visibleEffects.map(({ task, arm, metricLabel: label, stats, pairMatch, cardKey, rowModel }) => (
                 <tr key={`${cardKey}::${arm}`}>
                   <th scope="row">
                     {task.task_id}
