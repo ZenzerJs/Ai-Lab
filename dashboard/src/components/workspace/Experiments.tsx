@@ -3,6 +3,8 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   FlaskConical,
   Search,
 } from "lucide-react";
@@ -10,12 +12,17 @@ import { ArmStats, DashboardPayload, TaskSummaryItem } from "../../types";
 import { armNames, experimentNames, finite, governedArm, suiteBootstrapCI } from "../../lib/workspace";
 import { isPricedRun, pairedDiffStats, suitePairsDetailed } from "../../lib/analytics";
 import { formatArm, formatCurrency, formatSignedPercent, formatTokens } from "../../lib/formatters";
-import AdaptiveICM from "./AdaptiveICM";
+
+const PAGE_SIZE = 12;
 
 export default function Experiments({ data }: { data: DashboardPayload }) {
+  const [view, setView] = useState<"runs" | "quality">("runs");
   const [query, setQuery] = useState("");
+  const [suite, setSuite] = useState<"all" | "bench" | "exp">("all");
   const [filter, setFilter] = useState("all");
   const [model, setModel] = useState("all");
+  const [page, setPage] = useState(1);
+  const [showAll, setShowAll] = useState(false);
   const models = useMemo(
     () =>
       Array.from(
@@ -60,15 +67,30 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
             (task.arms[n]?.runs || []).some(isPricedRun),
           ) ||
           (task.excluded_runs || []).some(isPricedRun);
+        const matchesSuite =
+          suite === "all" ||
+          (suite === "bench"
+            ? task.task_id.startsWith("BENCH-")
+            : task.task_id.startsWith("EXP-"));
         return (
           matches &&
+          matchesSuite &&
           (model === "all" || mdl === model) &&
           (filter === "all" ||
             (filter === "priced" ? priced : filter === "unpriced" ? !priced :
               finite(delta) && (filter === "savings" ? delta > 0 : delta < 0)))
         );
       }),
-    [data.tasks, query, filter, model],
+    [data.tasks, query, suite, filter, model],
+  );
+  const totalPages = Math.max(1, Math.ceil(tasks.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const visibleTasks = showAll
+    ? tasks
+    : tasks.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const hasQualityView = Boolean(
+    (data.operational?.has_data && data.operational.summary) ||
+      data.quality_rubric?.has_data,
   );
   return (
     <>
@@ -77,58 +99,111 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
           <div className="eyebrow">LOOK CLOSER</div>
           <h1>Every experiment tells a story.</h1>
           <p>
-            Same task. Two approaches. Explore the tradeoffs behind each result.
+            Browse individual task runs or inspect the retrospective quality
+            rubric.
           </p>
         </div>
-        <span className="badge badge-purple">
-          <FlaskConical size={14} />
-          {data.tasks?.length || 0} series · {uniqueTaskCount} tasks
-        </span>
+        <div className="experiments-head-right">
+          <span className="badge badge-purple">
+            <FlaskConical size={14} />
+            {data.tasks?.length || 0} series · {uniqueTaskCount} tasks
+          </span>
+          {hasQualityView && (
+            <div
+              className="segmented-control"
+              role="tablist"
+              aria-label="Experiment views"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === "runs"}
+                aria-pressed={view === "runs"}
+                onClick={() => setView("runs")}
+              >
+                Experiment Runs ({data.tasks?.length || 0})
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === "quality"}
+                aria-pressed={view === "quality"}
+                onClick={() => setView("quality")}
+              >
+                Quality &amp; Rubric Study
+              </button>
+            </div>
+          )}
+        </div>
       </div>
-      <AdaptiveICM data={data} />
-      <div className="toolbar">
-        <label className="search-field">
-          <Search size={18} />
-          <span className="sr-only">Search experiments</span>
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search experiments…"
-          />
-        </label>
-        <label className="select-field">
-          Model
-          <select
-            value={model}
-            onChange={(event) => setModel(event.target.value)}
-          >
-            <option value="all">All models</option>
-            {models.map((mdl) => (
-              <option key={mdl} value={mdl}>
-                {mdl}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="select-field">
-          Show
-          <select
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-          >
-            <option value="all">All results</option>
-            <option value="priced">Priced only</option>
-            <option value="unpriced">Unpriced only</option>
-            <option value="savings">Cost savings</option>
-            <option value="overhead">Cost overhead</option>
-          </select>
-        </label>
-        <span className="result-count" role="status">
-          {tasks.length} {tasks.length === 1 ? "result" : "results"}
-        </span>
-      </div>
-      <div className="experiment-list">
-        {tasks.map((task) => {
+      {view === "runs" && (
+        <>
+          <div className="toolbar">
+            <label className="search-field">
+              <Search size={18} />
+              <span className="sr-only">Search experiments</span>
+              <input
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setPage(1);
+                }}
+                placeholder="Search experiments…"
+              />
+            </label>
+            <label className="select-field">
+              Suite
+              <select
+                value={suite}
+                onChange={(event) => {
+                  setSuite(event.target.value as "all" | "bench" | "exp");
+                  setPage(1);
+                }}
+              >
+                <option value="all">All suites</option>
+                <option value="bench">BENCH (Automated)</option>
+                <option value="exp">EXP (Case Studies)</option>
+              </select>
+            </label>
+            <label className="select-field">
+              Model
+              <select
+                value={model}
+                onChange={(event) => {
+                  setModel(event.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="all">All models</option>
+                {models.map((mdl) => (
+                  <option key={mdl} value={mdl}>
+                    {mdl}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="select-field">
+              Show
+              <select
+                value={filter}
+                onChange={(event) => {
+                  setFilter(event.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="all">All results</option>
+                <option value="priced">Priced only</option>
+                <option value="unpriced">Unpriced only</option>
+                <option value="savings">Cost savings</option>
+                <option value="overhead">Cost overhead</option>
+              </select>
+            </label>
+            <span className="result-count" role="status">
+              {tasks.length} {tasks.length === 1 ? "result" : "results"}
+            </span>
+          </div>
+          <div className="experiment-list">
+            {visibleTasks.map((task) => {
           const baseline = task.arms.baseline,
             governed = governedArm(task),
             reduction = task.savings?.mean_savings_percent;
@@ -446,25 +521,72 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
             </article>
           );
         })}
-        {!tasks.length && (
-          <div className="panel empty-state">
-            <Search size={30} />
-            <h2>No matching experiments.</h2>
-            <p>Try another name or clear the filters.</p>
-            <button
-              className="button button-outline"
-              onClick={() => {
-                setQuery("");
-                setFilter("all");
-                setModel("all");
-              }}
-            >
-              Clear filters
-            </button>
+            {!tasks.length && (
+              <div className="panel empty-state">
+                <Search size={30} />
+                <h2>No matching experiments.</h2>
+                <p>Try another name or clear the filters.</p>
+                <button
+                  className="button button-outline"
+                  onClick={() => {
+                    setQuery("");
+                    setSuite("all");
+                    setFilter("all");
+                    setModel("all");
+                    setPage(1);
+                  }}
+                >
+                  Clear filters
+                </button>
+              </div>
+            )}
           </div>
-        )}
-      </div>
-      {data.operational?.has_data && data.operational.summary && (
+          {tasks.length > PAGE_SIZE && (
+            <div className="panel pagination-bar">
+              <span role="status">
+                {showAll
+                  ? `Showing all ${tasks.length} series`
+                  : `${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(currentPage * PAGE_SIZE, tasks.length)} of ${tasks.length} series`}
+              </span>
+              <div className="pagination-controls">
+                {!showAll && (
+                  <>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label="Previous page"
+                      disabled={currentPage === 1}
+                      onClick={() => setPage(currentPage - 1)}
+                    >
+                      <ChevronLeft size={18} />
+                    </button>
+                    <span>
+                      {currentPage} / {totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label="Next page"
+                      disabled={currentPage === totalPages}
+                      onClick={() => setPage(currentPage + 1)}
+                    >
+                      <ChevronRight size={18} />
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  className="button button-outline"
+                  onClick={() => setShowAll((cur) => !cur)}
+                >
+                  {showAll ? "Paginate (12/page)" : `Show all (${tasks.length})`}
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+      {view === "quality" && data.operational?.has_data && data.operational.summary && (
         <section className="panel operational-panel">
           <div className="panel-heading">
             <div>
@@ -510,7 +632,7 @@ export default function Experiments({ data }: { data: DashboardPayload }) {
           </p>
         </section>
       )}
-      {data.quality_rubric?.has_data && (
+      {view === "quality" && data.quality_rubric?.has_data && (
         <section className="panel operational-panel">
           <div className="panel-heading">
             <div>

@@ -44,6 +44,45 @@ function formatAxisX(val: number, hasPricing: boolean): string {
   return `$${val.toFixed(4)}`;
 }
 
+const VERSION_ROLES: Record<string, string> = {
+  baseline: "Plain agent prompt with no ICM rules — our reference benchmark.",
+  icm_v1: "Original 5-stage contract with written intake, plan, exec, verify, and retro files.",
+  icm_lite: "Lightweight 1-stage contract for small, single-file tasks (<150 LOC).",
+  icm_v2: "Drops stage-file paperwork and injects a compact AST symbol map.",
+  icm_v3: "Batches reads & edits into a fast 3-turn cadence with a cache-stable prefix.",
+  icm_staged: "Splits planning and editing into two fresh sessions to shed exploration bloat.",
+};
+
+function buildTakeaway(
+  cohort: LineageModelCohort,
+  baseline: LineagePoint | undefined,
+  focus: LineagePoint | undefined,
+  paretoSet: Set<string>,
+  hasPricing: boolean,
+): string {
+  const target =
+    cohort.points.find((p) => p.version === "icm_v3" && paretoSet.has(p.version)) ||
+    cohort.points.find((p) => p.version !== "baseline" && paretoSet.has(p.version)) ||
+    focus ||
+    cohort.points[cohort.points.length - 1];
+  if (!target) return "";
+  const passPct = target.pass_rate != null ? `${(target.pass_rate * 100).toFixed(1)}%` : "—";
+  if (!baseline || target.version === "baseline") {
+    return `${cohort.model}: ${target.label} passed ${target.passed_count}/${target.n_runs} tasks (${passPct}).`;
+  }
+  const basePassPct =
+    baseline.pass_rate != null ? `${(baseline.pass_rate * 100).toFixed(1)}%` : "—";
+  if (hasPricing && finite(target.mean_cost_usd) && finite(baseline.mean_cost_usd) && baseline.mean_cost_usd > 0) {
+    const pctDiff = ((target.mean_cost_usd - baseline.mean_cost_usd) / baseline.mean_cost_usd) * 100;
+    const dir = pctDiff <= 0 ? `${Math.abs(pctDiff).toFixed(1)}% cheaper` : `${Math.abs(pctDiff).toFixed(1)}% costlier`;
+    return `Takeaway for ${cohort.model}: ${target.label} averaged ${formatCurrency(target.mean_cost_usd)}/run (${dir} than Baseline's ${formatCurrency(baseline.mean_cost_usd)}) with ${target.passed_count}/${target.n_runs} passes (${passPct} vs Baseline ${basePassPct}, n=${target.n_runs}).`;
+  }
+  if (finite(target.mean_tools) && finite(baseline.mean_tools)) {
+    return `Takeaway for ${cohort.model}: ${target.label} averaged ${formatDecimal(target.mean_tools)} tool calls/run (vs Baseline's ${formatDecimal(baseline.mean_tools)}) and passed ${target.passed_count}/${target.n_runs} tasks (${passPct} vs ${basePassPct}).`;
+  }
+  return `Takeaway for ${cohort.model}: ${target.label} passed ${target.passed_count}/${target.n_runs} tasks (${passPct}).`;
+}
+
 export default function IterationLineage({ data }: { data: DashboardPayload }) {
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const cohorts = useMemo(() => resolveLineageModels(data), [data]);
@@ -384,6 +423,13 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
   };
 
   const animKey = `${activeCohort.model}-${hasPricing ? costAxis : "tools"}`;
+  const takeawayText = buildTakeaway(
+    activeCohort,
+    baselinePoint,
+    inspectedPoint,
+    paretoSet,
+    hasPricing,
+  );
 
   return (
     <section
@@ -474,14 +520,29 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
         )}
       </div>
 
+      <div className="chart-guide-bar">
+        <span>
+          <strong>How to read this chart:</strong> Each dot is a workflow version tested on the same coding tasks.{" "}
+          Move <strong>up</strong> = solves more tasks. Move <strong>left</strong> ={" "}
+          {hasPricing ? "costs less." : "uses fewer tool calls."} The green dashed line marks the best tradeoffs (Pareto frontier).
+        </span>
+      </div>
+
+      {takeawayText && (
+        <div className="lineage-takeaway" role="note">
+          <Sparkles size={15} />
+          <span>{takeawayText}</span>
+        </div>
+      )}
+
       <div className="lineage-visual-grid">
         <div className="lineage-plot-card">
           <div className="lineage-plot-head">
             <span className="lineage-optimal-hint">
               <Sparkles size={13} />
               {hasPricing
-                ? "Optimal: lower cost · higher pass rate"
-                : "Optimal: fewer tool calls · higher pass rate"}
+                ? "Top-left is best: lower cost · higher pass rate"
+                : "Top-left is best: fewer tool calls · higher pass rate"}
             </span>
             <div className="lineage-legend">
               <span>
@@ -609,7 +670,7 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                 Pass rate
               </text>
 
-              {/* Subtle optimal quadrant glow + non-overlapping label above plot top */}
+              {/* Subtle optimal quadrant glow + crisp sweet-spot pill above plot top */}
               <rect
                 x={PAD.left}
                 y={PAD.top}
@@ -618,23 +679,31 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                 fill={`url(#optimal-zone-${uid})`}
                 pointerEvents="none"
               />
-              <path
-                d="M 4 0 L 5.2 2.8 L 8 4 L 5.2 5.2 L 4 8 L 2.8 5.2 L 0 4 L 2.8 2.8 Z"
-                transform={`translate(${PAD.left}, ${PAD.top - 19})`}
-                fill="var(--sea)"
-                aria-hidden="true"
-              />
-              <text
-                x={PAD.left + 12}
-                y={PAD.top - 12}
-                textAnchor="start"
-                fill="var(--sea)"
-                fontSize="9.5"
-                fontFamily="var(--mono)"
-                fontWeight="600"
-              >
-                Optimal corner
-              </text>
+              <g transform={`translate(${PAD.left}, ${PAD.top - 24})`} pointerEvents="none">
+                <rect
+                  x="0"
+                  y="0"
+                  width={hasPricing ? 210 : 216}
+                  height="18"
+                  rx="9"
+                  fill="var(--sea-soft)"
+                  stroke="var(--sea)"
+                  strokeOpacity="0.4"
+                />
+                <text
+                  x="10"
+                  y="12.5"
+                  textAnchor="start"
+                  fill="var(--sea)"
+                  fontSize="9.5"
+                  fontFamily="var(--mono)"
+                  fontWeight="600"
+                >
+                  {hasPricing
+                    ? "★ Best: lower cost & higher pass"
+                    : "★ Best: fewer tools & higher pass"}
+                </text>
+              </g>
 
               {/* Pareto frontier dashed envelope */}
               {frontierPathD && (
@@ -1004,19 +1073,17 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
                   </div>
 
                   <div className="lineage-bar-meta mono">
-                    <span>LLM {formatDecimal(p.mean_llm_calls)}</span>
-                    <span>Tools/call {formatDecimal(p.mean_tools_per_call)}</span>
+                    <span>{formatDecimal(p.mean_llm_calls)} turns</span>
+                    <span>{formatDecimal(p.mean_tools_per_call)} tools/turn</span>
                     <span>
-                      Cache{" "}
                       {p.mean_cache_hit_ratio != null
-                        ? formatPercent(p.mean_cache_hit_ratio * 100)
-                        : "—"}
+                        ? `${formatPercent(p.mean_cache_hit_ratio * 100)} cache hit`
+                        : "Cache —"}
                     </span>
                     <span>
-                      Busts{" "}
                       {p.total_cache_busts != null
-                        ? p.total_cache_busts
-                        : "—"}
+                        ? `${p.total_cache_busts} cache resets`
+                        : "Resets —"}
                     </span>
                   </div>
                 </button>
@@ -1026,72 +1093,153 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
         </div>
       </div>
 
-      <div className="lineage-cards-grid">
-        {activeCohort.points.map((p) => {
-          const isPareto = paretoSet.has(p.version);
-          const active = inspectedPoint?.version === p.version;
-          const regressed = isRegression(p);
-          return (
-            <article
-              key={p.version}
-              className={`lineage-card ${active ? "is-active" : ""}`}
-              onClick={() =>
-                setLockedVersion((cur) => (cur === p.version ? null : p.version))
-              }
-            >
-              <div className="lineage-card-head">
-                <div>
-                  <span
-                    className={`badge ${p.version === "baseline" ? "badge-neutral" : "badge-purple"}`}
-                  >
-                    {p.label}
+      <div className="lineage-spotlight-wrap">
+        <div
+          className="lineage-version-pills"
+          role="group"
+          aria-label="Inspect workflow version"
+        >
+          {activeCohort.points.map((p) => {
+            const active = inspectedPoint?.version === p.version;
+            const isPareto = paretoSet.has(p.version);
+            return (
+              <button
+                key={p.version}
+                type="button"
+                className={`lineage-pill ${active ? "is-active" : ""}`}
+                aria-pressed={active}
+                onClick={() =>
+                  setLockedVersion((cur) => (cur === p.version ? null : p.version))
+                }
+              >
+                <span>{p.label}</span>
+                {isPareto && (
+                  <span className="lineage-pareto-chip">Pareto</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {inspectedPoint && (
+          <article className="lineage-spotlight">
+            <div className="lineage-card-head">
+              <div>
+                <span
+                  className={`badge ${inspectedPoint.version === "baseline" ? "badge-neutral" : "badge-purple"}`}
+                >
+                  {inspectedPoint.label}
+                </span>
+                {paretoSet.has(inspectedPoint.version) && (
+                  <span className="badge badge-green">Pareto optimal</span>
+                )}
+                {isRegression(inspectedPoint) && (
+                  <span className="badge badge-amber">
+                    <TrendingDown size={12} /> Higher cost
                   </span>
-                  {isPareto && (
-                    <span className="badge badge-green">Pareto</span>
-                  )}
-                  {regressed && (
-                    <span className="badge badge-amber">
-                      <TrendingDown size={12} /> Regression
+                )}
+              </div>
+              <span className="mono lineage-card-runs">
+                {inspectedPoint.passed_count}/{inspectedPoint.n_runs} passed
+                {" · "}
+                {hasPricing
+                  ? formatCurrency(inspectedPoint.mean_cost_usd)
+                  : `${formatDecimal(inspectedPoint.mean_tools)} tools`}
+                {inspectedPoint.version !== "baseline" &&
+                  finite(inspectedPoint.cost_delta_vs_baseline_pct) &&
+                  ` (${formatSignedPercent(inspectedPoint.cost_delta_vs_baseline_pct)} vs base)`}
+              </span>
+            </div>
+            {VERSION_ROLES[inspectedPoint.version] && (
+              <p className="lineage-spotlight-role">
+                {VERSION_ROLES[inspectedPoint.version]}
+              </p>
+            )}
+            {inspectedPoint.hypothesis && (
+              <p className="lineage-card-hypothesis">
+                {inspectedPoint.hypothesis}
+              </p>
+            )}
+            {inspectedPoint.changes_from_prev.length > 0 && (
+              <ul className="lineage-card-changes">
+                {inspectedPoint.changes_from_prev.map((change, i) => (
+                  <li key={i}>{change}</li>
+                ))}
+              </ul>
+            )}
+          </article>
+        )}
+
+        <details className="lineage-all-versions">
+          <summary>Compare all {activeCohort.points.length} version notes</summary>
+          <div className="lineage-cards-grid">
+            {activeCohort.points.map((p) => {
+              const isPareto = paretoSet.has(p.version);
+              const active = inspectedPoint?.version === p.version;
+              const regressed = isRegression(p);
+              return (
+                <article
+                  key={p.version}
+                  className={`lineage-card ${active ? "is-active" : ""}`}
+                  onClick={() =>
+                    setLockedVersion((cur) => (cur === p.version ? null : p.version))
+                  }
+                >
+                  <div className="lineage-card-head">
+                    <div>
+                      <span
+                        className={`badge ${p.version === "baseline" ? "badge-neutral" : "badge-purple"}`}
+                      >
+                        {p.label}
+                      </span>
+                      {isPareto && (
+                        <span className="badge badge-green">Pareto</span>
+                      )}
+                      {regressed && (
+                        <span className="badge badge-amber">
+                          <TrendingDown size={12} /> Regression
+                        </span>
+                      )}
+                    </div>
+                    <span className="mono lineage-card-runs">
+                      {p.passed_count}/{p.n_runs} passed
                     </span>
+                  </div>
+
+                  {p.hypothesis && (
+                    <p className="lineage-card-hypothesis">{p.hypothesis}</p>
                   )}
-                </div>
-                <span className="mono lineage-card-runs">
-                  {p.passed_count}/{p.n_runs} passed
-                </span>
-              </div>
 
-              {p.hypothesis && (
-                <p className="lineage-card-hypothesis">{p.hypothesis}</p>
-              )}
+                  {p.changes_from_prev.length > 0 && (
+                    <ul className="lineage-card-changes">
+                      {p.changes_from_prev.map((change, i) => (
+                        <li key={i}>{change}</li>
+                      ))}
+                    </ul>
+                  )}
 
-              {p.changes_from_prev.length > 0 && (
-                <ul className="lineage-card-changes">
-                  {p.changes_from_prev.map((change, i) => (
-                    <li key={i}>{change}</li>
-                  ))}
-                </ul>
-              )}
-
-              <div className="lineage-card-deltas mono">
-                <span>
-                  <Layers size={12} />{" "}
-                  {hasPricing
-                    ? formatCurrency(p.mean_cost_usd)
-                    : `${formatDecimal(p.mean_tools)} tools`}
-                </span>
-                <span>
-                  {p.version === "baseline"
-                    ? "Baseline anchor"
-                    : finite(p.cost_delta_vs_baseline_pct)
-                      ? `${formatSignedPercent(p.cost_delta_vs_baseline_pct)} vs base`
-                      : p.mean_cache_hit_ratio != null
-                        ? `${formatPercent(p.mean_cache_hit_ratio * 100)} cache`
-                        : "Unpriced"}
-                </span>
-              </div>
-            </article>
-          );
-        })}
+                  <div className="lineage-card-deltas mono">
+                    <span>
+                      <Layers size={12} />{" "}
+                      {hasPricing
+                        ? formatCurrency(p.mean_cost_usd)
+                        : `${formatDecimal(p.mean_tools)} tools`}
+                    </span>
+                    <span>
+                      {p.version === "baseline"
+                        ? "Baseline anchor"
+                        : finite(p.cost_delta_vs_baseline_pct)
+                          ? `${formatSignedPercent(p.cost_delta_vs_baseline_pct)} vs base`
+                          : p.mean_cache_hit_ratio != null
+                            ? `${formatPercent(p.mean_cache_hit_ratio * 100)} cache`
+                            : "Unpriced"}
+                    </span>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </details>
       </div>
     </section>
   );

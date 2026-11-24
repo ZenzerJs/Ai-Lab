@@ -22,14 +22,32 @@ import {
 import { Destination, snapshotDate } from "../../lib/workspace";
 import { ThemeToggle } from "./ThemeToggle";
 
-const navigation = [
-  { id: "overview", label: "Overview", icon: LayoutDashboard },
-  { id: "tasks", label: "Experiments", icon: FlaskConical },
-  { id: "analytics", label: "Deep analytics", icon: ChartColumn },
-  { id: "simulator", label: "Model simulator", icon: SlidersHorizontal },
-  { id: "sandboxes", label: "Sandboxes", icon: Braces },
-  { id: "audit", label: "Evidence ledger", icon: ShieldCheck },
-] as const;
+interface NavItem {
+  id: Destination;
+  label: string;
+  icon: typeof LayoutDashboard;
+}
+
+const navGroups: { heading: string; items: NavItem[] }[] = [
+  {
+    heading: "START HERE",
+    items: [
+      { id: "overview", label: "Overview", icon: LayoutDashboard },
+      { id: "tasks", label: "Experiments", icon: FlaskConical },
+    ],
+  },
+  {
+    heading: "EXPLORE & AUDIT",
+    items: [
+      { id: "analytics", label: "Deep analytics", icon: ChartColumn },
+      { id: "simulator", label: "Model simulator", icon: SlidersHorizontal },
+      { id: "sandboxes", label: "Sandboxes", icon: Braces },
+      { id: "audit", label: "Evidence ledger", icon: ShieldCheck },
+    ],
+  },
+];
+
+const navigation = navGroups.flatMap((group) => group.items);
 
 interface ShellProps {
   active: Destination;
@@ -162,19 +180,23 @@ export function Shell({
             <X size={20} />
           </button>
         </div>
-        <div className="nav-eyebrow">WORKSPACE</div>
         <nav aria-label="Main navigation">
-          {navigation.map(({ id, label, icon: Icon }) => (
-            <a
-              key={id}
-              href={`#${id}`}
-              className={`nav-item ${active === id ? "is-active" : ""}`}
-              aria-current={active === id ? "page" : undefined}
-              onClick={() => closeMenu("main")}
-            >
-              <Icon size={19} strokeWidth={1.7} />
-              <span>{label}</span>
-            </a>
+          {navGroups.map((group) => (
+            <div key={group.heading} className="nav-group">
+              <div className="nav-group-label">{group.heading}</div>
+              {group.items.map(({ id, label, icon: Icon }) => (
+                <a
+                  key={id}
+                  href={`#${id}`}
+                  className={`nav-item ${active === id ? "is-active" : ""}`}
+                  aria-current={active === id ? "page" : undefined}
+                  onClick={() => closeMenu("main")}
+                >
+                  <Icon size={19} strokeWidth={1.7} />
+                  <span>{label}</span>
+                </a>
+              ))}
+            </div>
           ))}
         </nav>
         <div className="sidebar-bottom">
