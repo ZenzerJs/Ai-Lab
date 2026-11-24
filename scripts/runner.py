@@ -2031,12 +2031,74 @@ _INFRA_ERROR_SIGNALS = (
 
 
 def _resolve_cli_binary(cli_cmd: str) -> str:
-    """Resolve the CLI executable path, checking default Windows agy install location."""
+    """Resolve a supported CLI executable path."""
     if not shutil.which(cli_cmd) and cli_cmd == "agy":
         default_agy = os.path.expandvars(r"%LOCALAPPDATA%\agy\bin\agy.exe")
         if os.path.exists(default_agy):
             return default_agy
     return cli_cmd
+
+
+def _is_codex_cli(cmd_bin: str) -> bool:
+    """Return True if cmd_bin invokes the OpenAI Codex CLI (including .cmd/.ps1 shims)."""
+    return Path(cmd_bin).stem.lower() == "codex"
+
+
+def _build_cli_command(
+    cmd_bin: str, prompt: str, workspace_path: Path, model: str, timeout_seconds: int,
+) -> List[str]:
+    """Build invocation arguments for the legacy agy and OpenAI Codex CLIs."""
+    if _is_codex_cli(cmd_bin):
+        return [
+            cmd_bin, "exec", "--json", "--cd", str(workspace_path),
+            "--sandbox", "workspace-write", "--model", model, "--ephemeral", prompt,
+        ]
+    return [
+        cmd_bin, "-p", prompt, "--output-format", "stream-json", "--model", model,
+        "--dangerously-skip-permissions", "--print-timeout", f"{int(timeout_seconds)}s",
+    ]
+
+
+def _normalize_codex_events(lines: List[str]) -> List[str]:
+    """Map Codex exec JSONL events to the common ledger telemetry schema.
+
+    Raw Codex events are retained in evidence. Cached input is reported as a
+    subset of total input, matching OpenAI pricing semantics in the ledger.
+    """
+    normalized: List[str] = []
+    turn_number = 0
+    final_usage: Optional[Dict[str, Any]] = None
+    for raw in lines:
+        try:
+            event = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(event, dict):
+            continue
+        event_type = event.get("type")
+        if event_type == "turn.started":
+            turn_number += 1
+        elif event_type == "turn.completed":
+            turn_number = max(1, turn_number)
+            usage = event.get("usage")
+            if not isinstance(usage, dict):
+                continue
+            input_tokens = usage.get("input_tokens")
+            output_tokens = usage.get("output_tokens")
+            cached = usage.get("cached_input_tokens")
+            mapped_usage = {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cache_read_tokens": cached,
+            }
+            # OpenAI pricing uses cache_read_tokens as a subset of input_tokens.
+            normalized.append(json.dumps({"type": "turn", "turn": turn_number, "usage": mapped_usage}))
+            final_usage = mapped_usage
+    if final_usage is not None:
+        normalized.append(json.dumps({
+            "type": "run_complete", "usage": final_usage, "num_turns": turn_number,
+        }))
+    return normalized
 
 
 def _resolve_evidence_ref(evidence_file: Path) -> str:
@@ -2124,6 +2186,16 @@ def _extract_phase1_plan_text(
                 c = _extract_content_text(ev.get("content") if "content" in ev else ev.get("response"))
                 if c:
                     direct_contents.append(c)
+        elif ev_type == "item.completed":
+            item = ev.get("item")
+            if isinstance(item, dict) and item.get("type") == "agent_message":
+                msg_text = item.get("text")
+                if isinstance(msg_text, str) and msg_text.strip():
+                    direct_contents.append(msg_text)
+                else:
+                    c = _extract_content_text(item.get("content"))
+                    if c:
+                        direct_contents.append(c)
 
     if result_response is not None:
         plan_text = result_response
@@ -2188,18 +2260,7 @@ def _invoke_cli_phase(
     acus_consumed: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Invoke a single CLI session, persist raw NDJSON, and extract parsed telemetry."""
-    cmd = [
-        cmd_bin,
-        "-p",
-        prompt,
-        "--output-format",
-        "stream-json",
-        "--model",
-        model,
-        "--dangerously-skip-permissions",
-        "--print-timeout",
-        f"{int(timeout_seconds)}s",
-    ]
+    cmd = _build_cli_command(cmd_bin, prompt, workspace_path, model, timeout_seconds)
     phase_start = time.time()
     phase_exclusions: List[str] = []
     raw_stderr = b""
@@ -2253,12 +2314,17 @@ def _invoke_cli_phase(
     evidence_ref = _resolve_evidence_ref(evidence_file)
 
     stdout_lines = clean_bytes.decode("utf-8", errors="replace").splitlines()
+    telemetry_lines = (
+        _normalize_codex_events(stdout_lines)
+        if _is_codex_cli(cmd_bin)
+        else stdout_lines
+    )
     cost_status: Optional[str] = None
     try:
-        parsed = ledger.validate_and_parse_telemetry(stdout_lines)
+        parsed = ledger.validate_and_parse_telemetry(telemetry_lines)
     except ledger.TelemetryValidationError:
         valid_lines = []
-        for raw in stdout_lines:
+        for raw in telemetry_lines:
             s = raw.strip()
             if not s:
                 continue
@@ -2275,7 +2341,7 @@ def _invoke_cli_phase(
 
     usage = dict(parsed["usage"])
     if not parsed["has_usage"] and execution_status in ("timed_out", "failed"):
-        partial_u = _extract_partial_step_usage(stdout_lines)
+        partial_u = _extract_partial_step_usage(telemetry_lines)
         if partial_u is not None:
             usage = partial_u
             cost_status = "incomplete"
