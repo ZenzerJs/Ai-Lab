@@ -3,6 +3,7 @@ import {
   ArrowRight,
   ArrowUpRight,
   ArrowDownRight,
+  ChevronDown,
   CircleHelp,
   Cpu,
   FlaskConical,
@@ -25,6 +26,15 @@ import {
 import { armNames, experimentNames, finite, governedArm, governedArmName } from "../../lib/workspace";
 import AdaptiveICM from "./AdaptiveICM";
 import IterationLineage from "./IterationLineage";
+
+type OverviewTab = "cost" | "models" | "multifile";
+
+const METRIC_HELPERS: Record<string, string> = {
+  cost_reduction: "Priced API spend vs. plain baseline",
+  tokens_per_pass: "Tokens used per solved task (includes failed retries)",
+  defect_rate: "Defect rate observed in operational trials",
+  cache_hit_rate: "Prompt cache reuse across governed calls",
+};
 
 function ContextOrbit() {
   return (
@@ -125,7 +135,7 @@ function Metric({ stat }: { stat: HeadlineStat }) {
   const label = isCost
     ? "Cost change vs baseline"
     : isToken
-      ? "Tokens / passing patch"
+      ? "Tokens / solved task"
       : isQuality
         ? "Governed defect rate"
         : "Governed cache hit rate";
@@ -149,6 +159,9 @@ function Metric({ stat }: { stat: HeadlineStat }) {
           {isQuality ? "Quality" : isToken ? "All models" : "Recorded"}
         </span>
       </div>
+      {METRIC_HELPERS[stat.id] && (
+        <p className="metric-helper">{METRIC_HELPERS[stat.id]}</p>
+      )}
       <div className="metric-comparison">
         <span>
           Baseline <strong>{stat.baseline}</strong>
@@ -159,10 +172,9 @@ function Metric({ stat }: { stat: HeadlineStat }) {
       </div>
       <div className="metric-foot">
         {stat.source} · {stat.n_tasks} {isToken ? "series" : "tasks"}
-        {isCost && stat.pooling_method ? ` · ${stat.pooling_method}` : ""}
         {stat.ci95 && (
           <span className="confidence">
-            95% CI (exploratory): {stat.ci95[0]}% to {stat.ci95[1]}%
+            95% CI: {stat.ci95[0]}% to {stat.ci95[1]}%
           </span>
         )}
       </div>
@@ -172,6 +184,9 @@ function Metric({ stat }: { stat: HeadlineStat }) {
 
 export function Overview({ data }: { data: DashboardPayload }) {
   const [benchModel, setBenchModel] = useState("all");
+  const [activeTab, setActiveTab] = useState<OverviewTab>("cost");
+  const [showAllPriced, setShowAllPriced] = useState(false);
+  const [showAllUnpriced, setShowAllUnpriced] = useState(false);
   const measured =
     !data.is_demo_report &&
     !data.is_simulation &&
@@ -335,6 +350,10 @@ export function Overview({ data }: { data: DashboardPayload }) {
   ).length;
   const liveRunsCount = totalRunsCount - archivedRunsCount;
   const headlineScope = data.headline?.scope;
+  const shownPricedTasks = showAllPriced ? pricedTasks : pricedTasks.slice(0, 8);
+  const shownTokenBenchTasks = showAllUnpriced
+    ? visibleTokenBenchTasks
+    : visibleTokenBenchTasks.slice(0, 8);
   return (
     <>
       <div className="page-heading">
@@ -342,8 +361,8 @@ export function Overview({ data }: { data: DashboardPayload }) {
           <div className="eyebrow">THE BIG PICTURE</div>
           <h1>Your lab, at a glance.</h1>
           <p>
-            A clearer view of what your agents spend—and what better context
-            changes.
+            Does structured context make coding agents cheaper and more reliable,
+            or just add extra steps?
           </p>
         </div>
         <span className={`badge ${measured ? "badge-green" : "badge-amber"}`}>
@@ -357,10 +376,12 @@ export function Overview({ data }: { data: DashboardPayload }) {
                 : "Measurements unavailable"}
         </span>
       </div>
-      <section className="thesis-panel">
+
+      {/* Block 1: Plain-English Intro Hero + Collapsible ICM Primer */}
+      <section className="thesis-panel intro-hero">
         <div className="thesis-copy">
           <div className="eyebrow">
-            <Orbit size={14} /> THE CONTEXT ADVANTAGE
+            <Orbit size={14} /> WHAT IS AI-LAB?
           </div>
           <h2>
             Better context.
@@ -368,28 +389,66 @@ export function Overview({ data }: { data: DashboardPayload }) {
             <span>Measurable impact.</span>
           </h2>
           <p>
-            Compare unconstrained agents with a structured approach. Follow the
-            costs, inspect the work, and make up your own mind.
+            AI-Lab tests plain agent prompts head-to-head against structured{" "}
+            <strong>ICM workflows</strong> on real multi-file coding tasks—and
+            grades every patch with hidden automated tests.
           </p>
+          <div className="intro-steps" aria-label="How every trial works">
+            <div>
+              <strong>1. Same task</strong>
+              <span>Identical prompt &amp; model, different workflow</span>
+            </div>
+            <div>
+              <strong>2. Hidden tests</strong>
+              <span>Every patch verified in a clean sandbox</span>
+            </div>
+            <div>
+              <strong>3. Honest ledger</strong>
+              <span>Live API spend kept separate from projections</span>
+            </div>
+          </div>
+        </div>
+        <div className="intro-actions">
           <a href="#tasks" className="button button-primary">
-            Explore experiments <ArrowRight size={17} />
+            Browse {uniqueTasksCount} tasks <ArrowRight size={17} />
+          </a>
+          <a href="#analytics" className="button button-outline">
+            Deep analytics <ArrowUpRight size={16} />
           </a>
         </div>
-        <ContextOrbit />
       </section>
-      <AdaptiveICM data={data} />
+
+      <details className="panel guide-disclosure">
+        <summary>
+          <span>
+            <strong>New to ICM?</strong> See how workflow versions &amp; 3-tier
+            auto-routing work
+          </span>
+          <ChevronDown size={16} />
+        </summary>
+        <div className="guide-disclosure-body">
+          <AdaptiveICM data={data} />
+          <div className="guide-orbit-row">
+            <div>
+              <h3>Original 5-stage contract (ICM v1)</h3>
+              <p>
+                Structured context organizes work into five explicit phases
+                (Intake → Plan → Execute → Verify → Reflect). Newer versions
+                (<strong>ICM v3</strong> &amp; <strong>ICM Staged</strong>)
+                streamline that ceremony into fast batched reads and edits.
+              </p>
+            </div>
+            <ContextOrbit />
+          </div>
+        </div>
+      </details>
+
+      {/* Block 2: Key Findings at a Glance */}
       <div className="section-heading results-heading">
-        <h2>What the evidence says</h2>
+        <h2>Key findings so far</h2>
         <span>
-          {headlineScope
-            ? `${headlineScope.unique_task_count} tasks · ${headlineScope.total_run_count} runs · ${headlineScope.priced_run_count} priced runs · ${headlineScope.pooling_note || headlineScope.pooling_method}`
-            : `${uniqueTasksCount} tasks · ${totalRunsCount} runs · ${pricedRunsCount} priced runs · pooled_sum (macro_average noted per task)`}
-          {archivedRunsCount > 0
-            ? ` (${liveRunsCount} live · ${archivedRunsCount} archived)`
-            : ""}
-          {unmeasuredSuites.length > 0
-            ? ` · ${unmeasuredSuites.length} suite present, unmeasured`
-            : ""}
+          {totalRunsCount} runs · {uniqueTasksCount} tasks ·{" "}
+          {modelSummaries.length || 1} models
         </span>
       </div>
       {stats.length ? (
@@ -415,562 +474,669 @@ export function Overview({ data }: { data: DashboardPayload }) {
           </a>
         </div>
       )}
+
+      <details className="scope-disclosure">
+        <summary>
+          <span>Dataset scope &amp; statistical notes</span>
+          <ChevronDown size={15} />
+        </summary>
+        <p>
+          {headlineScope
+            ? `${headlineScope.unique_task_count} tasks · ${headlineScope.total_run_count} runs · ${headlineScope.priced_run_count} priced runs · ${headlineScope.pooling_note || headlineScope.pooling_method}`
+            : `${uniqueTasksCount} tasks · ${totalRunsCount} runs · ${pricedRunsCount} priced runs · pooled_sum (macro_average noted per task)`}
+          {archivedRunsCount > 0
+            ? ` (${liveRunsCount} live · ${archivedRunsCount} archived)`
+            : ""}
+          {unmeasuredSuites.length > 0
+            ? ` · ${unmeasuredSuites.length} suite present, unmeasured`
+            : ""}
+        </p>
+      </details>
+
+      {/* Block 3: Signature Interactive Pareto / Evolution Graph */}
       <IterationLineage data={data} />
-      <div className="overview-grid">
-        <section
-          className="panel comparison-panel"
-          aria-labelledby="comparison-title"
-        >
-          <div className="panel-heading">
-            <div>
-              <h2 id="comparison-title">The cost of context</h2>
-              <p>Average cost per run, by experiment</p>
-            </div>
-            <div className="chart-legend">
-              <span>
-                <i className="legend-baseline" />
-                Baseline
-              </span>
-              {legendArms.map((n) => (
-                <span key={n}>
-                  <i className="legend-governed" />
-                  {formatArm(n)}
-                </span>
-              ))}
-            </div>
+
+      {/* Block 4: Tabbed Dive Into the Charts Hub */}
+      <section className="panel overview-hub" aria-labelledby="hub-title">
+        <div className="panel-heading overview-hub-head">
+          <div>
+            <span className="eyebrow">DIVE INTO THE DATA</span>
+            <h2 id="hub-title">Explore results by task, model, or quality</h2>
           </div>
           <div
-            className="cost-chart"
-            role="group"
-            aria-label="Cost comparison in US dollars. Values for baseline and governed runs are labeled on each row."
+            className="segmented-control"
+            role="tablist"
+            aria-label="Overview chart sections"
           >
-            {pricedTasks.map((task) => {
-              const baseline = task.arms.baseline?.mean_cost_usd;
-              const mdl = taskModel(task);
-              return (
-                <div className="chart-row" key={taskKey(task)}>
-                  <a href="#tasks" className="chart-label">
-                    {task.task_id}
-                    <span>
-                      {experimentNames[task.task_id] || "Experiment"}
-                      {multiModelTasks.has(task.task_id) && mdl
-                        ? ` · ${mdl}`
-                        : ""}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "cost"}
+              aria-pressed={activeTab === "cost"}
+              onClick={() => setActiveTab("cost")}
+            >
+              Cost by task ({pricedTasks.length})
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "models"}
+              aria-pressed={activeTab === "models"}
+              onClick={() => setActiveTab("models")}
+            >
+              By model ({modelSummaries.length})
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "multifile"}
+              aria-pressed={activeTab === "multifile"}
+              onClick={() => setActiveTab("multifile")}
+            >
+              Multi-file &amp; quality
+            </button>
+          </div>
+        </div>
+
+        {activeTab === "cost" && (
+          <div className="overview-grid hub-grid">
+            <section
+              className="comparison-panel hub-panel-inner"
+              aria-labelledby="comparison-title"
+            >
+              <div className="panel-heading">
+                <div>
+                  <h3 id="comparison-title">The cost of context</h3>
+                  <p>
+                    Average USD per run — shorter bars mean lower spend.
+                  </p>
+                </div>
+                <div className="chart-legend">
+                  <span>
+                    <i className="legend-baseline" />
+                    Baseline
+                  </span>
+                  {legendArms.map((n) => (
+                    <span key={n}>
+                      <i className="legend-governed" />
+                      {formatArm(n)}
                     </span>
-                    <span className="badge badge-purple chart-arm-badge">{formatArm(governedArmName(task))}</span>
-                  </a>
-                  <div className="chart-bars">
-                    <div className="bar-line">
-                      <span
-                        className="bar bar-baseline"
-                        style={{
-                          width: finite(baseline)
-                            ? `${Math.max(1, (baseline / maxCost) * 100)}%`
-                            : "0%",
-                        }}
-                      />
-                      <span className="bar-value">
-                        <span className="sr-only">Baseline </span>
-                        {formatCurrency(baseline)}
+                  ))}
+                </div>
+              </div>
+              <div
+                className="cost-chart"
+                role="group"
+                aria-label="Cost comparison in US dollars. Values for baseline and governed runs are labeled on each row."
+              >
+                {shownPricedTasks.map((task) => {
+                  const baseline = task.arms.baseline?.mean_cost_usd;
+                  const mdl = taskModel(task);
+                  return (
+                    <div className="chart-row" key={taskKey(task)}>
+                      <a href="#tasks" className="chart-label">
+                        {task.task_id}
+                        <span>
+                          {experimentNames[task.task_id] || "Experiment"}
+                          {multiModelTasks.has(task.task_id) && mdl
+                            ? ` · ${mdl}`
+                            : ""}
+                        </span>
+                        <span className="badge badge-purple chart-arm-badge">{formatArm(governedArmName(task))}</span>
+                      </a>
+                      <div className="chart-bars">
+                        <div className="bar-line">
+                          <span
+                            className="bar bar-baseline"
+                            style={{
+                              width: finite(baseline)
+                                ? `${Math.max(1, (baseline / maxCost) * 100)}%`
+                                : "0%",
+                            }}
+                          />
+                          <span className="bar-value">
+                            <span className="sr-only">Baseline </span>
+                            {formatCurrency(baseline)}
+                          </span>
+                        </div>
+                        {armNames(task)
+                          .filter((n) => n !== "baseline")
+                          .map((name) => {
+                            const cost = task.arms[name]?.mean_cost_usd;
+                            return (
+                              <div className="bar-line" key={name}>
+                                <span
+                                  className="bar bar-governed"
+                                  style={{
+                                    width: finite(cost)
+                                      ? `${Math.max(1, (cost / maxCost) * 100)}%`
+                                      : "0%",
+                                  }}
+                                />
+                                <span className="bar-value">
+                                  <span className="sr-only">{formatArm(name)} </span>
+                                  {formatCurrency(cost)}
+                                </span>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  );
+                })}
+                {!pricedTasks.length && (
+                  <p className="empty-inline">
+                    No priced experiment comparisons available.
+                  </p>
+                )}
+              </div>
+              {pricedTasks.length > 8 && (
+                <div className="hub-show-more">
+                  <button
+                    type="button"
+                    className="button button-outline"
+                    onClick={() => setShowAllPriced((cur) => !cur)}
+                  >
+                    {showAllPriced
+                      ? "Show fewer tasks"
+                      : `Show all ${pricedTasks.length} priced tasks`}
+                  </button>
+                </div>
+              )}
+              <div className="panel-bottom">
+                <span>
+                  USD per run ·{" "}
+                  {measured
+                    ? "Recorded usage estimates"
+                    : "Demo / non-measured data"}
+                </span>
+                <a className="text-link" href="#tasks">
+                  View breakdown <ArrowUpRight size={15} />
+                </a>
+              </div>
+            </section>
+            <aside className="reading-panel">
+              <span className="reading-icon">
+                <CircleHelp size={22} />
+              </span>
+              <div className="eyebrow">READING THE RESULTS</div>
+              <h3>
+                The whole picture.
+                <br />
+                Not just the headline.
+              </h3>
+              <p>
+                Structure has a cost, too. Extra planning turns can outweigh
+                savings on tiny tasks, while batched workflows shine on bigger
+                ones.
+              </p>
+              <div className="reading-divider" />
+              <div className="reading-point">
+                <ArrowDownRight size={20} />
+                <div>
+                  <strong>Complex work benefits most</strong>
+                  <p>Compare each task before generalizing one number.</p>
+                </div>
+              </div>
+              <div className="reading-point">
+                <ShieldCheck size={20} />
+                <div>
+                  <strong>Quality is its own measure</strong>
+                  <p>Pass rates and rubric checks are tracked separately.</p>
+                </div>
+              </div>
+              <div className="reading-point">
+                <Cpu size={20} />
+                <div>
+                  <strong>Projections stay separate</strong>
+                  <p>
+                    Simulator rates estimate cost without faking model runs.
+                  </p>
+                </div>
+              </div>
+              <a className="text-link" href="#audit">
+                Follow the evidence <ArrowRight size={16} />
+              </a>
+            </aside>
+          </div>
+        )}
+
+        {activeTab === "models" && (
+          <div className="hub-tab-body" aria-labelledby="cross-model-title">
+            <div className="panel-heading">
+              <div>
+                <h3 id="cross-model-title">
+                  Performance &amp; token efficiency by model
+                </h3>
+                <p>
+                  Every live model tested so far. Priced models report estimated
+                  USD spend; unpriced models track pass rate, tokens, or tool
+                  calls.
+                </p>
+              </div>
+              <span className="badge badge-purple">
+                {modelSummaries.length} models · {liveRunsCount} live runs
+              </span>
+            </div>
+            {modelSummaries.length > 0 ? (
+              <div
+                className="table-scroll"
+                role="region"
+                aria-label="Cross-model performance summary"
+                tabIndex={0}
+              >
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Model</th>
+                      <th scope="col">Live runs</th>
+                      <th scope="col">Pass (Base / Gov)</th>
+                      <th scope="col">Tokens / pass (Base → Gov)</th>
+                      <th scope="col">Δ Tokens</th>
+                      <th scope="col">Tool calls (err)</th>
+                      <th scope="col">ACU (metadata)</th>
+                      <th scope="col">Priced USD (Base → Gov)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {modelSummaries.map((m) => (
+                      <tr key={m.model}>
+                        <th scope="row">{m.model}</th>
+                        <td>{m.liveRuns}</td>
+                        <td>
+                          {m.basePassed}/{m.baseTotal} / {m.govPassed}/{m.govTotal}
+                        </td>
+                        <td>
+                          {m.baseTokPass != null ? formatTokens(m.baseTokPass) : "—"}{" "}
+                          → {m.govTokPass != null ? formatTokens(m.govTokPass) : "—"}
+                        </td>
+                        <td>
+                          {m.tokDeltaPct != null ? (
+                            <span
+                              className={
+                                m.tokDeltaPct >= 0 ? "text-sea" : "text-rust"
+                              }
+                            >
+                              {m.tokDeltaPct >= 0
+                                ? `−${m.tokDeltaPct.toFixed(1)}%`
+                                : `+${Math.abs(m.tokDeltaPct).toFixed(1)}%`}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td>
+                          {m.baseTools} ({m.baseErrors}) / {m.govTools} ({m.govErrors})
+                        </td>
+                        <td>
+                          {m.acuRuns > 0 ? `${m.totalAcus.toFixed(2)} ACU` : "—"}
+                        </td>
+                        <td>
+                          {m.baseUsd != null && m.govUsd != null
+                            ? `${formatCurrency(m.baseUsd)} → ${formatCurrency(m.govUsd)}`
+                            : "Unpriced"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="empty-inline">No live model runs in this snapshot.</p>
+            )}
+          </div>
+        )}
+
+        {activeTab === "multifile" && (
+          <div className="hub-tab-body">
+            {tokenBenchTasks.length > 0 && (
+              <section
+                className="comparison-panel"
+                aria-labelledby="token-bench-title"
+              >
+                <div className="panel-heading">
+                  <div>
+                    <h3 id="token-bench-title">Multi-file benchmarks</h3>
+                    <p>
+                      Tokens per passing patch for unpriced models (shorter bars
+                      are more efficient).
+                    </p>
+                  </div>
+                  <div className="lineage-controls">
+                    {unpricedModels.length > 1 && (
+                      <label className="select-field">
+                        Model
+                        <select
+                          value={benchModel}
+                          onChange={(event) => setBenchModel(event.target.value)}
+                        >
+                          <option value="all">All models</option>
+                          {unpricedModels.map((mdl) => (
+                            <option key={mdl} value={mdl}>
+                              {mdl}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    <div className="chart-legend">
+                      <span>
+                        <i className="legend-baseline" />
+                        Baseline
+                      </span>
+                      <span>
+                        <i className="legend-governed" />
+                        Governed
                       </span>
                     </div>
-                    {armNames(task)
-                      .filter((n) => n !== "baseline")
-                      .map((name) => {
-                        const cost = task.arms[name]?.mean_cost_usd;
-                        return (
-                          <div className="bar-line" key={name}>
+                  </div>
+                </div>
+                <div
+                  className="cost-chart cost-chart-tokens"
+                  role="group"
+                  aria-label="Tokens per passing patch comparison for multi-file benchmarks."
+                >
+                  {shownTokenBenchTasks.map((task) => {
+                    const bArm = task.arms.baseline,
+                      gArm = governedArm(task);
+                    const bTok = bArm?.tokens_per_passing_patch,
+                      gTok = gArm?.tokens_per_passing_patch;
+                    const bDenom = bArm?.evaluated_count ?? bArm?.scheduled_count;
+                    const gDenom = gArm?.evaluated_count ?? gArm?.scheduled_count;
+                    const bPass =
+                      bArm?.verified_count != null && bDenom != null
+                        ? ` (${bArm.verified_count}/${bDenom})`
+                        : "";
+                    const gPass =
+                      gArm?.verified_count != null && gDenom != null
+                        ? ` (${gArm.verified_count}/${gDenom})`
+                        : "";
+                    const mdl = taskModel(task);
+                    return (
+                      <div className="chart-row" key={taskKey(task)}>
+                        <a href="#tasks" className="chart-label">
+                          {task.task_id}
+                          <span>
+                            {experimentNames[task.task_id] || "Benchmark"}
+                            {multiModelTasks.has(task.task_id) && mdl
+                              ? ` · ${mdl}`
+                              : ""}
+                          </span>
+                          <span className="badge badge-purple chart-arm-badge">
+                            {formatArm(governedArmName(task))}
+                          </span>
+                        </a>
+                        <div className="chart-bars">
+                          <div className="bar-line">
                             <span
-                              className="bar bar-governed"
+                              className="bar bar-baseline"
                               style={{
-                                width: finite(cost)
-                                  ? `${Math.max(1, (cost / maxCost) * 100)}%`
+                                width: finite(bTok)
+                                  ? `${Math.max(1, (bTok / maxBenchTokens) * 100)}%`
                                   : "0%",
                               }}
                             />
                             <span className="bar-value">
-                              <span className="sr-only">{formatArm(name)} </span>
-                              {formatCurrency(cost)}
+                              <span className="sr-only">Baseline </span>
+                              {formatTokens(bTok)}
+                              {bPass}
                             </span>
                           </div>
-                        );
-                      })}
-                  </div>
+                          <div className="bar-line">
+                            <span
+                              className="bar bar-governed"
+                              style={{
+                                width: finite(gTok)
+                                  ? `${Math.max(1, (gTok / maxBenchTokens) * 100)}%`
+                                  : "0%",
+                              }}
+                            />
+                            <span className="bar-value">
+                              <span className="sr-only">
+                                {formatArm(governedArmName(task))}{" "}
+                              </span>
+                              {formatTokens(gTok)}
+                              {gPass}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
-            {!pricedTasks.length && (
+                {visibleTokenBenchTasks.length > 8 && (
+                  <div className="hub-show-more">
+                    <button
+                      type="button"
+                      className="button button-outline"
+                      onClick={() => setShowAllUnpriced((cur) => !cur)}
+                    >
+                      {showAllUnpriced
+                        ? "Show fewer tasks"
+                        : `Show all ${visibleTokenBenchTasks.length} unpriced series`}
+                    </button>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {data.quality_rubric?.has_data &&
+              (() => {
+                const rubric = data.quality_rubric;
+                const pctCi = rubric.quality_ci.normalized_pct;
+                const outlines = rubric.multi_file_outlines;
+                const outlineSummary =
+                  outlines && outlines.length > 0
+                    ? (() => {
+                        const totalBase = outlines.reduce(
+                          (acc, item) => acc + item.baseline_cost_usd,
+                          0,
+                        );
+                        const totalNorm = outlines.reduce(
+                          (acc, item) => acc + item.icm_cost_normalized_usd,
+                          0,
+                        );
+                        const totalRaw = outlines.reduce(
+                          (acc, item) => acc + item.icm_cost_raw_usd,
+                          0,
+                        );
+                        const normPct =
+                          totalBase > 0
+                            ? ((totalBase - totalNorm) / totalBase) * 100
+                            : null;
+                        const rawPct =
+                          totalBase > 0
+                            ? ((totalBase - totalRaw) / totalBase) * 100
+                            : null;
+                        return {
+                          count: outlines.length,
+                          totalBase,
+                          totalNorm,
+                          normPct,
+                          rawPct,
+                        };
+                      })()
+                    : null;
+                const fmtSigned = (v: number, digits = 1) =>
+                  `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`;
+                const ciAboveZero = Boolean(pctCi.ci_95 && pctCi.ci_95[0] > 0);
+                return (
+                  <section
+                    className="operational-panel hub-quality-block"
+                    aria-labelledby="quality-rubric-title"
+                  >
+                    <div className="panel-heading">
+                      <div>
+                        <span className="eyebrow">
+                          5-DIMENSION QUALITY &amp; BREAK-EVEN
+                        </span>
+                        <h3 id="quality-rubric-title">
+                          Beyond token cost: quality CIs
+                          {outlineSummary ? " & multi-file outlines" : ""}
+                        </h3>
+                        <p>
+                          {rubric.quality_ci.sample_count} paired tasks ·
+                          Pre-registered 0–25 rubric
+                          {outlineSummary ? " & multi-file outlines" : ""}
+                        </p>
+                      </div>
+                      {ciAboveZero && (
+                        <span className="badge badge-green">
+                          <ShieldCheck size={13} />
+                          95% CI above zero
+                        </span>
+                      )}
+                    </div>
+                    <div className="operational-stats">
+                      <div>
+                        <span>Mean quality gain (ICM vs Baseline)</span>
+                        <strong className="text-sea">
+                          {pctCi.mean_delta != null
+                            ? `${fmtSigned(pctCi.mean_delta)}%`
+                            : "—"}
+                        </strong>
+                        {pctCi.ci_95 && (
+                          <span>
+                            95% CI: {fmtSigned(pctCi.ci_95[0])}% to{" "}
+                            {fmtSigned(pctCi.ci_95[1])}%
+                          </span>
+                        )}
+                      </div>
+                      {outlineSummary && (
+                        <div>
+                          <span>
+                            Multi-file outline savings ({outlineSummary.count}{" "}
+                            tasks)
+                          </span>
+                          <strong className="text-sea">
+                            {outlineSummary.normPct !== null
+                              ? `${fmtSigned(outlineSummary.normPct)}%`
+                              : "—"}
+                          </strong>
+                          <span>
+                            Normalized ({formatCurrency(outlineSummary.totalBase)} →{" "}
+                            {formatCurrency(outlineSummary.totalNorm)}
+                            {outlineSummary.rawPct !== null
+                              ? ` · ${fmtSigned(outlineSummary.rawPct)}% raw`
+                              : ""}
+                            )
+                          </span>
+                        </div>
+                      )}
+                      {!outlineSummary &&
+                        tokenBenchTasks.length > 0 &&
+                        (() => {
+                          const bTpps = tokenBenchTasks
+                            .map((t) => t.arms.baseline?.tokens_per_passing_patch)
+                            .filter(finite);
+                          const gTpps = tokenBenchTasks
+                            .map((t) => governedArm(t)?.tokens_per_passing_patch)
+                            .filter(finite);
+                          const bAvg = bTpps.length
+                            ? bTpps.reduce((a, b) => a + b, 0) / bTpps.length
+                            : null;
+                          const gAvg = gTpps.length
+                            ? gTpps.reduce((a, b) => a + b, 0) / gTpps.length
+                            : null;
+                          const deltaPct =
+                            bAvg != null && bAvg > 0 && gAvg != null
+                              ? ((bAvg - gAvg) / bAvg) * 100
+                              : null;
+                          const bPass = tokenBenchTasks.reduce(
+                            (s, t) => s + (t.arms.baseline?.verified_count ?? 0),
+                            0,
+                          );
+                          const bSched = tokenBenchTasks.reduce(
+                            (s, t) =>
+                              s +
+                              (t.arms.baseline?.evaluated_count ??
+                                t.arms.baseline?.scheduled_count ??
+                                0),
+                            0,
+                          );
+                          const gPass = tokenBenchTasks.reduce(
+                            (s, t) => s + (governedArm(t)?.verified_count ?? 0),
+                            0,
+                          );
+                          const gSched = tokenBenchTasks.reduce(
+                            (s, t) =>
+                              s +
+                              (governedArm(t)?.evaluated_count ??
+                                governedArm(t)?.scheduled_count ??
+                                0),
+                            0,
+                          );
+                          return (
+                            <div>
+                              <span>
+                                Multi-file token efficiency (
+                                {tokenBenchTasks.length} tasks)
+                              </span>
+                              <strong
+                                className={
+                                  deltaPct != null && deltaPct >= 0
+                                    ? "text-sea"
+                                    : "text-rust"
+                                }
+                              >
+                                {deltaPct != null ? `${fmtSigned(deltaPct)}%` : "—"}
+                              </strong>
+                              <span>
+                                {formatTokens(bAvg)} → {formatTokens(gAvg)} tok/pass
+                                {bSched > 0 && gSched > 0
+                                  ? ` · ${gPass}/${gSched} ICM vs ${bPass}/${bSched} base`
+                                  : ""}
+                              </span>
+                            </div>
+                          );
+                        })()}
+                      {rubric.tool_errors != null && (
+                        <div>
+                          <span>Tool &amp; path execution errors</span>
+                          <strong>
+                            {rubric.tool_errors.icm} vs {rubric.tool_errors.baseline}
+                          </strong>
+                          <span>
+                            {rubric.tool_errors.reduction_percent != null
+                              ? `${rubric.tool_errors.reduction_percent.toFixed(1)}% change in DB-linked logs`
+                              : "Tracked in DB-linked logs"}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                );
+              })()}
+            {!tokenBenchTasks.length && !data.quality_rubric?.has_data && (
               <p className="empty-inline">
-                No priced experiment comparisons available.
+                No multi-file unpriced or rubric records in this snapshot.
               </p>
             )}
           </div>
-          <div className="panel-bottom">
-            <span>
-              USD per run ·{" "}
-              {measured
-                ? "Recorded usage estimates"
-                : "Demo / non-measured data"}
-            </span>
-            <a className="text-link" href="#tasks">
-              View breakdown <ArrowUpRight size={15} />
-            </a>
-          </div>
-        </section>
-        <aside className="reading-panel">
-          <span className="reading-icon">
-            <CircleHelp size={22} />
-          </span>
-          <div className="eyebrow">READING THE RESULTS</div>
-          <h2>
-            The whole picture.
-            <br />
-            Not just the headline.
-          </h2>
-          <p>
-            Structure has a cost, too. Planning and verification can outweigh
-            the savings on small tasks.
-          </p>
-          <div className="reading-divider" />
-          <div className="reading-point">
-            <ArrowDownRight size={20} />
-            <div>
-              <strong>Complex work benefits most</strong>
-              <p>Compare each task before generalizing the aggregate result.</p>
-            </div>
-          </div>
-          <div className="reading-point">
-            <ShieldCheck size={20} />
-            <div>
-              <strong>Quality is its own measure</strong>
-              <p>Defect rates come from a separate operational benchmark.</p>
-            </div>
-          </div>
-          <div className="reading-point">
-            <Cpu size={20} />
-            <div>
-              <strong>Projections stay separate</strong>
-              <p>
-                Model repricing estimates cost. It does not test another model.
-              </p>
-            </div>
-          </div>
-          <a className="text-link" href="#audit">
-            Follow the evidence <ArrowRight size={16} />
-          </a>
-        </aside>
-      </div>
-      {modelSummaries.length > 1 && (
-        <section
-          className="panel operational-panel"
-          aria-labelledby="cross-model-title"
-        >
-          <div className="panel-heading">
-            <div>
-              <span className="eyebrow">CROSS-MODEL BREAKDOWN</span>
-              <h2 id="cross-model-title">
-                Performance & token efficiency by model
-              </h2>
-              <p>
-                Live non-imported runs grouped by model; tokens/pass includes
-                tokens spent on failed runs.
-              </p>
-            </div>
-            <span className="badge badge-purple">
-              {modelSummaries.length} models · {liveRunsCount} live runs
-            </span>
-          </div>
-          <div
-            className="table-scroll"
-            role="region"
-            aria-label="Cross-model performance summary"
-            tabIndex={0}
-          >
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th scope="col">Model</th>
-                  <th scope="col">Live runs</th>
-                  <th scope="col">Pass (Base / Gov)</th>
-                  <th scope="col">Tokens / pass (Base → Gov)</th>
-                  <th scope="col">Δ Tokens</th>
-                  <th scope="col">Tool calls (err)</th>
-                  <th scope="col">ACU (metadata)</th>
-                  <th scope="col">Priced USD (Base → Gov)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {modelSummaries.map((m) => (
-                  <tr key={m.model}>
-                    <th scope="row">{m.model}</th>
-                    <td>{m.liveRuns}</td>
-                    <td>
-                      {m.basePassed}/{m.baseTotal} / {m.govPassed}/{m.govTotal}
-                    </td>
-                    <td>
-                      {m.baseTokPass != null ? formatTokens(m.baseTokPass) : "—"}{" "}
-                      → {m.govTokPass != null ? formatTokens(m.govTokPass) : "—"}
-                    </td>
-                    <td>
-                      {m.tokDeltaPct != null ? (
-                        <span
-                          className={
-                            m.tokDeltaPct >= 0 ? "text-sea" : "text-rust"
-                          }
-                        >
-                          {m.tokDeltaPct >= 0
-                            ? `−${m.tokDeltaPct.toFixed(1)}%`
-                            : `+${Math.abs(m.tokDeltaPct).toFixed(1)}%`}
-                        </span>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td>
-                      {m.baseTools} ({m.baseErrors}) / {m.govTools} ({m.govErrors}
-                      )
-                    </td>
-                    <td>
-                      {m.acuRuns > 0 ? `${m.totalAcus.toFixed(2)} ACU` : "—"}
-                    </td>
-                    <td>
-                      {m.baseUsd != null && m.govUsd != null
-                        ? `${formatCurrency(m.baseUsd)} → ${formatCurrency(m.govUsd)}`
-                        : "Unpriced"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
-      {tokenBenchTasks.length > 0 && (
-        <section
-          className="panel operational-panel comparison-panel"
-          aria-labelledby="token-bench-title"
-        >
-          <div className="panel-heading">
-            <div>
-              <h2 id="token-bench-title">Multi-file benchmarks</h2>
-              <p>
-                Tokens per passing patch (unpriced{" "}
-                {unpricedModels.length > 1 ? "models" : "model"})
-              </p>
-            </div>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "14px",
-                flexWrap: "wrap",
-              }}
-            >
-              {unpricedModels.length > 1 && (
-                <label className="select-field">
-                  Model
-                  <select
-                    value={benchModel}
-                    onChange={(event) => setBenchModel(event.target.value)}
-                  >
-                    <option value="all">All models</option>
-                    {unpricedModels.map((mdl) => (
-                      <option key={mdl} value={mdl}>
-                        {mdl}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <div className="chart-legend">
-                <span>
-                  <i className="legend-baseline" />
-                  Baseline
-                </span>
-                <span>
-                  <i className="legend-governed" />
-                  Governed
-                </span>
-              </div>
-            </div>
-          </div>
-          <div
-            className="cost-chart cost-chart-tokens"
-            role="group"
-            aria-label="Tokens per passing patch comparison for multi-file benchmarks."
-          >
-            {visibleTokenBenchTasks.map((task) => {
-              const bArm = task.arms.baseline,
-                gArm = governedArm(task);
-              const bTok = bArm?.tokens_per_passing_patch,
-                gTok = gArm?.tokens_per_passing_patch;
-              const bDenom = bArm?.evaluated_count ?? bArm?.scheduled_count;
-              const gDenom = gArm?.evaluated_count ?? gArm?.scheduled_count;
-              const bPass =
-                bArm?.verified_count != null && bDenom != null
-                  ? ` (${bArm.verified_count}/${bDenom})`
-                  : "";
-              const gPass =
-                gArm?.verified_count != null && gDenom != null
-                  ? ` (${gArm.verified_count}/${gDenom})`
-                  : "";
-              const mdl = taskModel(task);
-              return (
-                <div className="chart-row" key={taskKey(task)}>
-                  <a href="#tasks" className="chart-label">
-                    {task.task_id}
-                    <span>
-                      {experimentNames[task.task_id] || "Benchmark"}
-                      {multiModelTasks.has(task.task_id) && mdl
-                        ? ` · ${mdl}`
-                        : ""}
-                    </span>
-                    <span className="badge badge-purple chart-arm-badge">{formatArm(governedArmName(task))}</span>
-                  </a>
-                  <div className="chart-bars">
-                    <div className="bar-line">
-                      <span
-                        className="bar bar-baseline"
-                        style={{
-                          width: finite(bTok)
-                            ? `${Math.max(1, (bTok / maxBenchTokens) * 100)}%`
-                            : "0%",
-                        }}
-                      />
-                      <span className="bar-value">
-                        <span className="sr-only">Baseline </span>
-                        {formatTokens(bTok)}
-                        {bPass}
-                      </span>
-                    </div>
-                    <div className="bar-line">
-                      <span
-                        className="bar bar-governed"
-                        style={{
-                          width: finite(gTok)
-                            ? `${Math.max(1, (gTok / maxBenchTokens) * 100)}%`
-                            : "0%",
-                        }}
-                      />
-                      <span className="bar-value">
-                        <span className="sr-only">{formatArm(governedArmName(task))} </span>
-                        {formatTokens(gTok)}
-                        {gPass}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="panel-bottom">
-            <span>
-              Tokens per passing patch · rate card unpriced (excluded from USD totals)
-            </span>
-            <a className="text-link" href="#tasks">
-              View breakdown <ArrowUpRight size={15} />
-            </a>
-          </div>
-        </section>
-      )}
-      {data.quality_rubric?.has_data &&
-        (() => {
-          const rubric = data.quality_rubric;
-          const pctCi = rubric.quality_ci.normalized_pct;
-          const outlines = rubric.multi_file_outlines;
-          const outlineSummary =
-            outlines && outlines.length > 0
-              ? (() => {
-                  const totalBase = outlines.reduce(
-                    (acc, item) => acc + item.baseline_cost_usd,
-                    0,
-                  );
-                  const totalNorm = outlines.reduce(
-                    (acc, item) => acc + item.icm_cost_normalized_usd,
-                    0,
-                  );
-                  const totalRaw = outlines.reduce(
-                    (acc, item) => acc + item.icm_cost_raw_usd,
-                    0,
-                  );
-                  const normPct =
-                    totalBase > 0
-                      ? ((totalBase - totalNorm) / totalBase) * 100
-                      : null;
-                  const rawPct =
-                    totalBase > 0
-                      ? ((totalBase - totalRaw) / totalBase) * 100
-                      : null;
-                  return {
-                    count: outlines.length,
-                    totalBase,
-                    totalNorm,
-                    normPct,
-                    rawPct,
-                  };
-                })()
-              : null;
-          const fmtSigned = (v: number, digits = 1) =>
-            `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`;
-          const ciAboveZero = Boolean(pctCi.ci_95 && pctCi.ci_95[0] > 0);
-          return (
-            <section
-              className="panel operational-panel"
-              aria-labelledby="quality-rubric-title"
-            >
-              <div className="panel-heading">
-                <div>
-                  <span className="eyebrow">
-                    5-DIMENSION QUALITY & BREAK-EVEN
-                  </span>
-                  <h2 id="quality-rubric-title">
-                    Beyond token cost: quality CIs
-                    {outlineSummary ? " & multi-file outlines" : ""}
-                  </h2>
-                  <p>
-                    {rubric.quality_ci.sample_count} paired tasks ·
-                    Pre-registered 0–25 rubric
-                    {outlineSummary ? " & multi-file outlines" : ""}
-                  </p>
-                </div>
-                {ciAboveZero && (
-                  <span className="badge badge-green">
-                    <ShieldCheck size={13} />
-                    95% CI above zero
-                  </span>
-                )}
-              </div>
-              <div className="operational-stats">
-                <div>
-                  <span>Mean quality gain (ICM vs Baseline)</span>
-                  <strong className="text-sea">
-                    {pctCi.mean_delta != null
-                      ? `${fmtSigned(pctCi.mean_delta)}%`
-                      : "—"}
-                  </strong>
-                  {pctCi.ci_95 && (
-                    <span>
-                      95% CI: {fmtSigned(pctCi.ci_95[0])}% to{" "}
-                      {fmtSigned(pctCi.ci_95[1])}%
-                    </span>
-                  )}
-                </div>
-                {outlineSummary && (
-                  <div>
-                    <span>
-                      Multi-file outline savings ({outlineSummary.count} tasks)
-                    </span>
-                    <strong className="text-sea">
-                      {outlineSummary.normPct !== null
-                        ? `${fmtSigned(outlineSummary.normPct)}%`
-                        : "—"}
-                    </strong>
-                    <span>
-                      Normalized ({formatCurrency(outlineSummary.totalBase)} →{" "}
-                      {formatCurrency(outlineSummary.totalNorm)}
-                      {outlineSummary.rawPct !== null
-                        ? ` · ${fmtSigned(outlineSummary.rawPct)}% raw`
-                        : ""}
-                      )
-                    </span>
-                  </div>
-                )}
-                {!outlineSummary &&
-                  tokenBenchTasks.length > 0 &&
-                  (() => {
-                    const bTpps = tokenBenchTasks
-                      .map((t) => t.arms.baseline?.tokens_per_passing_patch)
-                      .filter(finite);
-                    const gTpps = tokenBenchTasks
-                      .map((t) => governedArm(t)?.tokens_per_passing_patch)
-                      .filter(finite);
-                    const bAvg = bTpps.length
-                      ? bTpps.reduce((a, b) => a + b, 0) / bTpps.length
-                      : null;
-                    const gAvg = gTpps.length
-                      ? gTpps.reduce((a, b) => a + b, 0) / gTpps.length
-                      : null;
-                    const deltaPct =
-                      bAvg != null && bAvg > 0 && gAvg != null
-                        ? ((bAvg - gAvg) / bAvg) * 100
-                        : null;
-                    const bPass = tokenBenchTasks.reduce(
-                      (s, t) => s + (t.arms.baseline?.verified_count ?? 0),
-                      0,
-                    );
-                    const bSched = tokenBenchTasks.reduce(
-                      (s, t) =>
-                        s +
-                        (t.arms.baseline?.evaluated_count ??
-                          t.arms.baseline?.scheduled_count ??
-                          0),
-                      0,
-                    );
-                    const gPass = tokenBenchTasks.reduce(
-                      (s, t) => s + (governedArm(t)?.verified_count ?? 0),
-                      0,
-                    );
-                    const gSched = tokenBenchTasks.reduce(
-                      (s, t) =>
-                        s +
-                        (governedArm(t)?.evaluated_count ??
-                          governedArm(t)?.scheduled_count ??
-                          0),
-                      0,
-                    );
-                    return (
-                      <div>
-                        <span>
-                          Multi-file token efficiency ({tokenBenchTasks.length}{" "}
-                          tasks)
-                        </span>
-                        <strong
-                          className={
-                            deltaPct != null && deltaPct >= 0
-                              ? "text-sea"
-                              : "text-rust"
-                          }
-                        >
-                          {deltaPct != null ? `${fmtSigned(deltaPct)}%` : "—"}
-                        </strong>
-                        <span>
-                          {formatTokens(bAvg)} → {formatTokens(gAvg)} tok/pass
-                          {bSched > 0 && gSched > 0
-                            ? ` · ${gPass}/${gSched} ICM vs ${bPass}/${bSched} base`
-                            : ""}
-                        </span>
-                      </div>
-                    );
-                  })()}
-                {rubric.tool_errors != null && (
-                  <div>
-                    <span>Tool & path execution errors</span>
-                    <strong>
-                      {rubric.tool_errors.icm} vs {rubric.tool_errors.baseline}
-                    </strong>
-                    <span>
-                      {rubric.tool_errors.reduction_percent != null
-                        ? `${rubric.tool_errors.reduction_percent.toFixed(1)}% reduction in DB-linked NDJSON logs`
-                        : "Tracked in DB-linked NDJSON logs"}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </section>
-          );
-        })()}
+        )}
+      </section>
+
+      {/* Block 5: Compact Next-Step Strip */}
       <section className="explore-strip">
         <div className="explore-strip-icon">
           <SlidersIcon />
         </div>
         <div>
-          <span className="eyebrow">YOUR NEXT QUESTION</span>
-          <h2>What would this cost on another model?</h2>
-          <p>Use the same token workload. Explore a different rate card.</p>
+          <span className="eyebrow">NEXT STEPS</span>
+          <h2>Test another rate card or inspect the raw logs</h2>
+          <p>
+            Reprice the recorded token workload on other models, or audit every
+            run in the ledger.
+          </p>
         </div>
-        <a href="#simulator" className="button button-outline">
-          Open simulator <ArrowUpRight size={17} />
-        </a>
+        <div className="explore-strip-actions">
+          <a href="#simulator" className="button button-outline">
+            Open simulator <ArrowUpRight size={17} />
+          </a>
+          <a href="#audit" className="button button-primary">
+            Evidence ledger <ArrowRight size={17} />
+          </a>
+        </div>
       </section>
     </>
   );

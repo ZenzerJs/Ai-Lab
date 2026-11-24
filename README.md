@@ -2,7 +2,7 @@
 
 # 🧪 Ai-Lab
 
-**Context, considered.**
+**Does giving an AI coding agent a structured workflow actually save tokens and prevent mistakes—or just add extra steps?**
 
 [![CI](https://github.com/ZenzerJs/Ai-Lab/actions/workflows/ci.yml/badge.svg)](https://github.com/ZenzerJs/Ai-Lab/actions/workflows/ci.yml)
 [![Dashboard](https://img.shields.io/badge/Dashboard-Live_on_GitHub_Pages-8B73E6?logo=githubpages&logoColor=white)](https://zenzerjs.github.io/Ai-Lab/)
@@ -11,183 +11,90 @@
 [![OKF](https://img.shields.io/badge/Knowledge-OKF_v0.2-8672DA)](docs/SPEC-VERSIONS.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-5470A6)](LICENSE)
 
-**[Open live project](https://zenzerjs.github.io/Ai-Lab/)**
+**[Open live dashboard](https://zenzerjs.github.io/Ai-Lab/)** · **[Test campaign playbook](experiments/ICM-v3-TEST-CAMPAIGN.md)**
 
-<img src="docs/images/screenshot.jpg" alt="Ai-Lab interface" width="900" />
+<img src="docs/images/screenshot.jpg" alt="Ai-Lab interactive research dashboard" width="900" />
 
-<sub>Live dashboard showing the published research snapshot.</sub>
+<sub>Published research dashboard built from verified trial snapshots.</sub>
 
 </div>
 
 ---
 
-## 📋 Contents
+## 💡 What Is Ai-Lab?
 
-- [Overview](#-overview)
-- [What the Evidence Says](#-what-the-evidence-says)
-- [Key Capabilities](#-key-capabilities)
-- [Architecture](#-architecture)
-- [Tech Stack](#-tech-stack)
-- [Getting Started](#-getting-started)
-- [Repository Layout](#-repository-layout)
-- [How Experiments Are Evaluated](#-how-experiments-are-evaluated)
-- [Claims, Limits & Next Steps](#-claims-limits--next-steps)
+When coding agents work on multi-file bugs, a plain prompt often burns tokens re-reading files or guessing edits. Adding structure (**Interpretable Context Methodology**, or **ICM**) can keep agents focused—but extra planning turns also cost money.
+
+Ai-Lab measures that tradeoff directly by running the **same coding tasks** on the **same model** with different workflows, then grading every patch in a clean sandbox:
+
+- **Same task, same model:** Baseline prompts run head-to-head against governed ICM contracts in randomized order.
+- **Hidden automated grading:** Every trial is checked against isolated unit and invariant tests after the run finishes.
+- **Honest accounting:** Real API dollar estimates stay strictly separated from unpriced cohorts and rate-card simulations.
 
 ---
 
-## 💡 Overview
+## 🧭 The ICM Versions at a Glance
 
-More context does not automatically mean better agent performance. Structure can reduce mistakes, but planning, re-reading, verification, and tool overhead all cost time and tokens.
+Ai-Lab evolves its workflow contracts step by step and plots every version on a **Cost vs. Pass Rate** chart:
 
-Ai-Lab studies that tradeoff. It brings together **Interpretable Context Methodology (ICM)** stage contracts, **Open Knowledge Format (OKF)** documentation, AST-based repository navigation, an A/B experiment harness, and a dashboard that separates measured outcomes from simulated pricing.
-
-| Common agent-workflow assumption | What Ai-Lab makes measurable |
-|---|---|
-| ❌ “More structure always saves tokens” | ✅ Compare **unconstrained baseline** and **governed** runs on cost, runtime, and quality |
-| ❌ “A passing agent response means the task is finished” | ✅ Use verification gates, task artifacts, and task-specific assertions |
-| ❌ “Every run is comparable” | ✅ Record prompt/model identity, run evidence, source type, and exclusions |
-| ❌ “Projected savings are real API spend” | ✅ Label **live token-based estimates** separately from **rate-card simulations** |
-| ❌ “A dashboard headline tells the whole story” | ✅ Inspect per-task deltas, confidence intervals, ledger entries, and failure cases |
-
----
-
-## 📊 What the Evidence Says
-
-> [!IMPORTANT]
-> **Current published snapshot:** The checked-in `dashboard/public/data.json` combines **782 tracked runs across 41 tasks (110 model-stratified series)** across seven models (`60` `gemini-3.8-flash-low` [50 measured live + 10 archived `imported`], `50` `gemini-4-hydrogen-low` [24 baseline, 24 `icm`, 2 `icm_lite`], `54` `gemini-4-argon-low` [26 baseline, 26 `icm`, 2 `icm_lite`], `18` `claude-sonnet-5-5-low`, `350` `swe-2-max-lightning` [158 baseline, 158 `icm`, 34 `icm_lite`], `190` `gemini-4-neon-devin` [74 baseline, 74 `icm`, 30 `icm_v2`, 12 `icm_lite`], and `60` `claude-fable-5-2-devin` [20 baseline, 20 `icm`, 20 `icm_v2`]), alongside `16` separate operational GLM runs (`ops_exp005.db`), `34` deterministic `BENCH-*` regression suites (`BENCH-001`..`BENCH-034`), and our local unit/integration/browser verification suites:
-> 1. **Priced live CLI cost snapshot (`gemini-3.8-flash-low`, `gemini-4-argon-low`, `gemini-4-hydrogen-low`, `claude-sonnet-5-5-low`, 172 measured runs):** Effort-suffix pricing (`scripts/ledger.py`) re-priced the 122 Argon/Hydrogen/Claude real-telemetry runs to `cost_status=usage_estimate`, bringing the priced measured pool to **156/172 passing (90.7%)** with **$8.1634 baseline vs. $8.0391 governed (+$0.1243 / +1.5% net USD savings across paired passing runs; macro-average across 41 tasks: +14.2% cost)** and **156 governed (`99` `icm` + `18` `icm_lite` + `39` `icm_v2`) vs. 117 baseline live tool execution errors (`−33.3%` reduction / `+33.3%` more errors in `quality_rubric.tool_errors`)** across all active DB-linked runs. Earlier `EXP-001`..`007` runs established the **~150 LOC / 2+ file break-even threshold** (**+28.1% to +64.3% savings** on multi-file architectures vs. **−200.8%** overhead on micro-tasks).
-> 2. **Cross-model multi-file + Adaptive `ICM-Lite` & `ICM v2` regression suites (`BENCH-001`..`034`):** Per-model breakdown: `gemini-4-argon-low` (`54` measured runs, `48/54` passed: `$3.6888` baseline vs. `$3.4563` governed), `gemini-4-hydrogen-low` (`50` measured runs, `49/50` passed: `$2.8255` baseline vs. `$2.7304` governed), `claude-sonnet-5-5-low` (`18` measured runs, `17/18` passed: `$0.3742` baseline vs. `$0.3411` governed), `swe-2-max-lightning` (`350` live isolated Devin trials across `BENCH-001`..`026`, `cost_status=unavailable`, graded by `ProtectedEvaluator`: `242/350` passed — `103/158` baseline, `105/158` `icm`, `34/34` `icm_lite`), and `gemini-4-neon-devin` (`190` live isolated Devin trials across `BENCH-001/004/005/006` + `BENCH-013`..`034`, `cost_status=unavailable`, graded by `ProtectedEvaluator`: `128/190` passed — `48/74` baseline, `49/74` `icm`, `19/30` `icm_v2`, `12/12` `icm_lite` — tool counts, errors, streaks, duration, and pre/post/restored hashes recomputed directly from committed `experiments/evidence/live_BENCH-*_gemini-4-neon-devin_*.ndjson`). In the 90-trial **Batch 5 ICM v2 Showdown** (`BENCH-013`..`034`, 30 matched triplets across `baseline` / `icm` / `icm_v2`), all three arms matched at **19/30 passed (63.3%)**, while `icm_v2`'s pre-injected AST repo-map + Zero-Ceremony Repro-First contract cut mean runtime by **−15.6% vs. ICM v1** (`72.2 s` vs. `85.5 s`, and `−4.2%` vs. baseline's `75.4 s`), mean turns by **−28.1% vs. ICM v1** (`5.03` vs. `7.00`), and logged NDJSON tool steps by **−23.0% vs. ICM v1** (`208` vs. `270`, and `−6.7%` vs. baseline's `223`). In the 60-trial **Batch 6 Fable 5.2 ICM v2 Showdown** (`claude-fable-5-2-devin`, `60` live isolated Devin trials on 10 hard multi-file suites `BENCH-014/017/018/021/024/027/029/030/032/034`, 20 matched triplets with 2 reps per arm, `cost_status=unavailable`, graded by `ProtectedEvaluator`, tool metrics read from committed `experiments/evidence/live_BENCH-*_claude-fable-5-2-devin_*.ndjson`), all three arms matched at **14/20 passed (70.0%)** (`BENCH-014`, `BENCH-021`, and `BENCH-024` failed in all 6 runs each), and the fixed `icm_v2` contract did not reduce overhead on this model: mean runtime `91.4 s` vs. `76.2 s` ICM v1 and `84.7 s` baseline, mean turns `5.80` vs. `4.75` vs. `4.55`, logged NDJSON tool steps `118` vs. `95` vs. `91`, and tool errors `14` vs. `2` vs. `1` (11 of the 14 are the contract's Repro-first failing test runs).
-> 3. **5-dimension quality rubric (`EXP-001`..`EXP-011`, 10 evaluated tasks):** Governed execution achieves a **+6.6% mean quality gain (95% CI: +1.6% to +13.0%)**, **+0.83 / 5.00 Design & Accessibility gain (95% CI: +0.17 to +1.50)**, while active DB-linked live tool execution errors across all 782 runs stand at **156 governed (`icm`/`icm_lite`/`icm_v2`) vs. 117 baseline** (`reduction_percent: −33.3%` in `quality_rubric.tool_errors`, driven by 39 `icm_v2` errors: 25 sandbox `filter_output.py` errors on `gemini-4-neon-devin` and 14 on `claude-fable-5-2-devin`, mostly Repro-first failing test runs).
-
-### Live-token comparison: seven tasks
-
-| Measure | Unconstrained baseline | Governed / ICM |
-|---|---:|---:|
-| Estimated total task cost | **$1.3858** | **$1.3592** |
-| Prompt cache-hit ratio | **87.8%** | **85.3%** |
-| Paired tasks represented | 7 | 7 |
-| Live-verified runs | 7 | 7 |
-
-**Net observed difference:** roughly **$0.0266 saved (1.9%)** across this specific seven-task snapshot. USD values are estimates calculated from recorded token usage and rate cards, not a statement of the user's billed API charges.
-
-### Why the per-task results matter
-
-| Task | Baseline cost | Governed cost | Result |
-|---|---:|---:|---|
-| `EXP-001` — text normalization | $0.0747 | $0.2247 | **Governed cost ~3× as much** |
-| `EXP-003` — code analysis | $0.1783 | $0.1283 | **28.1% lower estimated cost** |
-| `EXP-006` — transactional ledger | $0.5215 | $0.1861 | **64.3% lower estimated cost** |
-| `EXP-007` — API gateway topology | $0.2507 | $0.3381 | **34.8% higher estimated cost** |
-
-The honest finding is **conditional value**: workflow governance helped on some more involved tasks but added overhead to others. With only one run per arm for each task in this published snapshot, these are **descriptive comparisons**, not a robust estimate of average savings.
-
-### Separate operational benchmark: reliability vs. latency
-
-A different **GLM 5.3 Flash / FreeBuff** operational evaluation reported:
-
-| Measure | Baseline | Governed |
-|---|---:|---:|
-| Runs with observed defects | **2 of 8** | **0 of 8** |
-| Total duration | **460.6 s** | **760.0 s** |
-
-That sample shows a possible quality/reliability tradeoff alongside approximately **65% higher total duration**. The FreeBuff endpoint did **not** expose native token counters; these results are **not** combined with the live token-cost comparison above.
-
-### Multi-File Repository Outlines (`EXP-009`..`EXP-011`) & 5-Dimension Quality Rubric
-
-To test the **~150 LOC / 2+ file break-even threshold** (`docs/concepts/icm-breakeven-analysis.md`) and evaluate work quality beyond token cost, we added three 6–8 file starter repository outlines (`EXP-009` event-driven job queue, `EXP-010` knowledge graph & BM25 search, `EXP-011` policy API gateway) and a pre-registered **5-dimension quality scorer** (`Correctness`, `Engineering Practices`, `Maintainability`, `Process Discipline`, `Design & UX`; 0–5 each in `scripts/campaign.py`).
-
-#### 1. Multi-File Outline Token & Pricing Results (`EXP-009`..`EXP-011`, `gemini-3.8-flash`)
-
-| Task (6–8 Files) | Baseline Turns & Cost | ICM Turns & Cost (Raw) | ICM Cost (Cold-Start Normalized) | Net Savings (Raw / Normalized) |
-|---|---|---:|---:|---:|
-| `EXP-009` — 7-file job queue & DAG | 37 turns · **$0.2769** | 28 turns · **$0.3580** | **$0.1585** | −29.3% / **+42.8%** |
-| `EXP-010` — 8-file knowledge graph & BM25 | 15 turns · **$0.1840** | 9 turns · **$0.1222** | **$0.0580** | **+33.6% / +68.5%** |
-| `EXP-011` — 6-file policy API gateway | 20 turns · **$0.2206** | 12 turns · **$0.1670** | **$0.0815** | **+24.3% / +63.0%** |
-| **3-Task Multi-File Total** | **72 turns · $0.6814** | **49 turns · $0.6472** | **$0.2981** | **+5.0% / +56.3%** |
-
-*Note:* Across `EXP-009`..`EXP-011`, governed execution used **32% fewer turns** (49 vs. 72), **45% fewer uncached input tokens** (`126.3k` vs. `229.5k`), and **58% fewer output tokens** (`14.7k` vs. `34.8k`). Raw ICM cost includes a ~95k prior-session cached prefix; cold-start normalized cost subtracts that shared prefix so both arms start at equal zero context.
-
-#### 2. 5-Dimension Quality Sweep (`EXP-001`..`EXP-011`, $n = 10$ Evaluated Tasks)
-
-While pooled cost across the original 7 tasks had a wide confidence interval crossing zero (−68.3% to +41.1%), the **5-dimension quality delta stays strictly positive**:
-
-| Dimension | Mean Delta ($\text{ICM} - \text{Baseline}$) | 95% Bootstrap CI | Finding |
-|---|---:|---:|---|
-| **Overall Quality (`normalized_pct`)** | **+4.1%** | **[+1.2%, +8.1%]** | Statistically significant (> 0); peak gain on `EXP-003` (+20%) and `EXP-007` (+8%) |
-| **Design & Accessibility (`0–5`, $n=6$ UI)** | **+0.83 pt** | **[+0.17, +1.50]** | Governed UIs consistently include semantic `<main>`, ARIA attributes, and richer state coverage |
-| **Live Tool Execution Errors** | **81 vs. 103** | **−21.4%** | Active DB-linked live `EXP` + `BENCH` NDJSON logs record 81 governed vs. 103 baseline tool errors |
-
-**Explore the evidence:** [Dashboard](https://zenzerjs.github.io/Ai-Lab/) · [Published data snapshot](dashboard/public/data.json) · [Quality findings](docs/concepts/quality-benchmark-findings.md) · [Break-even analysis](docs/concepts/icm-breakeven-analysis.md) · [Measurement design](docs/concepts/measurement-layer.md)
+| Version | What changed | Best suited for |
+|---|---|---|
+| **Baseline** | Plain task prompt with no ICM rules. | Reference anchor for every task. |
+| **ICM v1** | Full 5-stage pipeline (`intake → plan → exec → verify → retro`) with written stage files. | Original baseline governance study. |
+| **ICM-Lite** | Collapses all 5 stages into one compact contract. | Small single-file fixes (`<150 LOC`). |
+| **ICM v2** | Removes stage-file paperwork and injects a compact AST symbol map. | Reducing unnecessary file-read turns. |
+| **ICM v3** | Enforces a 3-turn batch-first cadence with a cache-stable repo prefix. | Medium-to-large multi-file tasks (`13–50` files). |
+| **ICM Staged** | Splits read-only planning and fresh-context execution into two sessions. | Large repositories (`>50` files) to shed exploration bloat. |
 
 ---
 
-## ✨ Key Capabilities
+## 📊 What the Data Shows So Far
 
-| Component | What it provides |
-|---|---|
-| 🧭 **ICM task lifecycle** | Structured intake → plan → execute → verify → retrospective, with an explicit human approval gate between planning and execution. |
-| 🗂️ **OKF knowledge graph** | Versioned documentation, concepts, schemas, and knowledge links to retrieve relevant context without reading the entire repository. |
-| 🌳 **AST-aware navigation** | Structural repository maps that prioritize symbols and signatures over large undirected file dumps. |
-| 🔬 **A/B experiment runner & outlines** | Repeatable task definitions (`EXP-001`..`EXP-011`), 6–8 file starter repository outlines (`scripts/scaffold_outlines.py`), and telemetry extraction. |
-| ⚖️ **5-dimension quality judge & blind A/B** | Pre-registered 0–25 workspace scorer (`score_workspace`), diff blinding (`prepare_blind_ab_packet`), and 95% bootstrap CIs (`compute_quality_ci`). |
-| 🧾 **Evidence & cost ledger** | SQLite-backed run records with source classification, SHA-256 hashes, token usage, cache readings, and estimated cost. |
-| 📊 **Interactive workspace dashboard** | Obsidian Violet light/dark research workspace with task comparisons, 5-dimension quality CIs, rate-card simulator, live sandboxes, and provenance ledger. |
-| 🛡️ **Automated quality checks** | Python unit/integration/browser suites, OKF v0.2 frontmatter linter, and filtered verification runner (`scripts/filter_output.py`). |
+The current snapshot ([`dashboard/public/data.json`](dashboard/public/data.json)) records **802 runs across 41 tasks and 7 models** (`792` live runs + `10` archived imported runs, spanning `34` automated `BENCH-*` suites and `EXP-001`..`EXP-011`).
 
-### What Ai-Lab refuses to conflate
+### Key takeaways
 
-- **Actual model runs vs. hypothetical repricing.** Model comparisons in the spend simulator are **rate-card projections**, not evidence that those other models executed the same task.
-- **Cost vs. quality.** A cheaper run can fail; a more reliable run can take longer.
-- **A published snapshot vs. real-time telemetry.** The dashboard reads exported JSON. Refreshing the page does **not** execute agents or query the private SQLite ledger.
-- **Individual wins vs. general improvement.** A large saving in one benchmark does not establish a universal benefit.
+1. **Overall v1 governance is roughly cost-neutral (`-1.5%` pooled savings):** Across `202` priced runs on 4 models, total Baseline spend was **`$8.1634`** vs. **`$8.0391`** for governed runs (`95% CI: -10.0% to +12.5%`). Early 5-stage ceremony (`ICM v1`) helped on big multi-file tasks (`EXP-003`, `EXP-006`) but added overhead on small single-file tasks.
+2. **Early `ICM v3` cuts per-run spend in half on Flash:** Across `16` live runs on `gemini-3.8-flash-low`, `ICM v3` averaged **`$0.0593/run`** (`$0.0863/pass`, `11/16` passes) compared to **`$0.1235/run`** (`$0.1560/pass`, `19/24` passes) for Baseline. *(Small early sample — expanding `icm_v3` and `icm_staged` is our top priority.)*
+3. **Priced and unpriced cohorts never mix:** Models with audited provider rate cards (`gemini-3.8-flash-low`, `gemini-4-argon-low`, `gemini-4-hydrogen-low`, `claude-sonnet-5-5-low`) contribute to USD totals; large unpriced cohorts (`swe-2-max-lightning`, `gemini-4-neon-devin`, `claude-fable-5-2-devin`) report pass rates, tokens, and tool calls separately.
+4. **Quality & scope hygiene improved in paired audits:** On the retrospective 5-dimension rubric (`TSK-025`..`TSK-027`), governed runs scored higher on Design/A11y and structure; see [quality findings](docs/concepts/quality-benchmark-findings.md) and [break-even analysis](docs/concepts/icm-breakeven-analysis.md).
+
+### Snapshot by model (live runs)
+
+| Model | Live runs | Passes | Arms tested | Billing |
+|---|---:|---:|---|---|
+| `gemini-3.8-flash-low` | 70 | 56/70 | `baseline`, `icm`, `icm_lite`, `icm_v3`, `icm_staged` | Priced USD |
+| `gemini-4-argon-low` | 54 | 48/54 | `baseline`, `icm`, `icm_lite` | Priced USD |
+| `gemini-4-hydrogen-low` | 50 | 49/50 | `baseline`, `icm`, `icm_lite` | Priced USD |
+| `claude-sonnet-5-5-low` | 18 | 17/18 | `baseline`, `icm` | Priced USD |
+| `swe-2-max-lightning` | 350 | 242/350 | `baseline`, `icm`, `icm_lite` | Unpriced |
+| `gemini-4-neon-devin` | 190 | 128/190 | `baseline`, `icm`, `icm_lite`, `icm_v2` | Unpriced |
+| `claude-fable-5-2-devin` | 60 | 42/60 | `baseline`, `icm`, `icm_v2` | Unpriced |
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ How Experiments Run
 
 ```mermaid
-flowchart TD
-    O["Operator & task definition"] --> R["A/B experiment runner"]
-    R --> B["Baseline arm<br/>unconstrained workflow"]
-    R --> G["Governed arm<br/>ICM stage contracts"]
-    K["OKF knowledge + AST tools"] --> G
-    B --> L["Verified telemetry & SQLite ledger"]
-    G --> L
-    L --> Q["5-dimension quality scorer & blind A/B judge"]
-    L --> D["Static workspace export<br/>React 18 · TypeScript · Custom SVG"]
-    Q --> D
+flowchart LR
+    T["Task & Model"] --> R["Campaign Runner"]
+    R --> B["Baseline Arm<br/>(plain prompt)"]
+    R --> G["Governed Arm<br/>(ICM v1 / Lite / v2 / v3 / Staged)"]
+    B --> E["Isolated Evaluator<br/>(hidden tests)"]
+    G --> E
+    E --> D["SQLite Ledger → Dashboard JSON"]
 ```
 
-The governed arm uses a documented task lifecycle:
-
-| Stage | Contract |
-|---|---|
-| `01_intake` | Bound scope, context, and budget |
-| `02_plan` | Define changes, tests, and approval criteria |
-| `03_exec` | Apply constrained edits and record changes |
-| `04_verify` | Run checks and capture evidence |
-| `05_retro` | Record findings for later tasks |
-
-See [architecture overview](docs/concepts/architecture-overview.md), [knowledge index](docs/index.md), and [task definitions](experiments/tasks/).
+1. **Plan:** `scripts/campaign.py plan-batch` generates a SHA-256 signed manifest with randomized arm order.
+2. **Isolate:** `scripts/runner.py` creates a fresh disposable worktree per run so agents cannot see hidden evaluator tests or host `.git` history.
+3. **Verify:** An independent evaluator grades the saved patch and logs tokens, cache reads, tool calls, and pass/fail status to SQLite (`data/usage.db`).
+4. **Publish:** `dashboard/build_data.py` exports the sanitized snapshot to `dashboard/public/data.json`.
 
 ---
 
-## 🧱 Tech Stack
+## 🚀 Quickstart
 
-| Layer | Technology |
-|---|---|
-| Agent methods | ICM 5-stage contracts, OKF v0.2 knowledge graph, break-even complexity law |
-| Research & grading scripts | Python 3.11+, AST (`ast` / Tree-sitter), `tiktoken`, 5-dimension rubric & blind A/B judge |
-| Experiment evidence | JSON/NDJSON streams, SQLite ledger, SHA-256 provenance, 95% bootstrap CIs |
-| Dashboard workspace | Vite, React 18, TypeScript, custom CSS token system (Obsidian Violet light/dark), bespoke SVG charts |
-| Testing | pytest (unit, integration, snapshot, rubric), Playwright browser suites, GitHub Actions |
-| Publication | Static GitHub Pages snapshot (`dashboard/public/data.json`) |
-
----
-
-## 🚀 Getting Started
-
-### 1. Explore the dashboard
+### 1. View the dashboard locally (no API keys needed)
 
 ```bash
 git clone https://github.com/ZenzerJs/Ai-Lab.git
@@ -196,7 +103,7 @@ npm ci
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173). This serves the checked-in public data snapshot; **no paid model calls or live database are needed**.
+Open [http://localhost:5173](http://localhost:5173). It loads the checked-in `dashboard/public/data.json` snapshot.
 
 ### 2. Run the offline verification suite
 
@@ -208,25 +115,12 @@ python -m pytest tests/unit/ -v --tb=short
 python scripts/lint_frontmatter.py
 ```
 
-The CI workflow additionally verifies selected production-dashboard behavior, runs a dry-run fixture, and compiles the Vite app.
+### 3. Run new `icm_v3` / `icm_staged` test batches
 
-### 3. Work with the experiment runner (optional)
+Follow [`experiments/ICM-v3-TEST-CAMPAIGN.md`](experiments/ICM-v3-TEST-CAMPAIGN.md) for copy-paste local CLI commands (to hydrate `data/usage.db` and run matched `icm_v3` / `icm_staged` batches on `gemini-4-argon-low`, `gemini-4-hydrogen-low`, and `gemini-3.8-flash-low`) as well as prompts for ChatGPT Codex and Devin/Neon.
 
-Only in a **disposable checkout**:
-
-```bash
-python scripts/run_experiment.py --task MOCK-001 --dry-run
-```
-
-This checks mechanics using a synthetic fixture without invoking a paid model. The runner's isolation workflow can modify or clean its target worktree; inspect the task definition and target path first.
-
-### 4. Regenerate the dashboard data (optional)
-
-```bash
-python dashboard/build_data.py
-```
-
-**Warning:** The exporter **overwrites** `dashboard/public/data.json`. With no local `data/usage.db`, it can generate a demo/fixture report instead of the published empirical snapshot. Use a disposable clone or back up that file first.
+> [!CAUTION]
+> Experiment runners clone, reset, and delete temporary worktrees during isolation. **Never run live trials against a working checkout with uncommitted edits.**
 
 ---
 
@@ -234,57 +128,24 @@ python dashboard/build_data.py
 
 ```text
 Ai-Lab/
-├── .agents/
-│   ├── rules/                  # Modular ICM governance constraints
-│   └── skills/                 # Navigation and run helpers
-├── docs/                       # OKF v0.2 knowledge graph, break-even & quality findings
-├── experiments/
-│   ├── tasks/                  # Benchmark task specs (EXP-001..EXP-011)
-│   └── evidence/               # SHA-256 verified live CLI event streams (.ndjson)
-├── sandbox/                    # Interactive UI artifacts & multi-file outline runs
-├── scripts/                    # Runner, repo_map, ledger, campaign, quality rubric, outlines
-├── tasks/                      # ICM 5-stage task contracts (TSK-001..TSK-027)
-├── dashboard/
-│   ├── src/                    # Obsidian Violet React workspace (Overview, Experiments, Simulator, Sandboxes, Audit)
-│   ├── public/data.json        # Published empirical + quality rubric snapshot
-│   └── build_data.py           # SQLite & quality rubric → static JSON exporter
-├── tests/                      # Unit, integration, rubric, and Playwright browser suites
-├── config/PRICING.json         # Audited model rate cards with provenance
-└── .github/workflows/          # CI and GitHub Pages deployment
+├── contracts/                  # Versioned ICM contracts & SHA-256 registry (v1, lite, v2, v3, staged)
+├── benchmarks/                 # 34 isolated multi-file coding suites (BENCH-001..BENCH-034)
+├── experiments/                # Legacy EXP tasks, NDJSON evidence logs, & test campaign playbook
+├── scripts/                    # Experiment runner, campaign planner, AST repo map, SQLite ledger & hydrator
+├── dashboard/                  # React 18 + TypeScript research UI (Overview, Experiments, Analytics, Simulator, Sandboxes, Ledger)
+├── docs/                       # OKF v0.2 knowledge base, architecture overview & findings
+├── tasks/                      # ICM stage contracts & audit records
+└── tests/                      # Python unit, integration, and Playwright browser regression suites
 ```
 
 ---
 
-## 🔒 How Experiments Are Evaluated
+## 📚 Deep-Dive Docs
 
-The framework is designed around **same-task, same-model, same-prompt** comparisons, with run provenance and explicit exclusions:
-
-1. **Prompt/model parity:** both arms should receive the same task instructions and model.
-2. **Worktree isolation:** each trial starts from a known repository state.
-3. **Outcome evidence:** usage, duration, completion, and evaluator results are stored with source classification.
-4. **Separate accounting:** recorded token counts determine measured-workload estimates; alternate model pricing is an explicitly labelled simulation.
-5. **Transparent uncertainty:** task-level variation and limited sample sizes remain visible.
-
-> [!WARNING]
-> **Replication matters.** The experiment protocol documents a minimum of two runs per arm; the `EXP-001`..`EXP-007` live cost snapshot represents **one run per arm across seven tasks**, whereas `BENCH-002`/`003`/`007`/`008` run $n=3$ per arm on `gemini-4-hydrogen-low`. Do not describe the 7-task `EXP` slice as a replicated multi-run A/B campaign.
-
-> [!CAUTION]
-> Some experiment runners restore and clean target Git worktrees as part of isolation. **Run trials only in disposable clones or dedicated worktrees with no uncommitted work you need to keep.** Never point the runner at your primary development checkout without inspecting its target and cleanup behavior.
-
----
-
-## 🎓 Claims, Limits & Next Steps
-
-> **The product is the measurement discipline, not an attractive savings percentage.**
-
-- **Two-regime cost & token behavior (`EXP-001`..`EXP-011`, `BENCH-002`/`003`/`007`/`008`):** Pooled across the initial 7-task snapshot (`EXP-001`..`EXP-007`), estimated cost reduction is **1.9% (95% CI: −68.3% to +41.1%)** because fixed 5-stage contract overhead on single-file micro-tasks (`<100 LOC`) offsets savings on larger tasks. Above the **~150 LOC / 2+ file break-even threshold** (`EXP-003`, `EXP-006`, and multi-file `BENCH-*` regression suites on `gemini-4-hydrogen-low`), governed runs cut active live cost (`EXP-003`: −28.1%, `EXP-006`: −64.3%) and multi-file tokens/passing patch (**46,663 vs. 49,861**, −6.4%).
-- **Statistically significant quality & hygiene gains (`TSK-025`..`TSK-027`):** Evaluated across 10 paired tasks (`EXP-001`..`EXP-011`, excl. `EXP-006`) on the pre-registered 5-dimension rubric (0–25 scale), governed execution achieves a **+4.1% mean quality improvement (95% CI: +1.2% to +8.1%)**, **+0.83 / 5.00 Design & Accessibility gain (95% CI: +0.17 to +1.50)**, and **21.4% fewer active live tool execution errors** (`81` vs. `103`).
-- **Historical single-run claims (`EXP-008`):** Earlier references to `EXP-008` (64.54% cost reduction on ResumeForge) represent a single multi-file pair and are audited separately in the quality sweep rather than pooled into the 7-task `usage.db` cost aggregate.
-- **Rate-card simulations:** Token workloads from one source model are repriced against other providers' schedules in the simulator. Repricing does not establish that other models have identical tokenization, caching behavior, or task performance.
-- **Operational quality (`EXP-005` FreeBuff):** The 8-vs-8 GLM 5.3 Flash benchmark (`0/8` governed defect runs vs. `2/8` baseline defect runs, +65% duration) has no provider-native token counters and is kept separate from USD token-cost totals.
-- **Forward direction:** Expand multi-repetition campaigns ($k \ge 3$ per task) across 20+ multi-file tasks and introduce **ICM-Lite** (single-file contract) for micro-tasks below the 150 LOC break-even threshold.
-
-The most interesting question is not whether governance can make an agent look efficient once. It's **which tasks justify the extra structure, and how confidently we can tell**.
+- [Architecture overview](docs/concepts/architecture-overview.md) — Runner isolation, AST navigation, and telemetry schema
+- [ICM break-even analysis](docs/concepts/icm-breakeven-analysis.md) — Why small tasks pay overhead and multi-file tasks save tokens
+- [Quality benchmark findings](docs/concepts/quality-benchmark-findings.md) — 5-dimension rubric scoring and blind evaluation details
+- [ICM v3 & Staged test campaign](experiments/ICM-v3-TEST-CAMPAIGN.md) — Priority runs, local commands, and Codex/Neon prompts
 
 <div align="center">
 
