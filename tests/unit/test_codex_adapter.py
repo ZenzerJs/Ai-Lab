@@ -13,6 +13,8 @@ def test_codex_command_uses_exec_json_and_workspace_write():
 
     assert command[:2] == ["codex", "exec"]
     assert "--json" in command
+    assert "--skip-git-repo-check" in command
+    assert "--add-dir" in command
     assert "--sandbox" in command
     assert "workspace-write" in command
     assert "--model" in command
@@ -27,6 +29,7 @@ def test_codex_turn_usage_maps_to_ledger_cumulative_schema():
             "input_tokens": 1200,
             "cached_input_tokens": 800,
             "output_tokens": 240,
+            "reasoning_output_tokens": 115,
         }}),
     ]
 
@@ -37,6 +40,7 @@ def test_codex_turn_usage_maps_to_ledger_cumulative_schema():
     assert parsed["usage"]["input_tokens"] == 1200
     assert parsed["usage"]["cache_read_tokens"] == 800
     assert parsed["usage"]["output_tokens"] == 240
+    assert parsed["usage"]["thinking_tokens"] == 115
     assert parsed["num_turns"] == 1
 
 

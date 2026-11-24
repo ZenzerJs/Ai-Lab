@@ -2051,7 +2051,8 @@ def _build_cli_command(
     """Build invocation arguments for the legacy agy and OpenAI Codex CLIs."""
     if _is_codex_cli(cmd_bin):
         return [
-            cmd_bin, "exec", "--json", "--cd", str(workspace_path),
+            cmd_bin, "exec", "--json", "--skip-git-repo-check",
+            "--cd", str(workspace_path), "--add-dir", str(workspace_path),
             "--sandbox", "workspace-write", "--model", model, "--ephemeral", prompt,
         ]
     return [
@@ -2091,6 +2092,7 @@ def _normalize_codex_events(lines: List[str]) -> List[str]:
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
                 "cache_read_tokens": cached,
+                "thinking_tokens": usage.get("reasoning_output_tokens"),
             }
             # OpenAI pricing uses cache_read_tokens as a subset of input_tokens.
             normalized.append(json.dumps({"type": "turn", "turn": turn_number, "usage": mapped_usage}))
@@ -2321,8 +2323,11 @@ def _invoke_cli_phase(
         else stdout_lines
     )
     cost_status: Optional[str] = None
+    adapter_name = "subset" if _is_codex_cli(cmd_bin) else None
     try:
-        parsed = ledger.validate_and_parse_telemetry(telemetry_lines)
+        parsed = ledger.validate_and_parse_telemetry(
+            telemetry_lines, adapter_name=adapter_name
+        )
     except ledger.TelemetryValidationError:
         valid_lines = []
         for raw in telemetry_lines:
@@ -2335,7 +2340,9 @@ def _invoke_cli_phase(
                     valid_lines.append(s)
             except json.JSONDecodeError:
                 continue
-        parsed = ledger.validate_and_parse_telemetry(valid_lines)
+        parsed = ledger.validate_and_parse_telemetry(
+            valid_lines, adapter_name=adapter_name
+        )
         if "partial_telemetry" not in phase_exclusions:
             phase_exclusions.append("partial_telemetry")
         cost_status = "incomplete"
