@@ -89,6 +89,7 @@ def test_codex_windows_shim_names_recognized():
     for shim in (
         "codex.cmd",
         r"C:\Users\dev\AppData\Roaming\npm\codex.cmd",
+        "/usr/local/bin/codex",
         "codex.ps1",
         "codex.exe",
     ):

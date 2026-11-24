@@ -2041,7 +2041,8 @@ def _resolve_cli_binary(cli_cmd: str) -> str:
 
 def _is_codex_cli(cmd_bin: str) -> bool:
     """Return True if cmd_bin invokes the OpenAI Codex CLI (including .cmd/.ps1 shims)."""
-    return Path(cmd_bin).stem.lower() == "codex"
+    basename = re.split(r"[/\\]", str(cmd_bin))[-1]
+    return Path(basename).stem.lower() == "codex"
 
 
 def _build_cli_command(
