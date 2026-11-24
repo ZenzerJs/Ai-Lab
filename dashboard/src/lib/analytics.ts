@@ -692,3 +692,181 @@ export function crossCheckBenchmarks(
       };
     });
 }
+
+export type IdealZoneArm = "icm_lite" | "icm_v3" | "icm_staged";
+
+export interface IdealZoneSummary {
+  arm: IdealZoneArm;
+  matchedSeries: number;
+  baseRuns: number;
+  basePassed: number;
+  govRuns: number;
+  govPassed: number;
+  basePassRate: number | null;
+  govPassRate: number | null;
+  passDeltaPp: number | null;
+  pricedSeries: number;
+  pricedBaseRuns: number;
+  pricedBasePassed: number;
+  pricedGovRuns: number;
+  pricedGovPassed: number;
+  baseMeanCost: number | null;
+  govMeanCost: number | null;
+  runCostSavingsPct: number | null;
+  baseCostPerPass: number | null;
+  govCostPerPass: number | null;
+  costPerPassSavingsPct: number | null;
+  baseMeanTools: number | null;
+  govMeanTools: number | null;
+  toolSavingsPct: number | null;
+  baseMeanDuration: number | null;
+  govMeanDuration: number | null;
+  durationSavingsPct: number | null;
+}
+
+const IDEAL_ZONE_ARMS: IdealZoneArm[] = ["icm_lite", "icm_v3", "icm_staged"];
+
+function meanMetric(
+  runs: RunRecord[],
+  pick: (run: RunRecord) => number | null | undefined,
+): number | null {
+  const vals = runs.map(pick).filter(finite);
+  if (vals.length === 0) return null;
+  return vals.reduce((sum, val) => sum + val, 0) / vals.length;
+}
+
+function savingsPercent(
+  baselineValue: number | null,
+  governedValue: number | null,
+): number | null {
+  if (
+    baselineValue == null ||
+    governedValue == null ||
+    baselineValue <= 0
+  ) {
+    return null;
+  }
+  return ((baselineValue - governedValue) / baselineValue) * 100;
+}
+
+/**
+ * Computes matched (task_id, model) head-to-head statistics for each ICM tier
+ * strictly against Baseline runs in the same series — never across ICM tiers.
+ */
+export function computeIdealZoneMetrics(
+  runs: RunRecord[],
+): Record<IdealZoneArm, IdealZoneSummary> {
+  const bySeries = new Map<string, RunRecord[]>();
+  for (const run of runs || []) {
+    if (run.source_kind === "imported" || Boolean(run.is_simulation)) continue;
+    const key = `${run.task_id}::${run.model}`;
+    const list = bySeries.get(key) || [];
+    list.push(run);
+    bySeries.set(key, list);
+  }
+
+  const result = {} as Record<IdealZoneArm, IdealZoneSummary>;
+  for (const arm of IDEAL_ZONE_ARMS) {
+    let matchedSeries = 0;
+    let pricedSeries = 0;
+    const baseAll: RunRecord[] = [];
+    const govAll: RunRecord[] = [];
+    const pricedBase: RunRecord[] = [];
+    const pricedGov: RunRecord[] = [];
+
+    for (const group of bySeries.values()) {
+      const baseGroup = group.filter((r) => r.arm === "baseline");
+      const govGroup = group.filter((r) => r.arm === arm);
+      if (baseGroup.length === 0 || govGroup.length === 0) continue;
+
+      matchedSeries += 1;
+      baseAll.push(...baseGroup);
+      govAll.push(...govGroup);
+
+      const basePricedGroup = baseGroup.filter(isPricedRun);
+      const govPricedGroup = govGroup.filter(isPricedRun);
+      if (basePricedGroup.length > 0 && govPricedGroup.length > 0) {
+        pricedSeries += 1;
+        pricedBase.push(...basePricedGroup);
+        pricedGov.push(...govPricedGroup);
+      }
+    }
+
+    const basePassed = baseAll.filter(
+      (r) => r.verification_status === "passed",
+    ).length;
+    const govPassed = govAll.filter(
+      (r) => r.verification_status === "passed",
+    ).length;
+    const basePassRate =
+      baseAll.length > 0 ? (basePassed / baseAll.length) * 100 : null;
+    const govPassRate =
+      govAll.length > 0 ? (govPassed / govAll.length) * 100 : null;
+    const passDeltaPp =
+      basePassRate != null && govPassRate != null
+        ? govPassRate - basePassRate
+        : null;
+
+    const baseMeanCost = meanMetric(pricedBase, (r) => r.cost_usd);
+    const govMeanCost = meanMetric(pricedGov, (r) => r.cost_usd);
+    const runCostSavingsPct = savingsPercent(baseMeanCost, govMeanCost);
+
+    const pricedBasePassed = pricedBase.filter(
+      (r) => r.verification_status === "passed",
+    ).length;
+    const pricedGovPassed = pricedGov.filter(
+      (r) => r.verification_status === "passed",
+    ).length;
+    const baseTotalUsd = pricedBase.reduce(
+      (s, r) => s + (finite(r.cost_usd) ? r.cost_usd : 0),
+      0,
+    );
+    const govTotalUsd = pricedGov.reduce(
+      (s, r) => s + (finite(r.cost_usd) ? r.cost_usd : 0),
+      0,
+    );
+    const baseCostPerPass =
+      pricedBasePassed > 0 ? baseTotalUsd / pricedBasePassed : null;
+    const govCostPerPass =
+      pricedGovPassed > 0 ? govTotalUsd / pricedGovPassed : null;
+    const costPerPassSavingsPct = savingsPercent(baseCostPerPass, govCostPerPass);
+
+    const baseMeanTools = meanMetric(baseAll, (r) => r.tool_calls_count);
+    const govMeanTools = meanMetric(govAll, (r) => r.tool_calls_count);
+    const toolSavingsPct = savingsPercent(baseMeanTools, govMeanTools);
+
+    const baseMeanDuration = meanMetric(baseAll, (r) => r.duration_seconds);
+    const govMeanDuration = meanMetric(govAll, (r) => r.duration_seconds);
+    const durationSavingsPct = savingsPercent(baseMeanDuration, govMeanDuration);
+
+    result[arm] = {
+      arm,
+      matchedSeries,
+      baseRuns: baseAll.length,
+      basePassed,
+      govRuns: govAll.length,
+      govPassed,
+      basePassRate,
+      govPassRate,
+      passDeltaPp,
+      pricedSeries,
+      pricedBaseRuns: pricedBase.length,
+      pricedBasePassed,
+      pricedGovRuns: pricedGov.length,
+      pricedGovPassed,
+      baseMeanCost,
+      govMeanCost,
+      runCostSavingsPct,
+      baseCostPerPass,
+      govCostPerPass,
+      costPerPassSavingsPct,
+      baseMeanTools,
+      govMeanTools,
+      toolSavingsPct,
+      baseMeanDuration,
+      govMeanDuration,
+      durationSavingsPct,
+    };
+  }
+  return result;
+}

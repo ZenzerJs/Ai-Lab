@@ -31,6 +31,7 @@ const {
   modelFamilySummaries,
   suitePairs,
   pairedDiffStats,
+  computeIdealZoneMetrics,
 } = require('../src/lib/analytics.ts');
 const snapshot = JSON.parse(fs.readFileSync(path.join(__dirname, '../public/data.json'), 'utf8'));
 
@@ -244,4 +245,31 @@ test('Analytics page stays robust on empty and unpriced payloads', () => {
   );
   assert.match(unpricedOnly, /Unpriced only/);
   assert.match(unpricedOnly, /model family/i);
+});
+
+test('computeIdealZoneMetrics isolates each ICM tier strictly against matched baseline runs', () => {
+  const zones = computeIdealZoneMetrics(snapshot.runs);
+  for (const arm of ['icm_lite', 'icm_v3', 'icm_staged']) {
+    const z = zones[arm];
+    assert.ok(z.matchedSeries > 0, `${arm} has matched series`);
+    assert.ok(z.baseRuns >= z.basePassed);
+    assert.ok(z.govRuns >= z.govPassed);
+    assert.ok(z.toolSavingsPct != null && Number.isFinite(z.toolSavingsPct));
+    assert.ok(
+      z.costPerPassSavingsPct != null && Number.isFinite(z.costPerPassSavingsPct),
+    );
+  }
+  assert.ok(zones.icm_lite.toolSavingsPct > 0);
+  assert.ok(zones.icm_v3.costPerPassSavingsPct > 0);
+  assert.ok(zones.icm_staged.passDeltaPp > 0);
+
+  const liteOnly = snapshot.runs.filter(
+    (r) => r.arm === 'baseline' || r.arm === 'icm_lite',
+  );
+  const isolated = computeIdealZoneMetrics(liteOnly);
+  assert.ok(isolated.icm_lite.matchedSeries > 0);
+  assert.equal(isolated.icm_v3.matchedSeries, 0);
+  assert.equal(isolated.icm_v3.govRuns, 0);
+  assert.equal(isolated.icm_staged.matchedSeries, 0);
+  assert.equal(isolated.icm_staged.govRuns, 0);
 });

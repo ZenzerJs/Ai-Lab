@@ -520,20 +520,15 @@ export default function IterationLineage({ data }: { data: DashboardPayload }) {
         )}
       </div>
 
-      <div className="chart-guide-bar">
+      <div className="lineage-summary-strip" role="note">
+        <Sparkles size={15} />
         <span>
-          <strong>How to read this chart:</strong> Each dot is a workflow version tested on the same coding tasks.{" "}
-          Move <strong>up</strong> = solves more tasks. Move <strong>left</strong> ={" "}
-          {hasPricing ? "costs less." : "uses fewer tool calls."} The green dashed line marks the best tradeoffs (Pareto frontier).
+          <strong>How to read this chart:</strong> Left ={" "}
+          {hasPricing ? "lower cost" : "fewer tool calls"}, up = higher pass rate
+          (dashed frontier marks Pareto-optimal tradeoffs).
+          {takeawayText ? ` ${takeawayText}` : ""}
         </span>
       </div>
-
-      {takeawayText && (
-        <div className="lineage-takeaway" role="note">
-          <Sparkles size={15} />
-          <span>{takeawayText}</span>
-        </div>
-      )}
 
       <div className="lineage-visual-grid">
         <div className="lineage-plot-card">
