@@ -190,7 +190,10 @@ test('every governed arm of every published suite yields a stats object or nothi
       const stats = pairedDiffStats(suitePairs(task, name));
       if (stats) {
         assert.ok(stats.n >= 1);
-        assert.ok(stats.meanBaseline > 0);
+        assert.ok(stats.meanBaseline >= 0);
+        if (stats.meanBaseline === 0) {
+          assert.equal(stats.meanDeltaPct, null);
+        }
       }
     }
   }
