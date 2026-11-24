@@ -1,15 +1,17 @@
-import { useMemo, useState } from "react";
+import { type CSSProperties, useMemo, useState } from "react";
 import {
   ArrowRight,
   ArrowUpRight,
-  ArrowDownRight,
   ChevronDown,
   CircleHelp,
   Cpu,
   FlaskConical,
+  Layers,
   Orbit,
   ShieldCheck,
+  Sparkles,
   TrendingDown,
+  Zap,
 } from "lucide-react";
 import {
   DashboardPayload,
@@ -20,14 +22,16 @@ import {
 import { formatArm, formatCurrency, formatTokens } from "../../lib/formatters";
 import {
   acuTelemetrySummary,
+  computeIdealZoneMetrics,
   formatSignedCostChange,
+  IdealZoneSummary,
   isPricedRun,
 } from "../../lib/analytics";
 import { armNames, experimentNames, finite, governedArm, governedArmName } from "../../lib/workspace";
 import AdaptiveICM from "./AdaptiveICM";
 import IterationLineage from "./IterationLineage";
 
-type OverviewTab = "cost" | "models" | "multifile";
+type OverviewTab = "cost" | "models";
 
 const METRIC_HELPERS: Record<string, string> = {
   cost_reduction: "Priced API spend vs. plain baseline",
@@ -35,6 +39,14 @@ const METRIC_HELPERS: Record<string, string> = {
   defect_rate: "Defect rate observed in operational trials",
   cache_hit_rate: "Prompt cache reuse across governed calls",
 };
+
+const ORBIT_STAGES = [
+  { x: 116, y: 61, t: "Intake" },
+  { x: 286, y: 50, t: "Plan" },
+  { x: 342, y: 149, t: "Execute" },
+  { x: 233, y: 222, t: "Verify" },
+  { x: 77, y: 172, t: "Reflect" },
+];
 
 function ContextOrbit() {
   return (
@@ -50,53 +62,69 @@ function ContextOrbit() {
             <stop offset="1" stopColor="#8E7BD8" />
           </linearGradient>
         </defs>
-        <ellipse
-          cx="205"
-          cy="130"
-          rx="132"
-          ry="83"
-          fill="none"
-          stroke="url(#orbit-line)"
-          strokeWidth="1"
-          transform="rotate(-18 205 130)"
-        />
-        <ellipse
-          cx="205"
-          cy="130"
-          rx="100"
-          ry="106"
-          fill="none"
-          stroke="#CDC3EE"
-          strokeWidth="1"
-          transform="rotate(44 205 130)"
-        />
-        <ellipse cx="205" cy="130" rx="57" ry="57" fill="#E2DAF8" />
-        <circle cx="205" cy="130" r="42" fill="#6955D8" />
-        <g fill="none" stroke="#FFF" strokeWidth="1.7">
+        <g className="orbit-ring-outer">
           <ellipse
             cx="205"
             cy="130"
-            rx="22"
-            ry="9"
-            transform="rotate(-35 205 130)"
-          />
-          <ellipse
-            cx="205"
-            cy="130"
-            rx="22"
-            ry="9"
-            transform="rotate(55 205 130)"
+            rx="132"
+            ry="83"
+            fill="none"
+            stroke="url(#orbit-line)"
+            strokeWidth="1.15"
+            transform="rotate(-18 205 130)"
           />
         </g>
-        <circle cx="205" cy="130" r="3" fill="white" />
-        {[
-          { x: 116, y: 61, t: "Intake" },
-          { x: 286, y: 50, t: "Plan" },
-          { x: 342, y: 149, t: "Execute" },
-          { x: 233, y: 222, t: "Verify" },
-          { x: 77, y: 172, t: "Reflect" },
-        ].map(({ x, y, t }) => (
-          <g key={t}>
+        <g className="orbit-ring-inner">
+          <ellipse
+            cx="205"
+            cy="130"
+            rx="100"
+            ry="106"
+            fill="none"
+            stroke="#CDC3EE"
+            strokeWidth="1"
+            strokeDasharray="4 6"
+            transform="rotate(44 205 130)"
+          />
+        </g>
+        <circle
+          className="orbit-core-halo"
+          cx="205"
+          cy="130"
+          r="57"
+          fill="#E2DAF8"
+        />
+        <g className="orbit-core-emblem">
+          <circle cx="205" cy="130" r="42" fill="#6955D8" />
+          <g fill="none" stroke="#FFF" strokeWidth="1.7">
+            <ellipse
+              cx="205"
+              cy="130"
+              rx="22"
+              ry="9"
+              transform="rotate(-35 205 130)"
+            />
+            <ellipse
+              cx="205"
+              cy="130"
+              rx="22"
+              ry="9"
+              transform="rotate(55 205 130)"
+            />
+          </g>
+          <circle cx="205" cy="130" r="3" fill="white" />
+        </g>
+        <g className="orbit-satellites">
+          <circle cx="185" cy="30" r="4" fill="#A495D5" />
+          <circle cx="308" cy="202" r="3" fill="#A495D5" />
+          <circle cx="67" cy="108" r="3" fill="#A495D5" />
+        </g>
+        {ORBIT_STAGES.map(({ x, y, t }, idx) => (
+          <g
+            key={t}
+            className="orbit-pill"
+            style={{ "--pill-i": idx } as CSSProperties}
+          >
             <rect
               x={x - 34}
               y={y - 14}
@@ -118,13 +146,34 @@ function ContextOrbit() {
             </text>
           </g>
         ))}
-        <circle cx="185" cy="30" r="4" fill="#A495D5" />
-        <circle cx="308" cy="202" r="3" fill="#A495D5" />
-        <circle cx="67" cy="108" r="3" fill="#A495D5" />
       </svg>
       <span>LESS NOISE. MORE SIGNAL.</span>
     </div>
   );
+}
+
+function fmtSignedPct(val: number | null, suffix = "%"): string {
+  if (val == null || !Number.isFinite(val)) return "—";
+  return `${val >= 0 ? `+${val.toFixed(1)}` : `−${Math.abs(val).toFixed(1)}`}${suffix}`;
+}
+
+function fmtSavingsHero(val: number | null): string {
+  if (val == null || !Number.isFinite(val)) return "—";
+  if (val > 0) return `−${val.toFixed(1)}%`;
+  if (val < 0) return `+${Math.abs(val).toFixed(1)}%`;
+  return "0.0%";
+}
+
+function fmtPct(val: number | null, digits = 1): string {
+  return val != null && Number.isFinite(val) ? `${val.toFixed(digits)}%` : "—";
+}
+
+function fmtNum(val: number | null, digits = 1): string {
+  return val != null && Number.isFinite(val) ? val.toFixed(digits) : "—";
+}
+
+function fmtSec(val: number | null): string {
+  return val != null && Number.isFinite(val) ? `${val.toFixed(1)}s` : "—";
 }
 
 function Metric({ stat }: { stat: HeadlineStat }) {
@@ -183,10 +232,8 @@ function Metric({ stat }: { stat: HeadlineStat }) {
 }
 
 export function Overview({ data }: { data: DashboardPayload }) {
-  const [benchModel, setBenchModel] = useState("all");
   const [activeTab, setActiveTab] = useState<OverviewTab>("cost");
   const [showAllPriced, setShowAllPriced] = useState(false);
-  const [showAllUnpriced, setShowAllUnpriced] = useState(false);
   const measured =
     !data.is_demo_report &&
     !data.is_simulation &&
@@ -206,23 +253,10 @@ export function Overview({ data }: { data: DashboardPayload }) {
       finite(task.arms.baseline?.mean_cost_usd) ||
       finite(governedArm(task)?.mean_cost_usd),
   );
-  const tokenBenchTasks = tasks.filter(
-    (task) =>
-      !pricedTasks.includes(task) &&
-      (finite(task.arms.baseline?.tokens_per_passing_patch) ||
-        finite(governedArm(task)?.tokens_per_passing_patch)),
+  const idealZones = useMemo(
+    () => computeIdealZoneMetrics(data.runs || []),
+    [data.runs],
   );
-  const unpricedModels = useMemo(
-    () =>
-      Array.from(
-        new Set(tokenBenchTasks.map(taskModel).filter(Boolean)),
-      ).sort(),
-    [tokenBenchTasks],
-  );
-  const visibleTokenBenchTasks =
-    benchModel === "all"
-      ? tokenBenchTasks
-      : tokenBenchTasks.filter((task) => taskModel(task) === benchModel);
   const modelSummaries = useMemo(() => {
     const byModel = new Map<string, RunRecord[]>();
     for (const run of data.runs || []) {
@@ -329,15 +363,6 @@ export function Overview({ data }: { data: DashboardPayload }) {
       ),
     ),
   );
-  const maxBenchTokens = Math.max(
-    1,
-    ...visibleTokenBenchTasks
-      .flatMap((task) => [
-        task.arms.baseline?.tokens_per_passing_patch,
-        governedArm(task)?.tokens_per_passing_patch,
-      ])
-      .filter(finite),
-  );
   const stats = measured ? data.headline?.stats || [] : [];
   const totalRunsCount = data.runs?.length ?? data.cumulative?.total_runs ?? 0;
   const pricedRunsCount = (data.runs || []).filter(isPricedRun).length;
@@ -350,10 +375,10 @@ export function Overview({ data }: { data: DashboardPayload }) {
   ).length;
   const liveRunsCount = totalRunsCount - archivedRunsCount;
   const headlineScope = data.headline?.scope;
-  const shownPricedTasks = showAllPriced ? pricedTasks : pricedTasks.slice(0, 8);
-  const shownTokenBenchTasks = showAllUnpriced
-    ? visibleTokenBenchTasks
-    : visibleTokenBenchTasks.slice(0, 8);
+  const shownPricedTasks = showAllPriced ? pricedTasks : pricedTasks.slice(0, 5);
+  const lite: IdealZoneSummary = idealZones.icm_lite;
+  const v3: IdealZoneSummary = idealZones.icm_v3;
+  const staged: IdealZoneSummary = idealZones.icm_staged;
   return (
     <>
       <div className="page-heading">
@@ -361,8 +386,8 @@ export function Overview({ data }: { data: DashboardPayload }) {
           <div className="eyebrow">THE BIG PICTURE</div>
           <h1>Your lab, at a glance.</h1>
           <p>
-            Does structured context make coding agents cheaper and more reliable,
-            or just add extra steps?
+            Does structured context make coding agents cheaper and more reliable
+            against plain baselines?
           </p>
         </div>
         <span className={`badge ${measured ? "badge-green" : "badge-amber"}`}>
@@ -377,11 +402,11 @@ export function Overview({ data }: { data: DashboardPayload }) {
         </span>
       </div>
 
-      {/* Block 1: Plain-English Intro Hero + Collapsible ICM Primer */}
-      <section className="thesis-panel intro-hero">
-        <div className="thesis-copy">
+      {/* Beat 1: Airy Hero Stage with Animated Context Orbit SVG */}
+      <section className="thesis-panel hero-stage">
+        <div className="thesis-copy hero-copy">
           <div className="eyebrow">
-            <Orbit size={14} /> WHAT IS AI-LAB?
+            <Orbit size={14} /> INTERPRETABLE CONTEXT METHODOLOGY
           </div>
           <h2>
             Better context.
@@ -389,119 +414,252 @@ export function Overview({ data }: { data: DashboardPayload }) {
             <span>Measurable impact.</span>
           </h2>
           <p>
-            AI-Lab tests plain agent prompts head-to-head against structured{" "}
-            <strong>ICM workflows</strong> on real multi-file coding tasks—and
-            grades every patch with hidden automated tests.
+            AI-Lab tests plain baseline prompts head-to-head against structured{" "}
+            <strong>ICM workflows</strong> on identical multi-file tasks—graded
+            automatically by hidden test suites.
           </p>
-          <div className="intro-steps" aria-label="How every trial works">
-            <div>
-              <strong>1. Same task</strong>
-              <span>Identical prompt &amp; model, different workflow</span>
-            </div>
-            <div>
-              <strong>2. Hidden tests</strong>
-              <span>Every patch verified in a clean sandbox</span>
-            </div>
-            <div>
-              <strong>3. Honest ledger</strong>
-              <span>Live API spend kept separate from projections</span>
-            </div>
+          <div className="hero-actions">
+            <a href="#tasks" className="button button-primary">
+              Browse {uniqueTasksCount} tasks <ArrowRight size={17} />
+            </a>
+            <a href="#analytics" className="button button-outline">
+              Deep analytics <ArrowUpRight size={16} />
+            </a>
           </div>
         </div>
-        <div className="intro-actions">
-          <a href="#tasks" className="button button-primary">
-            Browse {uniqueTasksCount} tasks <ArrowRight size={17} />
-          </a>
-          <a href="#analytics" className="button button-outline">
-            Deep analytics <ArrowUpRight size={16} />
-          </a>
+        <div className="hero-orbit-stage">
+          <ContextOrbit />
         </div>
       </section>
 
-      <details className="panel guide-disclosure">
-        <summary>
-          <span>
-            <strong>New to ICM?</strong> See how workflow versions &amp; 3-tier
-            auto-routing work
-          </span>
-          <ChevronDown size={16} />
-        </summary>
-        <div className="guide-disclosure-body">
-          <AdaptiveICM data={data} />
-          <div className="guide-orbit-row">
-            <div>
-              <h3>Original 5-stage contract (ICM v1)</h3>
-              <p>
-                Structured context organizes work into five explicit phases
-                (Intake → Plan → Execute → Verify → Reflect). Newer versions
-                (<strong>ICM v3</strong> &amp; <strong>ICM Staged</strong>)
-                streamline that ceremony into fast batched reads and edits.
-              </p>
-            </div>
-            <ContextOrbit />
+      {/* Beat 2: Ideal Workflow Zones — strictly each ICM tier vs. matched Baseline */}
+      <section className="ideal-zones" aria-labelledby="ideal-zones-title">
+        <div className="section-heading results-heading">
+          <div>
+            <div className="eyebrow">IDEAL WORKFLOW ZONES</div>
+            <h2 id="ideal-zones-title">
+              Each ICM tier vs. its matched baseline
+            </h2>
+            <p className="section-subcopy">
+              Every card benchmarks one ICM workflow strictly against matched
+              Baseline runs on the same task and model—never against other ICM
+              versions.
+            </p>
           </div>
+          <span>
+            {totalRunsCount} runs · {uniqueTasksCount} tasks
+          </span>
         </div>
-      </details>
 
-      {/* Block 2: Key Findings at a Glance */}
-      <div className="section-heading results-heading">
-        <h2>Key findings so far</h2>
-        <span>
-          {totalRunsCount} runs · {uniqueTasksCount} tasks ·{" "}
-          {modelSummaries.length || 1} models
-        </span>
-      </div>
-      {stats.length ? (
-        <section
-          className="metrics-grid"
-          aria-label="Recorded benchmark metrics"
-        >
-          {stats.map((stat) => (
-            <Metric key={stat.id} stat={stat} />
-          ))}
-        </section>
-      ) : (
-        <div className="panel empty-state">
-          <FlaskConical size={30} />
-          <h2>Measurements start with evidence.</h2>
-          <p>
-            {measured
-              ? "No headline statistics in this snapshot. Inspect individual experiments below."
-              : "This snapshot has no measured headline results. Explore the available records or refresh after adding verified runs."}
-          </p>
-          <a href="#audit" className="text-link">
-            Inspect evidence <ArrowRight size={16} />
-          </a>
+        <div className="ideal-zones-grid">
+          <article className="zone-card">
+            <div className="zone-card-head">
+              <div>
+                <h3>ICM-Lite</h3>
+                <p>Micro-tasks &amp; focused edits</p>
+              </div>
+              <span className="badge badge-purple">
+                <Zap size={12} /> Fast loop
+              </span>
+            </div>
+            <div className="zone-kpi">
+              <strong
+                className={
+                  lite.toolSavingsPct != null && lite.toolSavingsPct >= 0
+                    ? "text-sea"
+                    : "text-rust"
+                }
+              >
+                {fmtSavingsHero(lite.toolSavingsPct)}
+              </strong>
+              <span>tool calls vs. baseline</span>
+            </div>
+            <p className="zone-kpi-sub">
+              {fmtNum(lite.govMeanTools)} vs {fmtNum(lite.baseMeanTools)} avg
+              tool calls
+            </p>
+            <dl className="zone-ledger">
+              <div>
+                <dt>Verified pass rate</dt>
+                <dd>
+                  {fmtPct(lite.govPassRate, 0)} ({lite.govPassed}/{lite.govRuns}
+                  ) vs {fmtPct(lite.basePassRate, 0)} ({lite.basePassed}/
+                  {lite.baseRuns})
+                </dd>
+              </div>
+              <div>
+                <dt>Mean runtime</dt>
+                <dd>
+                  {fmtSec(lite.govMeanDuration)} vs{" "}
+                  {fmtSec(lite.baseMeanDuration)} (
+                  {fmtSavingsHero(lite.durationSavingsPct)})
+                </dd>
+              </div>
+            </dl>
+            <div className="zone-card-foot">
+              {lite.matchedSeries} matched series vs. Baseline · Skips heavy
+              planning when edits stay local.
+            </div>
+          </article>
+
+          <article className="zone-card zone-card-featured">
+            <div className="zone-card-head">
+              <div>
+                <h3>ICM v3</h3>
+                <p>Multi-file engineering</p>
+              </div>
+              <span className="badge badge-green">
+                <Sparkles size={12} /> Cost sweet spot
+              </span>
+            </div>
+            <div className="zone-kpi">
+              <strong
+                className={
+                  v3.costPerPassSavingsPct != null &&
+                  v3.costPerPassSavingsPct >= 0
+                    ? "text-sea"
+                    : "text-rust"
+                }
+              >
+                {fmtSavingsHero(v3.costPerPassSavingsPct)}
+              </strong>
+              <span>cost / verified pass vs. baseline</span>
+            </div>
+            <p className="zone-kpi-sub">
+              {formatCurrency(v3.govCostPerPass)} vs{" "}
+              {formatCurrency(v3.baseCostPerPass)} per solved task
+            </p>
+            <dl className="zone-ledger">
+              <div>
+                <dt>Mean run spend</dt>
+                <dd>
+                  {formatCurrency(v3.govMeanCost)} vs{" "}
+                  {formatCurrency(v3.baseMeanCost)} (
+                  {fmtSavingsHero(v3.runCostSavingsPct)})
+                </dd>
+              </div>
+              <div>
+                <dt>Runtime &amp; tools</dt>
+                <dd>
+                  {fmtSec(v3.govMeanDuration)} vs {fmtSec(v3.baseMeanDuration)}{" "}
+                  · {fmtSavingsHero(v3.toolSavingsPct)} tools
+                </dd>
+              </div>
+            </dl>
+            <div className="zone-card-foot">
+              {v3.pricedSeries} priced series ({v3.matchedSeries} matched vs.
+              Baseline) · Batched reads cut token waste.
+            </div>
+          </article>
+
+          <article className="zone-card">
+            <div className="zone-card-head">
+              <div>
+                <h3>ICM Staged</h3>
+                <p>Complex multi-step suites</p>
+              </div>
+              <span className="badge badge-purple">
+                <Layers size={12} /> Reliability guard
+              </span>
+            </div>
+            <div className="zone-kpi">
+              <strong
+                className={
+                  staged.passDeltaPp != null && staged.passDeltaPp >= 0
+                    ? "text-sea"
+                    : "text-rust"
+                }
+              >
+                {fmtSignedPct(staged.passDeltaPp, " pp")}
+              </strong>
+              <span>pass rate vs. baseline</span>
+            </div>
+            <p className="zone-kpi-sub">
+              {fmtPct(staged.govPassRate)} ({staged.govPassed}/{staged.govRuns})
+              vs {fmtPct(staged.basePassRate)} ({staged.basePassed}/
+              {staged.baseRuns})
+            </p>
+            <dl className="zone-ledger">
+              <div>
+                <dt>Cost / verified pass</dt>
+                <dd>
+                  {formatCurrency(staged.govCostPerPass)} vs{" "}
+                  {formatCurrency(staged.baseCostPerPass)} (
+                  {fmtSavingsHero(staged.costPerPassSavingsPct)})
+                </dd>
+              </div>
+              <div>
+                <dt>Mean run spend</dt>
+                <dd>
+                  {formatCurrency(staged.govMeanCost)} vs{" "}
+                  {formatCurrency(staged.baseMeanCost)}
+                </dd>
+              </div>
+            </dl>
+            <div className="zone-card-foot">
+              {staged.matchedSeries} matched series vs. Baseline · Progressive
+              gates catch errors early.
+            </div>
+          </article>
         </div>
-      )}
 
-      <details className="scope-disclosure">
-        <summary>
-          <span>Dataset scope &amp; statistical notes</span>
-          <ChevronDown size={15} />
-        </summary>
-        <p>
-          {headlineScope
-            ? `${headlineScope.unique_task_count} tasks · ${headlineScope.total_run_count} runs · ${headlineScope.priced_run_count} priced runs · ${headlineScope.pooling_note || headlineScope.pooling_method}`
-            : `${uniqueTasksCount} tasks · ${totalRunsCount} runs · ${pricedRunsCount} priced runs · pooled_sum (macro_average noted per task)`}
-          {archivedRunsCount > 0
-            ? ` (${liveRunsCount} live · ${archivedRunsCount} archived)`
-            : ""}
-          {unmeasuredSuites.length > 0
-            ? ` · ${unmeasuredSuites.length} suite present, unmeasured`
-            : ""}
-        </p>
-      </details>
+        <details className="scope-disclosure">
+          <summary>
+            <span>
+              Pooled headline stats, dataset scope &amp; 3-tier routing details (
+              {totalRunsCount} runs · {uniqueTasksCount} tasks)
+            </span>
+            <ChevronDown size={15} />
+          </summary>
+          <div className="scope-disclosure-body">
+            {stats.length ? (
+              <section
+                className="metrics-grid"
+                aria-label="Recorded benchmark metrics"
+              >
+                {stats.map((stat) => (
+                  <Metric key={stat.id} stat={stat} />
+                ))}
+              </section>
+            ) : (
+              <div className="panel empty-state">
+                <FlaskConical size={30} />
+                <h2>Measurements start with evidence.</h2>
+                <p>
+                  {measured
+                    ? "No headline statistics in this snapshot. Inspect individual experiments below."
+                    : "This snapshot has no measured headline results. Explore the available records or refresh after adding verified runs."}
+                </p>
+                <a href="#audit" className="text-link">
+                  Inspect evidence <ArrowRight size={16} />
+                </a>
+              </div>
+            )}
+            <p className="scope-disclosure-note">
+              {headlineScope
+                ? `${headlineScope.unique_task_count} tasks · ${headlineScope.total_run_count} runs · ${headlineScope.priced_run_count} priced runs · ${headlineScope.pooling_note || headlineScope.pooling_method}`
+                : `${uniqueTasksCount} tasks · ${totalRunsCount} runs · ${pricedRunsCount} priced runs · pooled_sum (macro_average noted per task)`}
+              {archivedRunsCount > 0
+                ? ` (${liveRunsCount} live · ${archivedRunsCount} archived)`
+                : ""}
+              {unmeasuredSuites.length > 0
+                ? ` · ${unmeasuredSuites.length} suite present, unmeasured`
+                : ""}
+            </p>
+            <AdaptiveICM data={data} />
+          </div>
+        </details>
+      </section>
 
-      {/* Block 3: Signature Interactive Pareto / Evolution Graph */}
+      {/* Beat 3: Signature Interactive Pareto / Evolution Graph */}
       <IterationLineage data={data} />
 
-      {/* Block 4: Tabbed Dive Into the Charts Hub */}
+      {/* Beat 4: Light Preview Panel (Cost by Task & Model Summary) */}
       <section className="panel overview-hub" aria-labelledby="hub-title">
         <div className="panel-heading overview-hub-head">
           <div>
-            <span className="eyebrow">DIVE INTO THE DATA</span>
-            <h2 id="hub-title">Explore results by task, model, or quality</h2>
+            <span className="eyebrow">EXPLORE THE DATA</span>
+            <h2 id="hub-title">Cost per task &amp; model summary</h2>
           </div>
           <div
             className="segmented-control"
@@ -526,27 +684,18 @@ export function Overview({ data }: { data: DashboardPayload }) {
             >
               By model ({modelSummaries.length})
             </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === "multifile"}
-              aria-pressed={activeTab === "multifile"}
-              onClick={() => setActiveTab("multifile")}
-            >
-              Multi-file &amp; quality
-            </button>
           </div>
         </div>
 
         {activeTab === "cost" && (
-          <div className="overview-grid hub-grid">
+          <div className="hub-tab-body">
             <section
               className="comparison-panel hub-panel-inner"
               aria-labelledby="comparison-title"
             >
               <div className="panel-heading">
                 <div>
-                  <h3 id="comparison-title">The cost of context</h3>
+                  <h3 id="comparison-title">Cost per run by task</h3>
                   <p>
                     Average USD per run — shorter bars mean lower spend.
                   </p>
@@ -630,7 +779,7 @@ export function Overview({ data }: { data: DashboardPayload }) {
                   </p>
                 )}
               </div>
-              {pricedTasks.length > 8 && (
+              {pricedTasks.length > 5 && (
                 <div className="hub-show-more">
                   <button
                     type="button"
@@ -651,53 +800,10 @@ export function Overview({ data }: { data: DashboardPayload }) {
                     : "Demo / non-measured data"}
                 </span>
                 <a className="text-link" href="#tasks">
-                  View breakdown <ArrowUpRight size={15} />
+                  View all tasks <ArrowUpRight size={15} />
                 </a>
               </div>
             </section>
-            <aside className="reading-panel">
-              <span className="reading-icon">
-                <CircleHelp size={22} />
-              </span>
-              <div className="eyebrow">READING THE RESULTS</div>
-              <h3>
-                The whole picture.
-                <br />
-                Not just the headline.
-              </h3>
-              <p>
-                Structure has a cost, too. Extra planning turns can outweigh
-                savings on tiny tasks, while batched workflows shine on bigger
-                ones.
-              </p>
-              <div className="reading-divider" />
-              <div className="reading-point">
-                <ArrowDownRight size={20} />
-                <div>
-                  <strong>Complex work benefits most</strong>
-                  <p>Compare each task before generalizing one number.</p>
-                </div>
-              </div>
-              <div className="reading-point">
-                <ShieldCheck size={20} />
-                <div>
-                  <strong>Quality is its own measure</strong>
-                  <p>Pass rates and rubric checks are tracked separately.</p>
-                </div>
-              </div>
-              <div className="reading-point">
-                <Cpu size={20} />
-                <div>
-                  <strong>Projections stay separate</strong>
-                  <p>
-                    Simulator rates estimate cost without faking model runs.
-                  </p>
-                </div>
-              </div>
-              <a className="text-link" href="#audit">
-                Follow the evidence <ArrowRight size={16} />
-              </a>
-            </aside>
           </div>
         )}
 
@@ -783,334 +889,6 @@ export function Overview({ data }: { data: DashboardPayload }) {
               </div>
             ) : (
               <p className="empty-inline">No live model runs in this snapshot.</p>
-            )}
-          </div>
-        )}
-
-        {activeTab === "multifile" && (
-          <div className="hub-tab-body">
-            {tokenBenchTasks.length > 0 && (
-              <section
-                className="comparison-panel"
-                aria-labelledby="token-bench-title"
-              >
-                <div className="panel-heading">
-                  <div>
-                    <h3 id="token-bench-title">Multi-file benchmarks</h3>
-                    <p>
-                      Tokens per passing patch for unpriced models (shorter bars
-                      are more efficient).
-                    </p>
-                  </div>
-                  <div className="lineage-controls">
-                    {unpricedModels.length > 1 && (
-                      <label className="select-field">
-                        Model
-                        <select
-                          value={benchModel}
-                          onChange={(event) => setBenchModel(event.target.value)}
-                        >
-                          <option value="all">All models</option>
-                          {unpricedModels.map((mdl) => (
-                            <option key={mdl} value={mdl}>
-                              {mdl}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    )}
-                    <div className="chart-legend">
-                      <span>
-                        <i className="legend-baseline" />
-                        Baseline
-                      </span>
-                      <span>
-                        <i className="legend-governed" />
-                        Governed
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <div
-                  className="cost-chart cost-chart-tokens"
-                  role="group"
-                  aria-label="Tokens per passing patch comparison for multi-file benchmarks."
-                >
-                  {shownTokenBenchTasks.map((task) => {
-                    const bArm = task.arms.baseline,
-                      gArm = governedArm(task);
-                    const bTok = bArm?.tokens_per_passing_patch,
-                      gTok = gArm?.tokens_per_passing_patch;
-                    const bDenom = bArm?.evaluated_count ?? bArm?.scheduled_count;
-                    const gDenom = gArm?.evaluated_count ?? gArm?.scheduled_count;
-                    const bPass =
-                      bArm?.verified_count != null && bDenom != null
-                        ? ` (${bArm.verified_count}/${bDenom})`
-                        : "";
-                    const gPass =
-                      gArm?.verified_count != null && gDenom != null
-                        ? ` (${gArm.verified_count}/${gDenom})`
-                        : "";
-                    const mdl = taskModel(task);
-                    return (
-                      <div className="chart-row" key={taskKey(task)}>
-                        <a href="#tasks" className="chart-label">
-                          {task.task_id}
-                          <span>
-                            {experimentNames[task.task_id] || "Benchmark"}
-                            {multiModelTasks.has(task.task_id) && mdl
-                              ? ` · ${mdl}`
-                              : ""}
-                          </span>
-                          <span className="badge badge-purple chart-arm-badge">
-                            {formatArm(governedArmName(task))}
-                          </span>
-                        </a>
-                        <div className="chart-bars">
-                          <div className="bar-line">
-                            <span
-                              className="bar bar-baseline"
-                              style={{
-                                width: finite(bTok)
-                                  ? `${Math.max(1, (bTok / maxBenchTokens) * 100)}%`
-                                  : "0%",
-                              }}
-                            />
-                            <span className="bar-value">
-                              <span className="sr-only">Baseline </span>
-                              {formatTokens(bTok)}
-                              {bPass}
-                            </span>
-                          </div>
-                          <div className="bar-line">
-                            <span
-                              className="bar bar-governed"
-                              style={{
-                                width: finite(gTok)
-                                  ? `${Math.max(1, (gTok / maxBenchTokens) * 100)}%`
-                                  : "0%",
-                              }}
-                            />
-                            <span className="bar-value">
-                              <span className="sr-only">
-                                {formatArm(governedArmName(task))}{" "}
-                              </span>
-                              {formatTokens(gTok)}
-                              {gPass}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                {visibleTokenBenchTasks.length > 8 && (
-                  <div className="hub-show-more">
-                    <button
-                      type="button"
-                      className="button button-outline"
-                      onClick={() => setShowAllUnpriced((cur) => !cur)}
-                    >
-                      {showAllUnpriced
-                        ? "Show fewer tasks"
-                        : `Show all ${visibleTokenBenchTasks.length} unpriced series`}
-                    </button>
-                  </div>
-                )}
-              </section>
-            )}
-
-            {data.quality_rubric?.has_data &&
-              (() => {
-                const rubric = data.quality_rubric;
-                const pctCi = rubric.quality_ci.normalized_pct;
-                const outlines = rubric.multi_file_outlines;
-                const outlineSummary =
-                  outlines && outlines.length > 0
-                    ? (() => {
-                        const totalBase = outlines.reduce(
-                          (acc, item) => acc + item.baseline_cost_usd,
-                          0,
-                        );
-                        const totalNorm = outlines.reduce(
-                          (acc, item) => acc + item.icm_cost_normalized_usd,
-                          0,
-                        );
-                        const totalRaw = outlines.reduce(
-                          (acc, item) => acc + item.icm_cost_raw_usd,
-                          0,
-                        );
-                        const normPct =
-                          totalBase > 0
-                            ? ((totalBase - totalNorm) / totalBase) * 100
-                            : null;
-                        const rawPct =
-                          totalBase > 0
-                            ? ((totalBase - totalRaw) / totalBase) * 100
-                            : null;
-                        return {
-                          count: outlines.length,
-                          totalBase,
-                          totalNorm,
-                          normPct,
-                          rawPct,
-                        };
-                      })()
-                    : null;
-                const fmtSigned = (v: number, digits = 1) =>
-                  `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`;
-                const ciAboveZero = Boolean(pctCi.ci_95 && pctCi.ci_95[0] > 0);
-                return (
-                  <section
-                    className="operational-panel hub-quality-block"
-                    aria-labelledby="quality-rubric-title"
-                  >
-                    <div className="panel-heading">
-                      <div>
-                        <span className="eyebrow">
-                          5-DIMENSION QUALITY &amp; BREAK-EVEN
-                        </span>
-                        <h3 id="quality-rubric-title">
-                          Beyond token cost: quality CIs
-                          {outlineSummary ? " & multi-file outlines" : ""}
-                        </h3>
-                        <p>
-                          {rubric.quality_ci.sample_count} paired tasks ·
-                          Pre-registered 0–25 rubric
-                          {outlineSummary ? " & multi-file outlines" : ""}
-                        </p>
-                      </div>
-                      {ciAboveZero && (
-                        <span className="badge badge-green">
-                          <ShieldCheck size={13} />
-                          95% CI above zero
-                        </span>
-                      )}
-                    </div>
-                    <div className="operational-stats">
-                      <div>
-                        <span>Mean quality gain (ICM vs Baseline)</span>
-                        <strong className="text-sea">
-                          {pctCi.mean_delta != null
-                            ? `${fmtSigned(pctCi.mean_delta)}%`
-                            : "—"}
-                        </strong>
-                        {pctCi.ci_95 && (
-                          <span>
-                            95% CI: {fmtSigned(pctCi.ci_95[0])}% to{" "}
-                            {fmtSigned(pctCi.ci_95[1])}%
-                          </span>
-                        )}
-                      </div>
-                      {outlineSummary && (
-                        <div>
-                          <span>
-                            Multi-file outline savings ({outlineSummary.count}{" "}
-                            tasks)
-                          </span>
-                          <strong className="text-sea">
-                            {outlineSummary.normPct !== null
-                              ? `${fmtSigned(outlineSummary.normPct)}%`
-                              : "—"}
-                          </strong>
-                          <span>
-                            Normalized ({formatCurrency(outlineSummary.totalBase)} →{" "}
-                            {formatCurrency(outlineSummary.totalNorm)}
-                            {outlineSummary.rawPct !== null
-                              ? ` · ${fmtSigned(outlineSummary.rawPct)}% raw`
-                              : ""}
-                            )
-                          </span>
-                        </div>
-                      )}
-                      {!outlineSummary &&
-                        tokenBenchTasks.length > 0 &&
-                        (() => {
-                          const bTpps = tokenBenchTasks
-                            .map((t) => t.arms.baseline?.tokens_per_passing_patch)
-                            .filter(finite);
-                          const gTpps = tokenBenchTasks
-                            .map((t) => governedArm(t)?.tokens_per_passing_patch)
-                            .filter(finite);
-                          const bAvg = bTpps.length
-                            ? bTpps.reduce((a, b) => a + b, 0) / bTpps.length
-                            : null;
-                          const gAvg = gTpps.length
-                            ? gTpps.reduce((a, b) => a + b, 0) / gTpps.length
-                            : null;
-                          const deltaPct =
-                            bAvg != null && bAvg > 0 && gAvg != null
-                              ? ((bAvg - gAvg) / bAvg) * 100
-                              : null;
-                          const bPass = tokenBenchTasks.reduce(
-                            (s, t) => s + (t.arms.baseline?.verified_count ?? 0),
-                            0,
-                          );
-                          const bSched = tokenBenchTasks.reduce(
-                            (s, t) =>
-                              s +
-                              (t.arms.baseline?.evaluated_count ??
-                                t.arms.baseline?.scheduled_count ??
-                                0),
-                            0,
-                          );
-                          const gPass = tokenBenchTasks.reduce(
-                            (s, t) => s + (governedArm(t)?.verified_count ?? 0),
-                            0,
-                          );
-                          const gSched = tokenBenchTasks.reduce(
-                            (s, t) =>
-                              s +
-                              (governedArm(t)?.evaluated_count ??
-                                governedArm(t)?.scheduled_count ??
-                                0),
-                            0,
-                          );
-                          return (
-                            <div>
-                              <span>
-                                Multi-file token efficiency (
-                                {tokenBenchTasks.length} tasks)
-                              </span>
-                              <strong
-                                className={
-                                  deltaPct != null && deltaPct >= 0
-                                    ? "text-sea"
-                                    : "text-rust"
-                                }
-                              >
-                                {deltaPct != null ? `${fmtSigned(deltaPct)}%` : "—"}
-                              </strong>
-                              <span>
-                                {formatTokens(bAvg)} → {formatTokens(gAvg)} tok/pass
-                                {bSched > 0 && gSched > 0
-                                  ? ` · ${gPass}/${gSched} ICM vs ${bPass}/${bSched} base`
-                                  : ""}
-                              </span>
-                            </div>
-                          );
-                        })()}
-                      {rubric.tool_errors != null && (
-                        <div>
-                          <span>Tool &amp; path execution errors</span>
-                          <strong>
-                            {rubric.tool_errors.icm} vs {rubric.tool_errors.baseline}
-                          </strong>
-                          <span>
-                            {rubric.tool_errors.reduction_percent != null
-                              ? `${rubric.tool_errors.reduction_percent.toFixed(1)}% change in DB-linked logs`
-                              : "Tracked in DB-linked logs"}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </section>
-                );
-              })()}
-            {!tokenBenchTasks.length && !data.quality_rubric?.has_data && (
-              <p className="empty-inline">
-                No multi-file unpriced or rubric records in this snapshot.
-              </p>
             )}
           </div>
         )}
