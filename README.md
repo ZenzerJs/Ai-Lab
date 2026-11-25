@@ -50,22 +50,22 @@ Ai-Lab evolves its workflow contracts step by step and plots every version on a 
 
 ## 📊 What the Data Shows So Far
 
-The current snapshot ([`dashboard/public/data.json`](dashboard/public/data.json)) records **802 runs across 41 tasks and 7 models** (`792` live runs + `10` archived imported runs, spanning `34` automated `BENCH-*` suites and `EXP-001`..`EXP-011`).
+The current snapshot ([`dashboard/public/data.json`](dashboard/public/data.json)) records **845 runs across 41 tasks and 7 models** (`835` live runs + `10` archived imported runs, spanning `34` automated `BENCH-*` suites and `EXP-001`..`EXP-011`).
 
 ### Key takeaways
 
-1. **Overall v1 governance is roughly cost-neutral (`-1.5%` pooled savings):** Across `202` priced runs on 4 models, total Baseline spend was **`$8.1634`** vs. **`$8.0391`** for governed runs (`95% CI: -10.0% to +12.5%`). Early 5-stage ceremony (`ICM v1`) helped on big multi-file tasks (`EXP-003`, `EXP-006`) but added overhead on small single-file tasks.
-2. **Early `ICM v3` cuts per-run spend in half on Flash:** Across `16` live runs on `gemini-3.8-flash-low`, `ICM v3` averaged **`$0.0593/run`** (`$0.0863/pass`, `11/16` passes) compared to **`$0.1235/run`** (`$0.1560/pass`, `19/24` passes) for Baseline. *(Small early sample — expanding `icm_v3` and `icm_staged` is our top priority.)*
+1. **Overall v1 governance is roughly cost-neutral (`-1.5%` pooled savings):** Across `245` priced runs on 4 models, total Baseline spend was **`$8.1634`** vs. **`$8.0391`** for governed runs (`95% CI: -10.0% to +12.5%`; macro-average across 41 paired tasks: **`+14.2%` cost**). Early 5-stage ceremony (`ICM v1`) helped on big multi-file tasks (`EXP-003`, `EXP-006`) but added overhead on small single-file tasks.
+2. **Early `ICM v3` cuts per-run spend in half on Flash:** Across `16` live runs on `gemini-3.8-flash-low`, `ICM v3` averaged **`$0.0593/run`** (`$0.0863/pass`, `11/16` passes) compared to **`$0.1235/run`** (`$0.1560/pass`, `19/24` passes) for Baseline, with initial `icm_v3` and `icm_staged` batches on `gemini-4-argon-low` (`10`/`9` runs) and `gemini-4-hydrogen-low` (`12`/`12` runs) also included in the snapshot. *(Small early sample — expanding `icm_v3` and `icm_staged` is our top priority.)*
 3. **Priced and unpriced cohorts never mix:** Models with audited provider rate cards (`gemini-3.8-flash-low`, `gemini-4-argon-low`, `gemini-4-hydrogen-low`, `claude-sonnet-5-5-low`) contribute to USD totals; large unpriced cohorts (`swe-2-max-lightning`, `gemini-4-neon-devin`, `claude-fable-5-2-devin`) report pass rates, tokens, and tool calls separately.
-4. **Quality & scope hygiene improved in paired audits:** On the retrospective 5-dimension rubric (`TSK-025`..`TSK-027`), governed runs scored higher on Design/A11y and structure; see [quality findings](docs/concepts/quality-benchmark-findings.md) and [break-even analysis](docs/concepts/icm-breakeven-analysis.md).
+4. **Quality & scope hygiene improved in paired audits:** On the retrospective 5-dimension rubric (`+6.6%` normalized mean delta across `n=10` evaluated `EXP` tasks in `data.json`, `95% CI: +1.6% to +13.0%`; see [quality findings](docs/concepts/quality-benchmark-findings.md) for the 11-task writeup), governed runs scored higher on Design/A11y and structure, distinct from all-run live tool execution errors across all 845 runs (`177` governed vs. `117` baseline, largely driven by repro-first failing test runs in newer contracts); see also [break-even analysis](docs/concepts/icm-breakeven-analysis.md).
 
 ### Snapshot by model (live runs)
 
 | Model | Live runs | Passes | Arms tested | Billing |
 |---|---:|---:|---|---|
 | `gemini-3.8-flash-low` | 70 | 56/70 | `baseline`, `icm`, `icm_lite`, `icm_v3`, `icm_staged` | Priced USD |
-| `gemini-4-argon-low` | 54 | 48/54 | `baseline`, `icm`, `icm_lite` | Priced USD |
-| `gemini-4-hydrogen-low` | 50 | 49/50 | `baseline`, `icm`, `icm_lite` | Priced USD |
+| `gemini-4-argon-low` | 73 | 66/73 | `baseline`, `icm`, `icm_lite`, `icm_v3`, `icm_staged` | Priced USD |
+| `gemini-4-hydrogen-low` | 74 | 72/74 | `baseline`, `icm`, `icm_lite`, `icm_v3`, `icm_staged` | Priced USD |
 | `claude-sonnet-5-5-low` | 18 | 17/18 | `baseline`, `icm` | Priced USD |
 | `swe-2-max-lightning` | 350 | 242/350 | `baseline`, `icm`, `icm_lite` | Unpriced |
 | `gemini-4-neon-devin` | 190 | 128/190 | `baseline`, `icm`, `icm_lite`, `icm_v2` | Unpriced |
